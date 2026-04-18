@@ -19,6 +19,6 @@ NODE_DISPLAY_NAME_MAPPINGS = {
 }
 
 # Web directory for UI extensions (if we need to add a menu button later)
-WEB_DIRECTORY = "./web"
+WEB_DIRECTORY = "./web/comfyui"
 
 __all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS", "WEB_DIRECTORY"]
