@@ -1,18 +1,13 @@
 import os
 import json
-import glob
 import urllib.parse
 from aiohttp import web
 
 try:
-    import server
+    import server as comfy_server
     import folder_paths
 except ImportError:
-    class _DummyPromptServer:
-        instance = None
-    class _DummyServer:
-        PromptServer = _DummyPromptServer
-    server = _DummyServer()
+    comfy_server = None
     class folder_paths:
         @staticmethod
         def get_output_directory():
@@ -216,28 +211,32 @@ async def api_delete_library(request: web.Request) -> web.Response:
 # ────────────────────────────────────────────
 
 def setup_routes():
-    if not (hasattr(server, "PromptServer") 
-            and getattr(server.PromptServer, "instance", None) 
-            and hasattr(server.PromptServer.instance, "app")):
+    if comfy_server is None:
+        print("[Universal Extractor] ComfyUI server module not available, skipping route setup.")
+        return
+
+    if not (hasattr(comfy_server, "PromptServer") 
+            and getattr(comfy_server.PromptServer, "instance", None) 
+            and hasattr(comfy_server.PromptServer.instance, "app")):
         print("[Universal Extractor] PromptServer not ready, skipping route setup.")
         return
 
-    app = server.PromptServer.instance.app
+    comfy_app = comfy_server.PromptServer.instance.app
 
     # Gallery APIs
-    app.router.add_get("/universal_gallery/api/images", api_list_images)
-    app.router.add_get("/universal_gallery/api/metadata", api_image_metadata)
+    comfy_app.router.add_get("/universal_gallery/api/images", api_list_images)
+    comfy_app.router.add_get("/universal_gallery/api/metadata", api_image_metadata)
 
     # Library CRUD APIs
-    app.router.add_get("/universal_gallery/api/libraries", api_list_libraries)
-    app.router.add_get("/universal_gallery/api/library", api_get_library)
-    app.router.add_post("/universal_gallery/api/library", api_save_library)
-    app.router.add_delete("/universal_gallery/api/library", api_delete_library)
+    comfy_app.router.add_get("/universal_gallery/api/libraries", api_list_libraries)
+    comfy_app.router.add_get("/universal_gallery/api/library", api_get_library)
+    comfy_app.router.add_post("/universal_gallery/api/library", api_save_library)
+    comfy_app.router.add_delete("/universal_gallery/api/library", api_delete_library)
 
     # Serve gallery UI static files
     ui_dir = os.path.join(PLUGIN_DIR, "gallery_ui", "dist")
     if os.path.exists(ui_dir):
-        app.router.add_static("/gallery", ui_dir, show_index=True)
+        comfy_app.router.add_static("/gallery", ui_dir, show_index=True)
         print("[Universal Extractor] Gallery UI -> /gallery")
     else:
         print(f"[Universal Extractor] Warning: {ui_dir} not found. Run 'npm run build' in gallery_ui/")
