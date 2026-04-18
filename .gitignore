@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Vite & React & Node
+gallery_ui/node_modules/
+# 注意：我们保留 gallery_ui/dist 文件夹以便于其他人下载能直接使用
+# 未使用框架开发可以直接忽略
+.DS_Store
