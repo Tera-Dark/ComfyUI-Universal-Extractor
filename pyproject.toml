@@ -1,0 +1,28 @@
+[project]
+name = "tera-universal-extractor"
+description = "ComfyUI custom node and gallery workspace for prompt libraries, searchable image notes, and reusable extraction workflows."
+version = "1.0.0"
+license = { file = "LICENSE.txt" }
+readme = "README.md"
+requires-python = ">=3.10"
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Operating System :: Microsoft :: Windows",
+  "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+]
+dependencies = [
+  "Pillow>=10.0.0",
+]
+
+[project.urls]
+Repository = "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor"
+"Bug Tracker" = "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor/issues"
+
+[tool.comfy]
+PublisherId = "tera-dark"
+DisplayName = "ComfyUI Universal Extractor"
+Icon = "https://raw.githubusercontent.com/Tera-Dark/ComfyUI-Universal-Extractor/master/gallery_ui/public/favicon.svg"
+requires-comfyui = ">=0.3.0"
+
