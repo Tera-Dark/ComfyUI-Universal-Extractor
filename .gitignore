@@ -20,8 +20,20 @@ var/
 .installed.cfg
 *.egg
 
-# Vite & React & Node
+# Vite / React / Node
 gallery_ui/node_modules/
-# 注意：我们保留 gallery_ui/dist 文件夹以便于其他人下载能直接使用
-# 未使用框架开发可以直接忽略
+# Keep gallery_ui/dist in git so users can install without rebuilding
+
+# OS / tooling
 .DS_Store
+.playwright-cli/
+
+# Runtime data
+output/
+data/gallery_state.json
+data/thumb_cache/
+data/trash/
+data/trash_state.json
+
+# Python caches in nested folders
+py/**/__pycache__/

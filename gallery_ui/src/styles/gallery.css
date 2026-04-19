@@ -1,0 +1,316 @@
+.ue-drop-shell {
+  position: relative;
+}
+
+.ue-gallery-grid {
+  display: grid;
+  gap: 14px;
+  align-items: start;
+}
+
+.ue-gallery-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  transform: translateY(0);
+  transition:
+    transform var(--ue-duration-base) var(--ue-ease),
+    filter var(--ue-duration-base) var(--ue-ease);
+}
+
+.ue-gallery-card:hover {
+  transform: translateY(-3px);
+}
+
+.ue-gallery-card.is-selected .ue-gallery-media {
+  box-shadow: 0 0 0 1px rgba(24, 24, 27, 0.12);
+}
+
+.ue-gallery-media {
+  position: relative;
+  overflow: hidden;
+  border-radius: 10px;
+  background: #f5f5f5;
+  aspect-ratio: 3 / 4;
+}
+
+.ue-gallery-media::after {
+  content: "";
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  height: 30%;
+  background: linear-gradient(180deg, transparent, rgba(12, 12, 14, 0.16));
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity var(--ue-duration-base) var(--ue-ease);
+}
+
+.ue-gallery-card:hover .ue-gallery-media::after {
+  opacity: 1;
+}
+
+.ue-gallery-media img {
+  display: block;
+  width: 100%;
+  height: auto;
+  cursor: zoom-in;
+  transition:
+    transform var(--ue-duration-slow) var(--ue-ease),
+    filter var(--ue-duration-slow) var(--ue-ease);
+}
+
+.ue-gallery-image-shell {
+  position: relative;
+  overflow: hidden;
+}
+
+.ue-gallery-image-shell::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, rgba(240, 240, 242, 0.8), rgba(255, 255, 255, 0.9), rgba(240, 240, 242, 0.8));
+  background-size: 200% 100%;
+  animation: ue-shimmer 1.2s ease-in-out infinite;
+  transition: opacity var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-gallery-image-shell.is-loaded::before {
+  opacity: 0;
+}
+
+.ue-gallery-image-shell img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: zoom-in;
+  opacity: 0;
+  object-fit: cover;
+  transition:
+    opacity var(--ue-duration-base) var(--ue-ease),
+    transform var(--ue-duration-slow) var(--ue-ease),
+    filter var(--ue-duration-slow) var(--ue-ease);
+}
+
+.ue-gallery-image-shell.is-loaded img {
+  opacity: 1;
+}
+
+.ue-gallery-card:hover .ue-gallery-media img {
+  transform: scale(1.015);
+}
+
+.ue-gallery-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+}
+
+.ue-select-btn,
+.ue-favorite-btn,
+.ue-send-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  color: var(--ue-ink-muted);
+  box-shadow: var(--ue-shadow-1);
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(-4px);
+  transition:
+    opacity var(--ue-duration-fast) var(--ue-ease),
+    transform var(--ue-duration-fast) var(--ue-ease),
+    color var(--ue-duration-fast) var(--ue-ease),
+    background-color var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-gallery-card:hover .ue-select-btn,
+.ue-gallery-card:hover .ue-favorite-btn,
+.ue-gallery-card:hover .ue-send-btn,
+.ue-gallery-card.is-selected .ue-select-btn,
+.ue-favorite-btn.active {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ue-select-btn:hover,
+.ue-favorite-btn:hover,
+.ue-send-btn:hover {
+  background: #ffffff;
+  color: var(--ue-ink);
+}
+
+.ue-favorite-btn.active {
+  color: var(--ue-favorite);
+}
+
+.ue-gallery-open {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  min-height: 28px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: rgba(24, 24, 27, 0.82);
+  color: #ffffff;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  opacity: 0;
+  transform: translateY(4px);
+  transition:
+    opacity var(--ue-duration-fast) var(--ue-ease),
+    transform var(--ue-duration-fast) var(--ue-ease),
+    background-color var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-gallery-open:hover {
+  background: rgba(24, 24, 27, 0.92);
+}
+
+.ue-gallery-card:hover .ue-gallery-open {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.ue-gallery-body {
+  display: flex;
+  width: 100%;
+  padding: 10px 2px 2px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ue-gallery-title {
+  display: block;
+  width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
+.ue-gallery-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  color: var(--ue-ink-muted);
+  font-size: 11px;
+}
+
+.ue-gallery-meta i {
+  font-style: normal;
+  color: var(--ue-line);
+}
+
+.ue-drop-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 35;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.72);
+  backdrop-filter: blur(16px);
+}
+
+.ue-drop-overlay-card {
+  padding: 34px 40px;
+  border: 1px dashed var(--ue-line);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: var(--ue-shadow-3);
+  text-align: center;
+}
+
+.ue-drop-overlay-card h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+
+.ue-drop-overlay-card p {
+  margin: 0;
+  color: var(--ue-ink-muted);
+}
+
+.ue-context-menu {
+  position: fixed;
+  z-index: 70;
+  display: flex;
+  width: 220px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid rgba(228, 228, 231, 0.92);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 40px rgba(24, 24, 27, 0.16);
+  backdrop-filter: blur(18px);
+  animation: ue-scale-in var(--ue-duration-fast) var(--ue-ease) both;
+}
+
+.ue-context-menu-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  min-height: 36px;
+  padding: 0 12px;
+  border-radius: 12px;
+  color: var(--ue-ink-soft);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--ue-duration-fast) var(--ue-ease),
+    color var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-context-menu-item:hover {
+  background: var(--ue-accent-soft);
+  color: var(--ue-ink);
+}
+
+.ue-context-menu-item--danger {
+  color: var(--ue-red);
+}
+
+.ue-context-menu-item--danger:hover {
+  background: var(--ue-red-soft);
+}
+
+@keyframes ue-shimmer {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (max-width: 960px) {
+  .ue-select-btn,
+  .ue-send-btn,
+  .ue-favorite-btn,
+  .ue-gallery-open {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}

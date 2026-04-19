@@ -1,0 +1,237 @@
+.ue-workbench-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  gap: 18px;
+}
+
+.ue-workbench-grid--expanded {
+  grid-template-columns: minmax(0, 1.4fr) minmax(340px, 0.9fr);
+}
+
+.ue-workbench-stack {
+  display: grid;
+  gap: 18px;
+}
+
+.ue-tool-panel {
+  padding: 20px;
+  border-radius: 20px;
+  background: linear-gradient(180deg, rgba(250, 250, 250, 0.92), rgba(255, 255, 255, 0.98));
+}
+
+.ue-tool-panel--placeholder {
+  border: 1px dashed var(--ue-line);
+  background: transparent;
+}
+
+.ue-tool-panel--summary {
+  background: linear-gradient(180deg, rgba(250, 250, 250, 0.96), rgba(255, 255, 255, 1));
+}
+
+.ue-tool-panel-head {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ue-tool-panel-head p {
+  margin: 0;
+  color: var(--ue-ink-muted);
+  font-size: 13px;
+}
+
+.ue-tool-grid--wide {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ue-toggle-field {
+  justify-content: flex-end;
+}
+
+.ue-workbench-stat-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.ue-workbench-stat-grid div {
+  display: flex;
+  min-height: 72px;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 12px;
+  border-radius: var(--ue-r-lg);
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.ue-workbench-stat-grid span {
+  color: var(--ue-ink-muted);
+  font-size: 11px;
+}
+
+.ue-workbench-stat-grid strong {
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+  word-break: break-word;
+}
+
+.ue-tool-form {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  margin-top: 16px;
+}
+
+.ue-tool-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ue-tool-form label span {
+  color: var(--ue-ink-muted);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.ue-tool-form input,
+.ue-tool-form select,
+.ue-tool-result {
+  width: 100%;
+  border: 0;
+  border-bottom: 1px solid var(--ue-line);
+  background: transparent;
+  padding: 8px 0 7px;
+  color: var(--ue-ink);
+  outline: none;
+  transition: border-color var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-tool-form input:focus,
+.ue-tool-form select:focus,
+.ue-tool-result:focus {
+  border-bottom-color: var(--ue-ink);
+}
+
+.ue-tool-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.ue-tool-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.ue-tool-result {
+  min-height: 128px;
+  padding: 12px 0;
+  resize: vertical;
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.ue-generated-list,
+.ue-preview-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ue-generated-chip,
+.ue-preview-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px;
+  border-radius: var(--ue-r-lg);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.ue-generated-chip span,
+.ue-preview-row span {
+  color: var(--ue-ink-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.ue-preview-row strong {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ue-preview-row {
+  flex-direction: row;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.ue-preview-row-main {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.ue-preview-row-side {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 12px;
+  color: var(--ue-ink-muted);
+}
+
+.ue-secondary-btn--tiny {
+  min-height: 30px;
+  padding: 0 10px;
+}
+
+.ue-tool-helper {
+  margin: 14px 0 0;
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+}
+
+.ue-tool-helper--inline {
+  display: flex;
+  align-items: center;
+  min-height: 42px;
+  margin: 0;
+}
+
+.ue-tool-divider {
+  height: 1px;
+  background: var(--ue-line-soft);
+}
+
+.ue-chip-remove {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  color: var(--ue-ink-ghost);
+  cursor: pointer;
+}
+
+.ue-chip-remove:hover {
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--ue-ink);
+}
+
+@media (max-width: 960px) {
+  .ue-workbench-grid,
+  .ue-workbench-stat-grid,
+  .ue-tool-grid--wide,
+  .ue-tool-grid {
+    grid-template-columns: 1fr;
+  }
+}

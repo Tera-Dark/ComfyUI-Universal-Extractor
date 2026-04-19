@@ -1,379 +1,552 @@
-import { useEffect, useState, useCallback } from 'react';
-import {
-  Search, Image as ImageIcon, BookOpen, Heart, Home,
-  Sliders, Hash, X, ChevronLeft, ChevronRight,
-  Plus, Trash2, Edit3, Save, RefreshCw, Palette, ExternalLink
-} from 'lucide-react';
-import './App.css';
+import { startTransition, useMemo, useState } from "react";
 
-/* ─── Types ─── */
-interface ImgData {
-  filename: string;
-  url: string;
-  size: number;
-  created_at: number;
-}
-interface ImgMeta {
-  filename: string;
-  metadata: Record<string, unknown>;
-  artist_prompts: string[];
-}
-interface LibInfo {
-  filename: string;
-  count: number;
-  size: number;
-}
-interface ArtistEntry {
-  title: string;
-  prompt: string;
-  model?: string;
-  tags?: string[];
-  description?: string;
-  [key: string]: unknown;
-}
+import { GalleryWorkspace } from "./components/gallery/GalleryWorkspace";
+import { ImageDetailModal } from "./components/gallery/ImageDetailModal";
+import { LibraryWorkspace } from "./components/library/LibraryWorkspace";
+import { TopNavigation } from "./components/shared/TopNavigation";
+import { WorkspaceSidebar } from "./components/shared/WorkspaceSidebar";
+import { WorkbenchWorkspace } from "./components/workbench/WorkbenchWorkspace";
+import { useGalleryData } from "./hooks/useGalleryData";
+import { useI18n } from "./i18n/I18nProvider";
+import { useLibraryData } from "./hooks/useLibraryData";
+import { galleryApi } from "./services/galleryApi";
+import { useConfirm } from "./components/shared/ConfirmDialog";
+import { useToast } from "./components/shared/ToastViewport";
+import type { LibraryInfo, WorkspaceTab } from "./types/universal-gallery";
+import "./App.css";
 
-/* ─── Tabs ─── */
-type SideTab = 'gallery' | 'library';
+const PENDING_WORKFLOW_KEY = "universal-extractor:pending-workflow";
+const WORKFLOW_CHANNEL_NAME = "universal-extractor-workflow";
+const COMFY_WINDOW_NAME = "comfyui-main";
+const WORKFLOW_MESSAGE_TYPE = "universal-extractor:workflow-message";
+const MAX_STORAGE_WORKFLOW_BYTES = 1_500_000;
 
-/* ════════════════════════════════════════════
- *  Main App
- * ════════════════════════════════════════════ */
+const matchesLibrarySearch = (library: LibraryInfo, searchTerm: string) => {
+  const query = searchTerm.trim().toLowerCase();
+  if (!query) {
+    return true;
+  }
+  return library.filename.toLowerCase().includes(query);
+};
+
 function App() {
-  /* --- gallery state --- */
-  const [images, setImages] = useState<ImgData[]>([]);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [search, setSearch] = useState('');
-  const [selectedImg, setSelectedImg] = useState<ImgData | null>(null);
-  const [imgMeta, setImgMeta] = useState<ImgMeta | null>(null);
-  const [metaLoading, setMetaLoading] = useState(false);
-  const LIMIT = 60;
+  const { t } = useI18n();
+  const { confirm } = useConfirm();
+  const { pushToast } = useToast();
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("gallery");
+  const [librarySearchTerm, setLibrarySearchTerm] = useState("");
+  const [folderViewMode, setFolderViewMode] = useState<"tree" | "list">("tree");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
-  /* --- library state --- */
-  const [sideTab, setSideTab] = useState<SideTab>('gallery');
-  const [libraries, setLibraries] = useState<LibInfo[]>([]);
-  const [activeLib, setActiveLib] = useState<string | null>(null);
-  const [libData, setLibData] = useState<ArtistEntry[]>([]);
-  const [libEditing, setLibEditing] = useState(false);
-  const [editJson, setEditJson] = useState('');
-  const [newLibName, setNewLibName] = useState('');
+  const gallery = useGalleryData();
+  const library = useLibraryData(true);
 
-  /* ─── fetch images ─── */
-  const fetchImages = useCallback(() => {
-    const params = new URLSearchParams({ page: String(page), limit: String(LIMIT) });
-    if (search) params.set('search', search);
-    fetch(`/universal_gallery/api/images?${params}`)
-      .then(r => r.json())
-      .then(d => { setImages(d.images || []); setTotal(d.total || 0); })
-      .catch(console.error);
-  }, [page, search]);
+  const filteredLibraries = useMemo(
+    () => library.libraries.filter((item) => matchesLibrarySearch(item, librarySearchTerm)),
+    [library.libraries, librarySearchTerm],
+  );
 
-  useEffect(() => { fetchImages(); }, [fetchImages]);
+  const canUseRawLibraryEditor = library.entryTotal <= 5000;
 
-  /* ─── fetch image metadata (for detail modal) ─── */
-  const openDetail = (img: ImgData) => {
-    setSelectedImg(img);
-    setImgMeta(null);
-    setMetaLoading(true);
-    fetch(`/universal_gallery/api/metadata?filename=${encodeURIComponent(img.filename)}`)
-      .then(r => r.json())
-      .then(d => { setImgMeta(d); setMetaLoading(false); })
-      .catch(() => setMetaLoading(false));
+  const confirmDiscardLibraryEdits = () => {
+    if (!library.isDirty) {
+      return true;
+    }
+    return window.confirm(t("libraryUnsavedConfirm"));
   };
 
-  /* ─── library helpers ─── */
-  const fetchLibraries = () => {
-    fetch('/universal_gallery/api/libraries')
-      .then(r => r.json())
-      .then(d => setLibraries(d.libraries || []))
-      .catch(console.error);
+  const handleTabChange = (tab: WorkspaceTab) => {
+    if (activeTab === "library" && tab !== "library" && !confirmDiscardLibraryEdits()) {
+      return;
+    }
+    startTransition(() => {
+      setActiveTab(tab);
+    });
   };
 
-  const fetchLibrary = (name: string) => {
-    setActiveLib(name);
-    fetch(`/universal_gallery/api/library?name=${encodeURIComponent(name)}`)
-      .then(r => r.json())
-      .then(d => { setLibData(d.data || []); setLibEditing(false); })
-      .catch(console.error);
+  const handleSearchChange = (value: string) => {
+    if (activeTab === "gallery") {
+      startTransition(() => {
+        gallery.setSearchTerm(value);
+        gallery.setPage(1);
+      });
+      return;
+    }
+
+    startTransition(() => {
+      setLibrarySearchTerm(value);
+      library.setSearchTerm(value);
+      library.setEntryPage(1);
+    });
   };
 
-  const saveLibrary = () => {
-    if (!activeLib) return;
+  const handleLibrarySelect = async (name: string) => {
+    if (activeTab === "library" && library.activeLibraryName !== name && !confirmDiscardLibraryEdits()) {
+      return;
+    }
+    startTransition(() => {
+      setActiveTab("library");
+    });
     try {
-      const parsed = JSON.parse(editJson);
-      fetch('/universal_gallery/api/library', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: activeLib, data: parsed }),
-      })
-        .then(r => r.json())
-        .then(() => { fetchLibrary(activeLib); fetchLibraries(); });
-    } catch { alert('JSON format error!'); }
+      await library.openLibrary(name);
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("errorOpenLibrary"), "error");
+    }
   };
 
-  const createLibrary = () => {
-    if (!newLibName.trim()) return;
-    const name = newLibName.trim().endsWith('.json') ? newLibName.trim() : newLibName.trim() + '.json';
-    fetch('/universal_gallery/api/library', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, data: [] }),
-    })
-      .then(r => r.json())
-      .then(() => { setNewLibName(''); fetchLibraries(); fetchLibrary(name); });
+  const handleCreateLibrary = async () => {
+    try {
+      const result = await library.createLibrary();
+      if (!result.ok && result.message) {
+        pushToast(result.message, "error");
+      } else {
+        pushToast(t("libraryCreateSuccess"), "success");
+      }
+      gallery.refresh();
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("errorCreateLibrary"), "error");
+    }
   };
 
-  const deleteLibrary = (name: string) => {
-    if (!confirm(`Delete "${name}"?`)) return;
-    fetch(`/universal_gallery/api/library?name=${encodeURIComponent(name)}`, { method: 'DELETE' })
-      .then(() => { fetchLibraries(); if (activeLib === name) { setActiveLib(null); setLibData([]); } });
+  const handleDeleteLibrary = async (name: string) => {
+    if (library.activeLibraryName === name && !confirmDiscardLibraryEdits()) {
+      return;
+    }
+    const approved = await confirm({
+      title: t("commonDelete"),
+      message: t("confirmDeleteLibrary", { name }),
+      tone: "warning",
+      confirmLabel: t("commonDelete"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+    try {
+      await library.deleteLibrary(name);
+      pushToast(t("commonDelete"), "success");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("errorDeleteLibrary"), "error");
+    }
   };
 
-  useEffect(() => { if (sideTab === 'library') fetchLibraries(); }, [sideTab]);
+  const handleSaveLibrary = async () => {
+    try {
+      const result = await library.saveLibrary();
+      if (!result.ok && result.message) {
+        pushToast(result.message, "error");
+      } else {
+        pushToast(t("librarySaveSuccess", { count: library.entryTotal }), "success");
+      }
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("errorSaveLibrary"), "error");
+    }
+  };
 
-  const totalPages = Math.max(1, Math.ceil(total / LIMIT));
+  const handleRefresh = async () => {
+    if (activeTab === "library" && !confirmDiscardLibraryEdits()) {
+      return;
+    }
+    if (activeTab === "gallery") {
+      gallery.refresh();
+      return;
+    }
+    await library.refreshLibraries();
+    if (library.activeLibraryName) {
+      await library.refreshActiveLibrary();
+    }
+  };
 
-  /* ═══════════ RENDER ═══════════ */
+  const handleExportLibrary = () => {
+    if (!library.activeLibraryName) {
+      return;
+    }
+
+    void galleryApi.getLibraryRaw(library.activeLibraryName).then((response) => {
+      const blob = new Blob([response.text], { type: "application/json;charset=utf-8" });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = library.activeLibraryName!;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(objectUrl);
+    }).catch((error) => {
+      window.alert(error instanceof Error ? error.message : t("errorOpenLibrary"));
+    });
+  };
+
+  const handleCreateFolder = async () => {
+    const basePath = gallery.selectedSubfolder ? `${gallery.selectedSubfolder}/` : "";
+    const nextPath = window.prompt(t("folderCreatePrompt"), basePath);
+    if (!nextPath?.trim()) {
+      return;
+    }
+
+    try {
+      await gallery.createFolder(nextPath.trim());
+      gallery.refresh();
+      pushToast(t("folderCreateSuccess"), "success");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("folderCreateError"), "error");
+    }
+  };
+
+  const handleDeleteFolder = async () => {
+    if (!gallery.selectedSubfolder) {
+      return;
+    }
+    const approved = await confirm({
+      title: t("commonDelete"),
+      message: t("folderDeleteConfirm", { name: gallery.selectedSubfolder }),
+      tone: gallery.selectedSubfolder.includes("/") ? "warning" : "danger",
+      confirmLabel: t("commonDelete"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
+    try {
+      await gallery.deleteFolder(gallery.selectedSubfolder);
+      pushToast(t("folderDeleteSuccess"), "success");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("folderDeleteError"), "error");
+    }
+  };
+
+  const handleMergeFolder = async () => {
+    if (!gallery.selectedSubfolder) {
+      return;
+    }
+    const targetPath = window.prompt(t("folderMergePrompt"), "");
+    if (!targetPath?.trim()) {
+      return;
+    }
+
+    try {
+      await gallery.mergeFolder(gallery.selectedSubfolder, targetPath.trim());
+      pushToast(t("folderMergeSuccess"), "success");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("folderMergeError"), "error");
+    }
+  };
+
+  const handleWorkbenchLibrarySelect = async (name: string) => {
+    try {
+      await library.openLibrary(name);
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("errorOpenLibrary"), "error");
+    }
+  };
+
+  const handleImportFiles = async (files: File[]) => {
+    const response = await gallery.importFiles(files);
+    await library.refreshLibraries();
+    const importedCount = response.imported_images.length + response.imported_libraries.length;
+    if (importedCount > 0) {
+      pushToast(t("galleryImportSuccess", { count: importedCount }), "success");
+    }
+    if (response.skipped.length > 0) {
+      pushToast(t("galleryImportSkipped", { count: response.skipped.length }), "info");
+    }
+  };
+
+  const handleUpdateImageState = async (relativePath: string, updates: Record<string, unknown>) => {
+    await gallery.updateImageState(relativePath, updates);
+    if (gallery.searchTerm.trim()) {
+      gallery.refresh();
+    }
+  };
+
+  const handleRenameImage = async (relativePath: string, newFilename: string) => {
+    try {
+      await gallery.renameImage(relativePath, newFilename);
+      pushToast(t("modalRenameFile"), "success");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("imageRenameError"), "error");
+    }
+  };
+
+  const handleDeleteSingleImage = async (relativePath: string) => {
+    try {
+      await gallery.deleteImages([relativePath]);
+      pushToast(t("imageDelete"), "success");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("imageDeleteError"), "error");
+    }
+  };
+
+  const handleOpenImageWorkflow = async (image: { relative_path: string; original_url?: string; url?: string }) => {
+    const approved = await confirm({
+      title: t("modalOpenWorkflow"),
+      message: t("workflowSendConfirm", { name: image.relative_path }),
+      tone: "info",
+      confirmLabel: t("commonCreate"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
+    try {
+      const metadata = await galleryApi.getImageMetadata(image.relative_path);
+      const payload = {
+        id: `wf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        workflow: metadata.workflow,
+        prompt: metadata.metadata && typeof metadata.metadata === "object" ? (metadata.metadata as Record<string, unknown>).prompt ?? null : null,
+        image: image.relative_path,
+        imageUrl: image.original_url || image.url || null,
+        ts: Date.now(),
+      };
+
+      if (!payload.workflow && !payload.prompt) {
+        pushToast(t("modalNoMetadata"), "error");
+        return;
+      }
+
+      const comfyWindow = window.open(`${window.location.origin}/`, COMFY_WINDOW_NAME);
+      const message = {
+        type: WORKFLOW_MESSAGE_TYPE,
+        payload,
+      };
+      const dispatchPayload = () => {
+        if (comfyWindow && !comfyWindow.closed) {
+          comfyWindow.postMessage(message, window.location.origin);
+        }
+
+        if ("BroadcastChannel" in window) {
+          const channel = new BroadcastChannel(WORKFLOW_CHANNEL_NAME);
+          channel.postMessage(payload);
+          channel.close();
+        }
+      };
+
+      dispatchPayload();
+      [180, 520, 1200, 2200].forEach((delay) => {
+        window.setTimeout(dispatchPayload, delay);
+      });
+
+      try {
+        const serializedPayload = JSON.stringify(payload);
+        if (serializedPayload.length <= MAX_STORAGE_WORKFLOW_BYTES) {
+          window.localStorage.setItem(PENDING_WORKFLOW_KEY, serializedPayload);
+        } else {
+          window.localStorage.removeItem(PENDING_WORKFLOW_KEY);
+        }
+      } catch {
+        window.localStorage.removeItem(PENDING_WORKFLOW_KEY);
+      }
+
+      pushToast(t("workflowSendSuccess"), "success");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("modalNoMetadata"), "error");
+    }
+  };
+
   return (
-    <div className="ue-root">
-      {/* ──── Sidebar ──── */}
-      <aside className="ue-sidebar">
-        <div className="ue-sidebar-brand">
-          <span className="ue-brand-icon">&#x2728;</span>
-          <span>Universal Extractor</span>
-        </div>
+    <div className="ue-app-shell">
+      <TopNavigation
+        activeTab={activeTab}
+        onTabChange={handleTabChange}
+        searchValue={activeTab === "gallery" ? gallery.searchTerm : activeTab === "library" ? librarySearchTerm : ""}
+        onSearchChange={handleSearchChange}
+        onRefresh={handleRefresh}
+        sidebarCollapsed={sidebarCollapsed}
+        onSidebarToggle={() => setSidebarCollapsed((current) => !current)}
+      />
 
-        <nav className="ue-sidebar-nav">
-          <button className={`ue-nav-btn ${sideTab === 'gallery' ? 'active' : ''}`}
-                  onClick={() => setSideTab('gallery')}>
-            <Home size={18} /><span>Output Gallery</span>
-          </button>
-          <button className={`ue-nav-btn ${sideTab === 'library' ? 'active' : ''}`}
-                  onClick={() => setSideTab('library')}>
-            <Palette size={18} /><span>Artist Library</span>
-          </button>
-        </nav>
+      <div className={`ue-body-shell ${sidebarCollapsed ? "is-sidebar-collapsed" : ""}`}>
+        <WorkspaceSidebar
+          collapsed={sidebarCollapsed}
+          activeTab={activeTab}
+          galleryContext={gallery.context}
+          folderViewMode={folderViewMode}
+          onFolderViewModeChange={setFolderViewMode}
+          selectedCategory={gallery.selectedCategory}
+          selectedSubfolder={gallery.selectedSubfolder}
+          onCategorySelect={(value) => {
+            gallery.setSelectedCategory(value);
+            gallery.setPage(1);
+          }}
+          onSubfolderSelect={(value) => {
+            gallery.setSelectedSubfolder(value);
+            gallery.setPage(1);
+          }}
+          onCreateFolder={handleCreateFolder}
+          onDeleteFolder={handleDeleteFolder}
+          onMergeFolder={handleMergeFolder}
+          libraries={filteredLibraries}
+          activeLibraryName={library.activeLibraryName}
+          onLibrarySelect={handleLibrarySelect}
+          onLibraryDelete={handleDeleteLibrary}
+          draftName={library.draftName}
+          onDraftNameChange={library.setDraftName}
+          onCreateLibrary={handleCreateLibrary}
+        />
 
-        {sideTab === 'library' && (
-          <div className="ue-lib-list">
-            <div className="ue-lib-list-title">JSON Data Files</div>
-            {libraries.map(lib => (
-              <div key={lib.filename}
-                   className={`ue-lib-item ${activeLib === lib.filename ? 'active' : ''}`}
-                   onClick={() => fetchLibrary(lib.filename)}>
-                <BookOpen size={14} />
-                <span className="ue-lib-name">{lib.filename}</span>
-                <span className="ue-lib-count">{lib.count}</span>
-                <button className="ue-lib-del" onClick={(e) => { e.stopPropagation(); deleteLibrary(lib.filename); }}>
-                  <Trash2 size={12} />
-                </button>
-              </div>
-            ))}
-            <div className="ue-lib-create">
-              <input placeholder="new_library.json" value={newLibName}
-                     onChange={e => setNewLibName(e.target.value)}
-                     onKeyDown={e => e.key === 'Enter' && createLibrary()} />
-              <button onClick={createLibrary}><Plus size={14} /></button>
-            </div>
-          </div>
-        )}
-      </aside>
-
-      {/* ──── Main Area ──── */}
-      <main className="ue-main">
-        {/* Top Bar */}
-        <header className="ue-topbar">
-          <div className="ue-topbar-left">
-            {sideTab === 'gallery' ? (
-              <>
-                <div className="ue-tab active"><ImageIcon size={15} /><span>Images</span></div>
-                <div className="ue-tab" onClick={() => setSideTab('library')}><Hash size={15} /><span>Library</span></div>
-              </>
-            ) : (
-              <>
-                <div className="ue-tab" onClick={() => setSideTab('gallery')}><ImageIcon size={15} /><span>Images</span></div>
-                <div className="ue-tab active"><Hash size={15} /><span>Library</span></div>
-              </>
-            )}
-          </div>
-
-          <div className="ue-topbar-right">
-            {sideTab === 'gallery' && (
-              <div className="ue-search-box">
-                <Search size={15} />
-                <input placeholder="Search images..."
-                       value={search}
-                       onChange={e => { setSearch(e.target.value); setPage(1); }} />
-              </div>
-            )}
-            <button className="ue-icon-btn" onClick={fetchImages} title="Refresh"><RefreshCw size={16} /></button>
-          </div>
-        </header>
-
-        {/* Content */}
-        <div className="ue-content">
-          {/* ========= GALLERY VIEW ========= */}
-          {sideTab === 'gallery' && (
-            <>
-              <div className="ue-breadcrumb">
-                <Home size={13} /><span>/</span>
-                <span className="ue-breadcrumb-active">All Images</span>
-                <span className="ue-breadcrumb-count">{total} items</span>
-              </div>
-
-              {images.length === 0 ? (
-                <div className="ue-empty">
-                  <ImageIcon size={52} />
-                  <p>No images found</p>
-                </div>
-              ) : (
-                <div className="ue-grid">
-                  {images.map(img => (
-                    <div key={img.filename} className="ue-card" onClick={() => openDetail(img)}>
-                      <div className="ue-card-img">
-                        <img src={img.url} alt={img.filename} loading="lazy" />
-                        <div className="ue-card-overlay">
-                          <button className="ue-card-action" title="View Details" onClick={e => { e.stopPropagation(); openDetail(img); }}>
-                            <Sliders size={14} />
-                          </button>
-                          <button className="ue-card-action fav" title="Favorite">
-                            <Heart size={14} />
-                          </button>
-                        </div>
-                      </div>
-                      <div className="ue-card-info">
-                        <p className="ue-card-name" title={img.filename}>{img.filename}</p>
-                        <p className="ue-card-meta">
-                          {(img.size / 1024).toFixed(0)} KB &bull; {new Date(img.created_at * 1000).toLocaleDateString()}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {/* Pagination */}
-              {total > LIMIT && (
-                <div className="ue-pagination">
-                  <button disabled={page <= 1} onClick={() => setPage(p => p - 1)}><ChevronLeft size={16} /></button>
-                  <span>{page} / {totalPages}</span>
-                  <button disabled={page >= totalPages} onClick={() => setPage(p => p + 1)}><ChevronRight size={16} /></button>
-                </div>
-              )}
-            </>
+        <main className="ue-main-shell">
+          {activeTab === "gallery" ? (
+            <GalleryWorkspace
+              images={gallery.images}
+              context={gallery.context}
+              total={gallery.total}
+              page={gallery.page}
+              totalPages={gallery.totalPages}
+              selectedCategory={gallery.selectedCategory}
+              selectedSubfolder={gallery.selectedSubfolder}
+              favoritesOnly={gallery.favoritesOnly}
+              sortBy={gallery.sortBy}
+              sortOrder={gallery.sortOrder}
+              gridColumns={gallery.gridColumns}
+              selectedImagePaths={gallery.selectedImagePaths}
+              trashItems={gallery.trashItems}
+              isTrashView={gallery.isTrashView}
+              importMessage={gallery.importMessage}
+              isLoading={gallery.isLoading}
+              isRefreshing={gallery.isRefreshing}
+              error={gallery.error}
+              targetFolderOptions={gallery.targetFolderOptions}
+              onOpenDetail={(image) => {
+                gallery.setSelectedImage(image);
+                gallery.setDetailNavigation({
+                  items: gallery.images,
+                  currentIndex: gallery.images.findIndex((item) => item.relative_path === image.relative_path),
+                });
+              }}
+              onPageChange={gallery.setPage}
+              onCategoryChange={gallery.setSelectedCategory}
+              onFavoritesOnlyChange={gallery.setFavoritesOnly}
+              onSortByChange={gallery.setSortBy}
+              onSortOrderChange={gallery.setSortOrder}
+              onGridColumnsChange={gallery.setGridColumns}
+              onOpenWorkflow={handleOpenImageWorkflow}
+              onSelectionChange={gallery.setSelectedImagePaths}
+              onUpdateImageState={handleUpdateImageState}
+              onBatchUpdateImages={gallery.batchUpdateImages}
+              onMoveImages={gallery.moveImages}
+              onDeleteImages={gallery.deleteImages}
+              onImportFiles={handleImportFiles}
+              onRestoreTrashItem={async (id) => {
+                await gallery.restoreTrashItem(id);
+                pushToast(t("trashRestore"), "success");
+              }}
+              onPurgeTrashItem={async (id) => {
+                const approved = await confirm({
+                  title: t("trashDeleteForever"),
+                  message: t("trashEmptyText"),
+                  tone: "danger",
+                  confirmLabel: t("trashDeleteForever"),
+                  cancelLabel: t("libraryCancel"),
+                });
+                if (!approved) return;
+                await gallery.purgeTrashItem(id);
+                pushToast(t("trashDeleteForever"), "success");
+              }}
+            />
+          ) : activeTab === "library" ? (
+            <LibraryWorkspace
+              libraries={library.libraries}
+              activeLibraryName={library.activeLibraryName}
+              entries={library.entries}
+              searchTerm={librarySearchTerm}
+              onSearchClear={() => {
+                setLibrarySearchTerm("");
+                library.setSearchTerm("");
+                library.setEntryPage(1);
+              }}
+              editorValue={library.editorValue}
+              isEditing={library.isEditing}
+              isDirty={library.isDirty}
+              isLoading={library.isLoading}
+              isRefreshing={library.isRefreshing}
+              isSubmitting={library.isSubmitting}
+              error={library.error}
+              statusMessage={library.statusMessage}
+              validationIssues={library.validationIssues}
+              canUseRawEditor={canUseRawLibraryEditor}
+              page={library.entryPage}
+              totalPages={Math.max(1, Math.ceil(library.entryTotal / library.entryLimit))}
+              totalEntries={library.entryTotal}
+              onEditorValueChange={library.setEditorValue}
+              onStartEditing={library.startEditing}
+              onPageChange={library.setEntryPage}
+              onCancelEditing={() => {
+                if (!confirmDiscardLibraryEdits()) {
+                  return;
+                }
+                library.cancelEditing();
+              }}
+              onFormatEditor={() => {
+                const result = library.formatEditor();
+                if (!result.ok && result.message) {
+                  pushToast(result.message, "error");
+                }
+              }}
+              onSaveLibrary={handleSaveLibrary}
+              onRefresh={handleRefresh}
+              onExportLibrary={handleExportLibrary}
+              onImportLibrary={async (file, mode, targetName, newName) => {
+                const result = await library.importLibrary(file, mode, targetName, newName);
+                if (!result.ok && result.message) {
+                  pushToast(result.message, "error");
+                } else {
+                  pushToast(t("libraryImportSuccess", { count: library.entryTotal, name: targetName || newName || file.name }), "success");
+                }
+                return result.ok;
+              }}
+              onSaveEntry={async (index, entry) => {
+                const result = await library.saveEntry(index, entry);
+                if (!result.ok && result.message) {
+                  pushToast(result.message, "error");
+                } else {
+                  pushToast(t("librarySaveSuccess", { count: library.entryTotal }), "success");
+                }
+                return result.ok;
+              }}
+              onDeleteEntry={async (index) => {
+                const result = await library.removeEntry(index);
+                if (!result.ok && result.message) {
+                  pushToast(result.message, "error");
+                } else {
+                  pushToast(t("commonDelete"), "success");
+                }
+                return result.ok;
+              }}
+            />
+          ) : (
+            <WorkbenchWorkspace
+              libraries={library.libraries}
+              activeLibraryName={library.activeLibraryName}
+              onLibrarySelect={handleWorkbenchLibrarySelect}
+            />
           )}
+        </main>
+      </div>
 
-          {/* ========= LIBRARY VIEW ========= */}
-          {sideTab === 'library' && (
-            <div className="ue-library-view">
-              {!activeLib ? (
-                <div className="ue-empty">
-                  <BookOpen size={52} />
-                  <p>Select a library from the sidebar, or create a new one</p>
-                </div>
-              ) : (
-                <>
-                  <div className="ue-lib-header">
-                    <h2>{activeLib}</h2>
-                    <span className="ue-lib-badge">{libData.length} entries</span>
-                    <div style={{ flex: 1 }} />
-                    {!libEditing ? (
-                      <button className="ue-btn" onClick={() => { setEditJson(JSON.stringify(libData, null, 2)); setLibEditing(true); }}>
-                        <Edit3 size={14} /><span>Edit JSON</span>
-                      </button>
-                    ) : (
-                      <>
-                        <button className="ue-btn primary" onClick={saveLibrary}><Save size={14} /><span>Save</span></button>
-                        <button className="ue-btn" onClick={() => setLibEditing(false)}><X size={14} /><span>Cancel</span></button>
-                      </>
-                    )}
-                  </div>
-
-                  {libEditing ? (
-                    <textarea className="ue-json-editor" value={editJson} onChange={e => setEditJson(e.target.value)} />
-                  ) : (
-                    <div className="ue-artist-grid">
-                      {libData.map((entry, i) => (
-                        <div key={i} className="ue-artist-card">
-                          <div className="ue-artist-title">{entry.title || entry.prompt || `#${i + 1}`}</div>
-                          <div className="ue-artist-prompt">{entry.prompt}</div>
-                          {entry.tags && entry.tags.length > 0 && (
-                            <div className="ue-artist-tags">
-                              {entry.tags.map((t, j) => <span key={j} className="ue-tag">{t}</span>)}
-                            </div>
-                          )}
-                          {entry.model && <div className="ue-artist-model">{entry.model}</div>}
-                          {entry.description && <div className="ue-artist-desc">{entry.description}</div>}
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      </main>
-
-      {/* ──── Image Detail Modal ──── */}
-      {selectedImg && (
-        <div className="ue-modal-backdrop" onClick={() => setSelectedImg(null)}>
-          <div className="ue-modal" onClick={e => e.stopPropagation()}>
-            <button className="ue-modal-close" onClick={() => setSelectedImg(null)}><X size={20} /></button>
-
-            <div className="ue-modal-body">
-              {/* Image Preview */}
-              <div className="ue-modal-preview">
-                <img src={selectedImg.url} alt={selectedImg.filename} />
-              </div>
-
-              {/* Info Panel */}
-              <div className="ue-modal-info">
-                <h3>{selectedImg.filename}</h3>
-                <div className="ue-modal-stats">
-                  <span>{(selectedImg.size / 1024).toFixed(1)} KB</span>
-                  <span>{new Date(selectedImg.created_at * 1000).toLocaleString()}</span>
-                </div>
-
-                {/* Open in new tab */}
-                <a href={selectedImg.url} target="_blank" rel="noopener" className="ue-btn outline" style={{ marginBottom: 12 }}>
-                  <ExternalLink size={14} /><span>Open Full Size</span>
-                </a>
-
-                {metaLoading && <div className="ue-loading">Loading metadata...</div>}
-
-                {imgMeta && (
-                  <>
-                    {/* Artist prompts binding */}
-                    {imgMeta.artist_prompts && imgMeta.artist_prompts.length > 0 && (
-                      <div className="ue-meta-section">
-                        <h4><Palette size={14} /> Artist Prompts Used</h4>
-                        <div className="ue-artist-prompts-list">
-                          {imgMeta.artist_prompts.map((ap, i) => (
-                            <div key={i} className="ue-artist-prompt-item">{ap}</div>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Raw prompt data */}
-                    {imgMeta.metadata && Object.keys(imgMeta.metadata).length > 0 && (
-                      <div className="ue-meta-section">
-                        <h4><Sliders size={14} /> Generation Metadata</h4>
-                        <pre className="ue-meta-raw">{JSON.stringify(imgMeta.metadata, null, 2)}</pre>
-                      </div>
-                    )}
-                  </>
-                )}
-
-                {!metaLoading && imgMeta && !imgMeta.metadata && (
-                  <div className="ue-meta-empty">No metadata embedded in this image.</div>
-                )}
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {gallery.selectedImage ? (
+        <ImageDetailModal
+          key={gallery.selectedImage.relative_path}
+          image={gallery.selectedImage}
+          onClose={() => gallery.setSelectedImage(null)}
+          onSaveState={handleUpdateImageState}
+          onRenameFile={handleRenameImage}
+          onDeleteFile={handleDeleteSingleImage}
+          onOpenWorkflow={handleOpenImageWorkflow}
+          navigation={gallery.detailNavigation}
+          onNavigate={(nextIndex) => {
+            const items = gallery.detailNavigation?.items ?? [];
+            const nextImage = items[nextIndex];
+            if (!nextImage) return;
+            gallery.setSelectedImage(nextImage);
+            gallery.setDetailNavigation({
+              items,
+              currentIndex: nextIndex,
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }
