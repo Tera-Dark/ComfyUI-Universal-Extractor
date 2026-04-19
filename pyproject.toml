@@ -21,8 +21,7 @@ Repository = "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor"
 "Bug Tracker" = "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor/issues"
 
 [tool.comfy]
-PublisherId = "tera-dark"
+PublisherId = "teradark"
 DisplayName = "ComfyUI Universal Extractor"
 Icon = "https://raw.githubusercontent.com/Tera-Dark/ComfyUI-Universal-Extractor/master/gallery_ui/public/favicon.svg"
 requires-comfyui = ">=0.3.0"
-
