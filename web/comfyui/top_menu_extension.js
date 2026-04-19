@@ -81,9 +81,43 @@ const supportsActionBarButtons = async () => {
 
 const getUEIcon = () => {
     return `
-        <svg viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
-            <rect x="2" y="2" width="28" height="28" rx="6" ry="6" fill="#3B82F6"/>
-            <text x="16" y="23" text-anchor="middle" font-family="Arial, sans-serif" font-weight="bold" font-size="20" fill="white">U</text>
+        <svg viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+            <defs>
+                <linearGradient id="ue-bg" x1="10" y1="8" x2="54" y2="56" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#101728"/>
+                    <stop offset="1" stop-color="#211433"/>
+                </linearGradient>
+                <radialGradient id="ue-glow" cx="0" cy="0" r="1" gradientUnits="userSpaceOnUse" gradientTransform="translate(20 14) rotate(47.49) scale(33.5313 34.7175)">
+                    <stop stop-color="#24365E" stop-opacity="0.95"/>
+                    <stop offset="1" stop-color="#24365E" stop-opacity="0"/>
+                </radialGradient>
+                <linearGradient id="ue-u" x1="18" y1="16" x2="50" y2="50" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#74F0FF"/>
+                    <stop offset="0.55" stop-color="#63B4FF"/>
+                    <stop offset="1" stop-color="#8A5CFF"/>
+                </linearGradient>
+                <linearGradient id="ue-spark" x1="44" y1="12" x2="54" y2="22" gradientUnits="userSpaceOnUse">
+                    <stop stop-color="#FFF3A8"/>
+                    <stop offset="1" stop-color="#FFB870"/>
+                </linearGradient>
+                <filter id="ue-shadow" x="8" y="8" width="48" height="50" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+                    <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+                    <feColorMatrix in="SourceAlpha" result="hardAlpha" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0"/>
+                    <feOffset dy="4"/>
+                    <feGaussianBlur stdDeviation="4"/>
+                    <feComposite in2="hardAlpha" operator="out"/>
+                    <feColorMatrix values="0 0 0 0 0.0823529 0 0 0 0 0.0470588 0 0 0 0 0.152941 0 0 0 0.42 0"/>
+                    <feBlend in2="BackgroundImageFix" result="effect1_dropShadow_ue"/>
+                    <feBlend in="SourceGraphic" in2="effect1_dropShadow_ue" result="shape"/>
+                </filter>
+            </defs>
+            <rect width="64" height="64" rx="18" fill="url(#ue-bg)"/>
+            <rect x="1" y="1" width="62" height="62" rx="17" fill="none" stroke="rgba(255,255,255,0.08)"/>
+            <circle cx="19" cy="16" r="18" fill="url(#ue-glow)"/>
+            <g filter="url(#ue-shadow)">
+                <path d="M18 18V34.5C18 44.165 23.82 50 32 50C40.18 50 46 44.165 46 34.5V18" stroke="url(#ue-u)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+            </g>
+            <path d="M49.5 11.5L50.766 15.234L54.5 16.5L50.766 17.766L49.5 21.5L48.234 17.766L44.5 16.5L48.234 15.234L49.5 11.5Z" fill="url(#ue-spark)"/>
         </svg>
     `;
 };

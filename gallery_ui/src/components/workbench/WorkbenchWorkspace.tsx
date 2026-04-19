@@ -53,16 +53,18 @@ const cleanArtistTag = (tag: string) =>
     .replace(/^by\s+/i, "")
     .trim();
 
+const normalizeArtistWords = (value: string) => value.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+
 const normalizeAnimaTag = (tag: string) => {
   const trimmed = cleanArtistTag(tag).replace(/^@+/, "");
   const bracketMatch = trimmed.match(/^(.+?)_\((.+)\)$/) ?? trimmed.match(/^(.+?)\((.+)\)$/);
   if (bracketMatch) {
-    const outer = bracketMatch[1].replace(/_+$/g, "").trim();
-    const inner = bracketMatch[2].trim();
+    const outer = normalizeArtistWords(bracketMatch[1].replace(/_+$/g, "").trim());
+    const inner = normalizeArtistWords(bracketMatch[2].trim());
     return `@${outer} \\(${inner}\\)`;
   }
 
-  return `@${trimmed}`;
+  return `@${normalizeArtistWords(trimmed)}`;
 };
 
 export const WorkbenchWorkspace = ({
