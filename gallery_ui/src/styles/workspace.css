@@ -519,6 +519,14 @@
   min-width: min(320px, 100%);
 }
 
+.ue-date-filter-field {
+  min-width: 162px;
+}
+
+.ue-date-filter-field input {
+  min-width: 118px;
+}
+
 .ue-json-shell {
   display: grid;
   grid-template-columns: 56px minmax(0, 1fr);

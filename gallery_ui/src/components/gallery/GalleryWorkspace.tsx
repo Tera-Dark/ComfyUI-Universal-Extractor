@@ -53,6 +53,8 @@ interface GalleryWorkspaceProps {
   totalPages: number;
   selectedCategory: string;
   selectedSubfolder: string;
+  dateFrom: string;
+  dateTo: string;
   favoritesOnly: boolean;
   sortBy: string;
   sortOrder: string;
@@ -68,6 +70,8 @@ interface GalleryWorkspaceProps {
   onOpenDetail: (image: ImageRecord) => void;
   onPageChange: (page: number) => void;
   onCategoryChange: (category: string) => void;
+  onDateFromChange: (value: string) => void;
+  onDateToChange: (value: string) => void;
   onFavoritesOnlyChange: (value: boolean) => void;
   onSortByChange: (value: string) => void;
   onSortOrderChange: (value: string) => void;
@@ -111,6 +115,8 @@ export const GalleryWorkspace = ({
   totalPages,
   selectedCategory,
   selectedSubfolder,
+  dateFrom,
+  dateTo,
   favoritesOnly,
   sortBy,
   sortOrder,
@@ -126,6 +132,8 @@ export const GalleryWorkspace = ({
   onOpenDetail,
   onPageChange,
   onCategoryChange,
+  onDateFromChange,
+  onDateToChange,
   onFavoritesOnlyChange,
   onSortByChange,
   onSortOrderChange,
@@ -572,6 +580,45 @@ export const GalleryWorkspace = ({
                 {t("gallerySortAsc")}
               </button>
             </div>
+
+            <label className="ue-select-field ue-select-field--input ue-date-filter-field">
+              <span>{t("galleryDateFrom")}</span>
+              <input
+                type="date"
+                value={dateFrom}
+                max={dateTo || undefined}
+                onChange={(event) => {
+                  onDateFromChange(event.target.value);
+                  onPageChange(1);
+                }}
+              />
+            </label>
+
+            <label className="ue-select-field ue-select-field--input ue-date-filter-field">
+              <span>{t("galleryDateTo")}</span>
+              <input
+                type="date"
+                value={dateTo}
+                min={dateFrom || undefined}
+                onChange={(event) => {
+                  onDateToChange(event.target.value);
+                  onPageChange(1);
+                }}
+              />
+            </label>
+
+            {dateFrom || dateTo ? (
+              <button
+                className="ue-secondary-btn"
+                onClick={() => {
+                  onDateFromChange("");
+                  onDateToChange("");
+                  onPageChange(1);
+                }}
+              >
+                {t("galleryDateClear")}
+              </button>
+            ) : null}
 
             <div className="ue-select-field ue-select-field--menu">
               <span>{t("galleryColumns")}</span>

@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import time
 import uuid
+from datetime import datetime, timedelta
 from threading import Lock
 from typing import Any
 
@@ -475,6 +476,8 @@ def list_images(
     search: str = "",
     category: str = "",
     subfolder: str = "",
+    date_from: str = "",
+    date_to: str = "",
     favorites_only: bool = False,
     sort_by: str = "created_at",
     sort_order: str = "desc",
@@ -484,6 +487,13 @@ def list_images(
     normalized_search = search.strip().lower()
     normalized_category = category.strip().lower()
     normalized_subfolder = normalize_relative_path(subfolder).lower()
+    date_from_ts = None
+    date_to_ts = None
+
+    if date_from.strip():
+        date_from_ts = int(datetime.strptime(date_from.strip(), "%Y-%m-%d").timestamp())
+    if date_to.strip():
+        date_to_ts = int((datetime.strptime(date_to.strip(), "%Y-%m-%d") + timedelta(days=1)).timestamp())
 
     indexed_images = get_image_index(force_refresh=force_refresh)["images"]
     images: list[dict[str, Any]] = []
@@ -508,6 +518,10 @@ def list_images(
             indexed_image["relative_dir"] == normalized_subfolder
             or indexed_image["relative_dir"].startswith(f"{normalized_subfolder}/")
         ):
+            continue
+        if date_from_ts is not None and indexed_image["created_at"] < date_from_ts:
+            continue
+        if date_to_ts is not None and indexed_image["created_at"] >= date_to_ts:
             continue
         if favorites_only and not image_state.get("favorite", False):
             continue

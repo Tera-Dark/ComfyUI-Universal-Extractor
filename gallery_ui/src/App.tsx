@@ -396,6 +396,8 @@ function App() {
               totalPages={gallery.totalPages}
               selectedCategory={gallery.selectedCategory}
               selectedSubfolder={gallery.selectedSubfolder}
+              dateFrom={gallery.dateFrom}
+              dateTo={gallery.dateTo}
               favoritesOnly={gallery.favoritesOnly}
               sortBy={gallery.sortBy}
               sortOrder={gallery.sortOrder}
@@ -417,6 +419,8 @@ function App() {
               }}
               onPageChange={gallery.setPage}
               onCategoryChange={gallery.setSelectedCategory}
+              onDateFromChange={gallery.setDateFrom}
+              onDateToChange={gallery.setDateTo}
               onFavoritesOnlyChange={gallery.setFavoritesOnly}
               onSortByChange={gallery.setSortBy}
               onSortOrderChange={gallery.setSortOrder}

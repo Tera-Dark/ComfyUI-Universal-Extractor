@@ -71,6 +71,8 @@ export const galleryApi = {
     search: string,
     category = "",
     subfolder = "",
+    dateFrom = "",
+    dateTo = "",
     favoritesOnly = false,
     sortBy = "created_at",
     sortOrder = "desc",
@@ -88,6 +90,12 @@ export const galleryApi = {
     }
     if (subfolder.trim()) {
       params.set("subfolder", subfolder.trim());
+    }
+    if (dateFrom.trim()) {
+      params.set("date_from", dateFrom.trim());
+    }
+    if (dateTo.trim()) {
+      params.set("date_to", dateTo.trim());
     }
     if (favoritesOnly) {
       params.set("favorites", "true");

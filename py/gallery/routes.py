@@ -75,6 +75,8 @@ async def api_list_images(request: web.Request) -> web.Response:
     search = request.query.get("search", "")
     category = request.query.get("category", "")
     subfolder = request.query.get("subfolder", "")
+    date_from = request.query.get("date_from", "")
+    date_to = request.query.get("date_to", "")
     favorites_only = request.query.get("favorites", "").lower() in {"1", "true", "yes"}
     force_refresh = request.query.get("force_refresh", "").lower() in {"1", "true", "yes"}
     sort_by = request.query.get("sort_by", "created_at")
@@ -86,6 +88,8 @@ async def api_list_images(request: web.Request) -> web.Response:
         search=search,
         category=category,
         subfolder=subfolder,
+        date_from=date_from,
+        date_to=date_to,
         favorites_only=favorites_only,
         sort_by=sort_by,
         sort_order=sort_order,

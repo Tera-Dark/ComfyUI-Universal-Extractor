@@ -16,6 +16,8 @@ export const useGalleryData = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedSubfolder, setSelectedSubfolder] = useState("");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
   const [sortBy, setSortBy] = useState("created_at");
   const [sortOrder, setSortOrder] = useState("desc");
@@ -104,6 +106,8 @@ export const useGalleryData = () => {
           deferredSearchTerm,
           selectedCategory,
           selectedSubfolder,
+          dateFrom,
+          dateTo,
           favoritesOnly,
           sortBy,
           sortOrder,
@@ -134,7 +138,7 @@ export const useGalleryData = () => {
     return () => {
       isCancelled = true;
     };
-  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, favoritesOnly, sortBy, sortOrder, refreshKey, t, isTrashView]);
+  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, dateFrom, dateTo, favoritesOnly, sortBy, sortOrder, refreshKey, t, isTrashView]);
 
   const refresh = () => setRefreshKey((value) => value + 1);
 
@@ -304,6 +308,10 @@ export const useGalleryData = () => {
     setSelectedCategory,
     selectedSubfolder,
     setSelectedSubfolder,
+    dateFrom,
+    setDateFrom,
+    dateTo,
+    setDateTo,
     favoritesOnly,
     setFavoritesOnly,
     sortBy,
