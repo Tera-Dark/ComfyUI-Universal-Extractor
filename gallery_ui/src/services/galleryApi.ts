@@ -56,8 +56,13 @@ const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Pro
 };
 
 export const galleryApi = {
-  async getContext() {
-    return requestJson<GalleryContext>("/universal_gallery/api/context");
+  async getContext(forceRefresh = false) {
+    const params = new URLSearchParams();
+    if (forceRefresh) {
+      params.set("force_refresh", "true");
+    }
+    const query = params.size ? `?${params}` : "";
+    return requestJson<GalleryContext>(`/universal_gallery/api/context${query}`);
   },
 
   async listImages(
@@ -69,6 +74,7 @@ export const galleryApi = {
     favoritesOnly = false,
     sortBy = "created_at",
     sortOrder = "desc",
+    forceRefresh = false,
   ) {
     const params = new URLSearchParams({
       page: String(page),
@@ -88,6 +94,9 @@ export const galleryApi = {
     }
     params.set("sort_by", sortBy);
     params.set("sort_order", sortOrder);
+    if (forceRefresh) {
+      params.set("force_refresh", "true");
+    }
 
     return requestJson<ImageListResponse>(`/universal_gallery/api/images?${params}`);
   },

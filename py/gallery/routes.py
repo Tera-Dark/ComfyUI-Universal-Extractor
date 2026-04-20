@@ -65,8 +65,9 @@ async def redirect_gallery_root(_request: web.Request) -> web.StreamResponse:
     raise web.HTTPFound("/gallery/")
 
 
-async def api_gallery_context(_request: web.Request) -> web.Response:
-    return web.json_response(get_gallery_context())
+async def api_gallery_context(request: web.Request) -> web.Response:
+    force_refresh = request.query.get("force_refresh", "").lower() in {"1", "true", "yes"}
+    return web.json_response(get_gallery_context(force_refresh=force_refresh))
 
 
 async def api_list_images(request: web.Request) -> web.Response:
@@ -74,6 +75,7 @@ async def api_list_images(request: web.Request) -> web.Response:
     category = request.query.get("category", "")
     subfolder = request.query.get("subfolder", "")
     favorites_only = request.query.get("favorites", "").lower() in {"1", "true", "yes"}
+    force_refresh = request.query.get("force_refresh", "").lower() in {"1", "true", "yes"}
     sort_by = request.query.get("sort_by", "created_at")
     sort_order = request.query.get("sort_order", "desc")
     page = max(1, int(request.query.get("page", "1")))
@@ -86,6 +88,7 @@ async def api_list_images(request: web.Request) -> web.Response:
         favorites_only=favorites_only,
         sort_by=sort_by,
         sort_order=sort_order,
+        force_refresh=force_refresh,
     )
     total = len(items)
     start = (page - 1) * limit

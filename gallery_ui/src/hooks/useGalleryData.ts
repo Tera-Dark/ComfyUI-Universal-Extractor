@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useState } from "react";
+import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "../i18n/I18nProvider";
 import { galleryApi } from "../services/galleryApi";
@@ -33,6 +33,8 @@ export const useGalleryData = () => {
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
   const [importMessage, setImportMessage] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const consumedContextRefreshKeyRef = useRef(0);
+  const consumedImagesRefreshKeyRef = useRef(0);
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const isTrashView = selectedSubfolder === TRASH_SUBFOLDER_KEY;
 
@@ -42,10 +44,14 @@ export const useGalleryData = () => {
 
   useEffect(() => {
     let isCancelled = false;
+    const shouldForceRefresh = refreshKey > 0 && consumedContextRefreshKeyRef.current !== refreshKey;
+    if (shouldForceRefresh) {
+      consumedContextRefreshKeyRef.current = refreshKey;
+    }
 
     const loadContext = async () => {
       try {
-        const contextResponse = await galleryApi.getContext();
+        const contextResponse = await galleryApi.getContext(shouldForceRefresh);
         if (isCancelled) {
           return;
         }
@@ -66,6 +72,10 @@ export const useGalleryData = () => {
 
   useEffect(() => {
     let isCancelled = false;
+    const shouldForceRefresh = refreshKey > 0 && consumedImagesRefreshKeyRef.current !== refreshKey;
+    if (shouldForceRefresh) {
+      consumedImagesRefreshKeyRef.current = refreshKey;
+    }
 
     const hasLoadedBefore = images.length > 0 || total > 0 || context !== null;
     if (hasLoadedBefore) {
@@ -97,6 +107,7 @@ export const useGalleryData = () => {
           favoritesOnly,
           sortBy,
           sortOrder,
+          shouldForceRefresh,
         );
 
         if (isCancelled) {

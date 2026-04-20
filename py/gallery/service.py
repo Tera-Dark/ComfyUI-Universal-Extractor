@@ -465,10 +465,10 @@ def get_image_index(force_refresh: bool = False) -> dict[str, Any]:
         }
 
 
-def collect_subfolders(output_dir: str) -> list[str]:
+def collect_subfolders(output_dir: str, force_refresh: bool = False) -> list[str]:
     if not output_dir or not os.path.exists(output_dir):
         return []
-    return get_image_index()["subfolders"]
+    return get_image_index(force_refresh=force_refresh)["subfolders"]
 
 
 def list_images(
@@ -478,13 +478,14 @@ def list_images(
     favorites_only: bool = False,
     sort_by: str = "created_at",
     sort_order: str = "desc",
+    force_refresh: bool = False,
 ) -> list[dict]:
     output_dir = _ensure_output_dir()
     normalized_search = search.strip().lower()
     normalized_category = category.strip().lower()
     normalized_subfolder = normalize_relative_path(subfolder).lower()
 
-    indexed_images = get_image_index()["images"]
+    indexed_images = get_image_index(force_refresh=force_refresh)["images"]
     images: list[dict[str, Any]] = []
 
     for indexed_image in indexed_images:
@@ -524,11 +525,11 @@ def list_images(
     return images
 
 
-def get_gallery_context() -> dict:
+def get_gallery_context(force_refresh: bool = False) -> dict:
     output_dir = get_output_dir()
     base_dir = get_comfy_base_dir()
     import_dir = os.path.join(output_dir, IMPORT_IMAGE_SUBFOLDER) if output_dir else ""
-    subfolders = collect_subfolders(output_dir) if output_dir else []
+    subfolders = collect_subfolders(output_dir, force_refresh=force_refresh) if output_dir else []
 
     return {
         "base_dir": base_dir,
