@@ -161,6 +161,7 @@
 }
 
 .ue-select-field {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -184,6 +185,64 @@
   background: transparent;
   color: var(--ue-ink);
   font-size: 12px;
+}
+
+.ue-select-field--menu {
+  z-index: 5;
+}
+
+.ue-select-field__menu-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 4px 0 2px;
+  border-radius: 999px;
+  color: var(--ue-ink);
+  cursor: pointer;
+}
+
+.ue-select-field__menu-trigger.is-open {
+  background: rgba(24, 24, 27, 0.06);
+}
+
+.ue-select-field__menu-trigger svg {
+  color: var(--ue-ink-soft);
+}
+
+.ue-select-field__menu {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  display: flex;
+  min-width: 72px;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+  border: 1px solid rgba(228, 228, 231, 0.92);
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 18px 36px rgba(24, 24, 27, 0.16);
+  backdrop-filter: blur(18px);
+}
+
+.ue-select-field__menu button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  border-radius: 10px;
+  color: var(--ue-ink-soft);
+  cursor: pointer;
+  transition:
+    background-color var(--ue-duration-fast) var(--ue-ease),
+    color var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-select-field__menu button:hover,
+.ue-select-field__menu button.is-active {
+  background: rgba(59, 130, 246, 0.1);
+  color: #2455a4;
 }
 
 .ue-select-field--input {
@@ -392,7 +451,7 @@
   bottom: 16px;
   z-index: 12;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 16px;
   padding: 12px 14px;
@@ -424,6 +483,40 @@
   justify-content: flex-end;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.ue-bulkbar-note {
+  display: flex;
+  min-width: min(360px, 100%);
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  background: rgba(244, 244, 245, 0.82);
+}
+
+.ue-bulkbar-note strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ue-bulkbar-note span {
+  color: var(--ue-ink-muted);
+  font-size: 11px;
+  line-height: 1.55;
+}
+
+.ue-bulk-number-field {
+  min-width: 108px;
+}
+
+.ue-bulk-number-field input {
+  width: 46px;
+  text-align: center;
+}
+
+.ue-bulk-rename-field {
+  min-width: min(320px, 100%);
 }
 
 .ue-json-shell {

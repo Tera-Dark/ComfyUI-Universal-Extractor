@@ -426,6 +426,16 @@ function App() {
               onUpdateImageState={handleUpdateImageState}
               onBatchUpdateImages={gallery.batchUpdateImages}
               onMoveImages={gallery.moveImages}
+              onBatchRenameImages={async (relativePaths, template, startNumber, padding, currentPage) => {
+                try {
+                  const result = await gallery.batchRenameImages(relativePaths, template, startNumber, padding, currentPage);
+                  pushToast(t("bulkRenameSuccess", { count: result.renamed.length }), "success");
+                  return result;
+                } catch (error) {
+                  pushToast(error instanceof Error ? error.message : t("bulkRenameError"), "error");
+                  throw error;
+                }
+              }}
               onDeleteImages={gallery.deleteImages}
               onImportFiles={handleImportFiles}
               onRestoreTrashItem={async (id) => {

@@ -182,6 +182,19 @@ export const useGalleryData = () => {
     return response;
   };
 
+  const batchRenameImages = async (
+    relativePaths: string[],
+    template: string,
+    startNumber: number,
+    padding: number,
+    currentPage: number,
+  ) => {
+    const response = await galleryApi.batchRenameImages(relativePaths, template, startNumber, padding, currentPage);
+    setSelectedImagePaths([]);
+    refresh();
+    return response;
+  };
+
   const deleteImages = async (relativePaths: string[]) => {
     const response = await galleryApi.deleteImages(relativePaths);
     applyContextPatch((current) => ({
@@ -317,6 +330,7 @@ export const useGalleryData = () => {
     updateImageState,
     batchUpdateImages,
     moveImages,
+    batchRenameImages,
     deleteImages,
     renameImage,
     createFolder,

@@ -9,6 +9,7 @@ from ..constants import GALLERY_INDEX_FILE, GALLERY_UI_DIR, TRASH_DIR
 from .service import (
     LibraryValidationError,
     batch_update_images,
+    batch_rename_images,
     create_folder,
     delete_images,
     delete_folder,
@@ -255,6 +256,35 @@ async def api_rename_image(request: web.Request) -> web.Response:
         return web.json_response({"error": "image not found"}, status=404)
     except FileExistsError:
         return web.json_response({"error": "target filename already exists"}, status=409)
+    except ValueError as error:
+        return web.json_response({"error": str(error)}, status=400)
+
+
+async def api_batch_rename_images(request: web.Request) -> web.Response:
+    body = await request.json()
+    relative_paths = body.get("relative_paths", [])
+    template = str(body.get("template", "")).strip()
+    start_number = int(body.get("start_number", 1))
+    padding = int(body.get("padding", 2))
+    current_page = int(body.get("current_page", 1))
+
+    if not isinstance(relative_paths, list) or not relative_paths or not template:
+        return web.json_response({"error": "relative_paths and template required"}, status=400)
+
+    try:
+        return web.json_response(
+            batch_rename_images(
+                relative_paths=relative_paths,
+                template=template,
+                start_number=start_number,
+                padding=padding,
+                current_page=current_page,
+            )
+        )
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except FileExistsError as error:
+        return web.json_response({"error": str(error)}, status=409)
     except ValueError as error:
         return web.json_response({"error": str(error)}, status=400)
 
@@ -506,6 +536,7 @@ def register_routes(app):
     _safe_add_route(app.router, "post", "/universal_gallery/api/images/batch-update", api_batch_update_images)
     _safe_add_route(app.router, "post", "/universal_gallery/api/images/move", api_move_images)
     _safe_add_route(app.router, "post", "/universal_gallery/api/images/rename", api_rename_image)
+    _safe_add_route(app.router, "post", "/universal_gallery/api/images/batch-rename", api_batch_rename_images)
     _safe_add_route(app.router, "get", "/universal_gallery/api/libraries", api_list_libraries)
     _safe_add_route(app.router, "get", "/universal_gallery/api/library", api_get_library)
     _safe_add_route(app.router, "get", "/universal_gallery/api/library/entries", api_get_library_entries)

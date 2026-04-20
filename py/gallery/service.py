@@ -983,6 +983,95 @@ def rename_image(relative_path: str, new_filename: str) -> dict:
     }
 
 
+def batch_rename_images(
+    relative_paths: list[str],
+    template: str,
+    start_number: int = 1,
+    padding: int = 2,
+    current_page: int = 1,
+) -> dict[str, Any]:
+    if not relative_paths:
+        raise ValueError("relative_paths required")
+
+    clean_template = str(template or "").strip()
+    if not clean_template:
+        raise ValueError("template required")
+
+    output_dir = _ensure_output_dir()
+    padding = max(1, min(8, int(padding)))
+    start_number = max(0, int(start_number))
+    current_page = max(1, int(current_page))
+
+    source_paths: list[tuple[str, str, str]] = []
+    selected_set = {normalize_relative_path(path) for path in relative_paths}
+
+    for normalized in relative_paths:
+        normalized_source = normalize_relative_path(normalized)
+        _, full_path = resolve_image_path(normalized_source)
+        if not os.path.exists(full_path):
+            raise FileNotFoundError(f"image not found: {normalized_source}")
+
+        filename = os.path.basename(normalized_source)
+        stem, ext = os.path.splitext(filename)
+        source_paths.append((normalized_source, stem, ext))
+
+    def build_target_name(original_name: str, index: int, extension: str) -> str:
+        serial = str(start_number + index).zfill(padding)
+        rendered = (
+            clean_template
+            .replace("{n}", serial)
+            .replace("{name}", original_name)
+            .replace("{page}", str(current_page))
+        )
+        rendered = os.path.basename(rendered).strip().strip(".")
+        if not rendered:
+            raise ValueError("template generated an empty filename")
+        return f"{rendered}{extension}"
+
+    target_mapping: dict[str, str] = {}
+    seen_targets: set[str] = set()
+
+    for index, (source_relative, original_stem, extension) in enumerate(source_paths):
+        next_filename = build_target_name(original_stem, index, extension)
+        target_relative = normalize_relative_path(os.path.join(os.path.dirname(source_relative), next_filename))
+
+        if target_relative in seen_targets:
+            raise FileExistsError(f"duplicate target filename: {next_filename}")
+        seen_targets.add(target_relative)
+
+        target_full_path = os.path.join(output_dir, target_relative)
+        if os.path.exists(target_full_path) and target_relative not in selected_set:
+            raise FileExistsError(f"target filename already exists: {next_filename}")
+
+        target_mapping[source_relative] = target_relative
+
+    temporary_mapping: dict[str, str] = {}
+    for source_relative, _, extension in source_paths:
+        temp_filename = f".ue-rename-{uuid.uuid4().hex}{extension}"
+        temp_relative = normalize_relative_path(os.path.join(os.path.dirname(source_relative), temp_filename))
+        temporary_mapping[source_relative] = temp_relative
+        os.rename(os.path.join(output_dir, source_relative), os.path.join(output_dir, temp_relative))
+
+    try:
+        for source_relative, temp_relative in temporary_mapping.items():
+          os.rename(os.path.join(output_dir, temp_relative), os.path.join(output_dir, target_mapping[source_relative]))
+    except Exception:
+        for source_relative, temp_relative in temporary_mapping.items():
+            temp_full_path = os.path.join(output_dir, temp_relative)
+            source_full_path = os.path.join(output_dir, source_relative)
+            if os.path.exists(temp_full_path) and not os.path.exists(source_full_path):
+                os.rename(temp_full_path, source_full_path)
+        raise
+
+    categories = move_image_states(target_mapping)
+    invalidate_image_index_cache()
+    return {
+        "ok": True,
+        "renamed": list(target_mapping.values()),
+        "categories": categories,
+    }
+
+
 def create_folder(subfolder: str) -> dict[str, Any]:
     normalized_subfolder, full_path = resolve_subfolder_path(subfolder)
     if not normalized_subfolder:

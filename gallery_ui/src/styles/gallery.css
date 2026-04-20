@@ -8,6 +8,16 @@
   align-items: start;
 }
 
+.ue-selection-box {
+  position: fixed;
+  z-index: 28;
+  border: 1px solid rgba(59, 130, 246, 0.72);
+  background: rgba(59, 130, 246, 0.12);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.32);
+  border-radius: 10px;
+  pointer-events: none;
+}
+
 .ue-gallery-card {
   position: relative;
   display: flex;
@@ -24,7 +34,9 @@
 }
 
 .ue-gallery-card.is-selected .ue-gallery-media {
-  box-shadow: 0 0 0 1px rgba(24, 24, 27, 0.12);
+  box-shadow:
+    0 0 0 2px rgba(59, 130, 246, 0.42),
+    0 12px 28px rgba(59, 130, 246, 0.12);
 }
 
 .ue-gallery-media {

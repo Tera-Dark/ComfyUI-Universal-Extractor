@@ -175,6 +175,26 @@ export const galleryApi = {
     );
   },
 
+  async batchRenameImages(relativePaths: string[], template: string, startNumber = 1, padding = 2, currentPage = 1) {
+    return requestJson<{
+      ok: boolean;
+      renamed: string[];
+      categories: string[];
+    }>("/universal_gallery/api/images/batch-rename", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        relative_paths: relativePaths,
+        template,
+        start_number: startNumber,
+        padding,
+        current_page: currentPage,
+      }),
+    });
+  },
+
   async listLibraries() {
     const response = await requestJson<{ libraries?: LibraryInfo[] }>("/universal_gallery/api/libraries");
     return response.libraries ?? [];

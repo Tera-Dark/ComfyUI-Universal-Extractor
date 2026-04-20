@@ -7,6 +7,7 @@ import {
   Folder as FolderIcon,
   Heart,
   Image as ImageIcon,
+  PencilLine,
   RotateCcw,
   Send,
   Square,
@@ -76,6 +77,13 @@ interface GalleryWorkspaceProps {
   onUpdateImageState: (relativePath: string, updates: Record<string, unknown>) => Promise<void>;
   onBatchUpdateImages: (relativePaths: string[], updates: Record<string, unknown>) => Promise<unknown>;
   onMoveImages: (relativePaths: string[], targetSubfolder: string) => Promise<unknown>;
+  onBatchRenameImages: (
+    relativePaths: string[],
+    template: string,
+    startNumber: number,
+    padding: number,
+    currentPage: number,
+  ) => Promise<unknown>;
   onDeleteImages: (relativePaths: string[]) => Promise<unknown>;
   onImportFiles: (files: File[]) => Promise<unknown>;
   onRestoreTrashItem: (id: string) => Promise<void>;
@@ -86,6 +94,13 @@ interface ImageContextMenuState {
   image: ImageRecord;
   x: number;
   y: number;
+}
+
+interface SelectionBoxState {
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
 }
 
 export const GalleryWorkspace = ({
@@ -120,6 +135,7 @@ export const GalleryWorkspace = ({
   onUpdateImageState,
   onBatchUpdateImages,
   onMoveImages,
+  onBatchRenameImages,
   onDeleteImages,
   onImportFiles,
   onRestoreTrashItem,
@@ -131,10 +147,26 @@ export const GalleryWorkspace = ({
   const [dragActive, setDragActive] = useState(false);
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkTargetSubfolder, setBulkTargetSubfolder] = useState("");
+  const [bulkRenameTemplate, setBulkRenameTemplate] = useState("set-{page}-{n}");
+  const [bulkRenameStart, setBulkRenameStart] = useState(1);
+  const [bulkRenamePadding, setBulkRenamePadding] = useState(2);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [contextMenu, setContextMenu] = useState<ImageContextMenuState | null>(null);
+  const [showColumnsMenu, setShowColumnsMenu] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectionBox, setSelectionBox] = useState<SelectionBoxState | null>(null);
   const dragDepthRef = useRef(0);
+  const gridRef = useRef<HTMLDivElement | null>(null);
+  const cardRefs = useRef<Record<string, HTMLElement | null>>({});
+  const isDraggingSelectionRef = useRef(false);
+
+  const visibleImagePaths = useMemo(() => images.map((image) => image.relative_path), [images]);
+  const selectedImagePathSet = useMemo(() => new Set(selectedImagePaths), [selectedImagePaths]);
+  const pageSelectedPaths = useMemo(
+    () => images.filter((image) => selectedImagePathSet.has(image.relative_path)).map((image) => image.relative_path),
+    [images, selectedImagePathSet],
+  );
 
   useEffect(() => {
     const handleResize = () => setViewportWidth(window.innerWidth);
@@ -168,6 +200,35 @@ export const GalleryWorkspace = ({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [contextMenu]);
+
+  useEffect(() => {
+    if (!showColumnsMenu) {
+      return;
+    }
+
+    const closeMenu = () => setShowColumnsMenu(false);
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("resize", closeMenu);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("resize", closeMenu);
+    };
+  }, [showColumnsMenu]);
+
+  useEffect(() => {
+    if (selectedImagePaths.length === pageSelectedPaths.length) {
+      return;
+    }
+    onSelectionChange(pageSelectedPaths);
+  }, [onSelectionChange, pageSelectedPaths, selectedImagePaths.length]);
+
+  useEffect(() => {
+    if (selectionMode) {
+      return;
+    }
+    setSelectionBox(null);
+    isDraggingSelectionRef.current = false;
+  }, [selectionMode]);
 
   const effectiveColumns = useMemo(() => {
     if (viewportWidth <= 640) return 1;
@@ -212,16 +273,16 @@ export const GalleryWorkspace = ({
   };
 
   const toggleSelection = (relativePath: string) => {
-    if (selectedImagePaths.includes(relativePath)) {
-      onSelectionChange(selectedImagePaths.filter((path) => path !== relativePath));
+    if (pageSelectedPaths.includes(relativePath)) {
+      onSelectionChange(pageSelectedPaths.filter((path) => path !== relativePath));
       return;
     }
 
-    onSelectionChange([...selectedImagePaths, relativePath]);
+    onSelectionChange([...pageSelectedPaths, relativePath]);
   };
 
   const selectAllVisible = () => {
-    onSelectionChange(images.map((image) => image.relative_path));
+    onSelectionChange(visibleImagePaths);
   };
 
   const clearSelection = () => {
@@ -229,17 +290,17 @@ export const GalleryWorkspace = ({
   };
 
   const handleBatchDelete = async () => {
-    if (!selectedImagePaths.length) {
+    if (!pageSelectedPaths.length) {
       return;
     }
 
     const approved = await confirm({
       title: t("bulkDelete"),
       message:
-        selectedImagePaths.length >= 20
-          ? t("bulkDeleteHeavyConfirm", { count: selectedImagePaths.length })
-          : t("bulkDeleteConfirm", { count: selectedImagePaths.length }),
-      tone: selectedImagePaths.length >= 20 ? "danger" : "warning",
+        pageSelectedPaths.length >= 20
+          ? t("bulkDeleteHeavyConfirm", { count: pageSelectedPaths.length })
+          : t("bulkDeleteConfirm", { count: pageSelectedPaths.length }),
+      tone: pageSelectedPaths.length >= 20 ? "danger" : "warning",
       confirmLabel: t("commonDelete"),
       cancelLabel: t("libraryCancel"),
     });
@@ -247,16 +308,31 @@ export const GalleryWorkspace = ({
       return;
     }
 
-    await onDeleteImages(selectedImagePaths);
+    await onDeleteImages(pageSelectedPaths);
     clearSelection();
   };
 
   const handleBatchMove = async () => {
-    if (!selectedImagePaths.length) {
+    if (!pageSelectedPaths.length || !bulkTargetSubfolder) {
       return;
     }
 
-    await onMoveImages(selectedImagePaths, bulkTargetSubfolder);
+    await onMoveImages(pageSelectedPaths, bulkTargetSubfolder);
+    clearSelection();
+  };
+
+  const handleBatchRename = async () => {
+    if (!pageSelectedPaths.length || !bulkRenameTemplate.trim()) {
+      return;
+    }
+
+    await onBatchRenameImages(
+      pageSelectedPaths,
+      bulkRenameTemplate.trim(),
+      bulkRenameStart,
+      bulkRenamePadding,
+      page,
+    );
     clearSelection();
   };
 
@@ -274,6 +350,83 @@ export const GalleryWorkspace = ({
 
   const getAbsoluteImageUrl = (image: ImageRecord) =>
     new URL(image.original_url || image.url, window.location.origin).toString();
+
+  const updateSelectionFromBox = (box: SelectionBoxState) => {
+    const left = Math.min(box.startX, box.currentX);
+    const right = Math.max(box.startX, box.currentX);
+    const top = Math.min(box.startY, box.currentY);
+    const bottom = Math.max(box.startY, box.currentY);
+
+    const intersectedPaths = images
+      .filter((image) => {
+        const element = cardRefs.current[image.relative_path];
+        if (!element) {
+          return false;
+        }
+        const rect = element.getBoundingClientRect();
+        return !(rect.right < left || rect.left > right || rect.bottom < top || rect.top > bottom);
+      })
+      .map((image) => image.relative_path);
+
+    onSelectionChange(intersectedPaths);
+  };
+
+  const handleSelectionPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!selectionMode || event.button !== 0) {
+      return;
+    }
+
+    const target = event.target as HTMLElement;
+    if (target.closest("button, input, select, textarea, a, label")) {
+      return;
+    }
+
+    isDraggingSelectionRef.current = false;
+    setSelectionBox({
+      startX: event.clientX,
+      startY: event.clientY,
+      currentX: event.clientX,
+      currentY: event.clientY,
+    });
+  };
+
+  const handleSelectionPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!selectionMode || !selectionBox) {
+      return;
+    }
+
+    const nextBox = {
+      ...selectionBox,
+      currentX: event.clientX,
+      currentY: event.clientY,
+    };
+    if (
+      Math.abs(nextBox.currentX - nextBox.startX) > 6 ||
+      Math.abs(nextBox.currentY - nextBox.startY) > 6
+    ) {
+      isDraggingSelectionRef.current = true;
+    }
+    setSelectionBox(nextBox);
+    if (isDraggingSelectionRef.current) {
+      updateSelectionFromBox(nextBox);
+    }
+  };
+
+  const handleSelectionPointerEnd = () => {
+    if (!selectionBox) {
+      return;
+    }
+
+    if (!isDraggingSelectionRef.current) {
+      setSelectionBox(null);
+      return;
+    }
+
+    setSelectionBox(null);
+    window.setTimeout(() => {
+      isDraggingSelectionRef.current = false;
+    }, 0);
+  };
 
   const copyText = async (value: string, successMessage: string) => {
     try {
@@ -420,19 +573,37 @@ export const GalleryWorkspace = ({
               </button>
             </div>
 
-            <label className="ue-select-field">
+            <div className="ue-select-field ue-select-field--menu">
               <span>{t("galleryColumns")}</span>
-              <select
-                value={String(gridColumns)}
-                onChange={(event) => onGridColumnsChange(Number(event.target.value))}
+              <button
+                className={`ue-select-field__menu-trigger ${showColumnsMenu ? "is-open" : ""}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowColumnsMenu((current) => !current);
+                }}
+                type="button"
               >
-                {Array.from({ length: 6 }, (_, index) => index + 3).map((count) => (
-                  <option key={count} value={count}>
-                    {count}
-                  </option>
-                ))}
-              </select>
-            </label>
+                <span>{gridColumns}</span>
+                <ChevronDown size={14} />
+              </button>
+              {showColumnsMenu ? (
+                <div className="ue-select-field__menu" onClick={(event) => event.stopPropagation()}>
+                  {Array.from({ length: 6 }, (_, index) => index + 3).map((count) => (
+                    <button
+                      key={count}
+                      className={gridColumns === count ? "is-active" : ""}
+                      onClick={() => {
+                        onGridColumnsChange(count);
+                        setShowColumnsMenu(false);
+                      }}
+                      type="button"
+                    >
+                      {count}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
 
             <button
               className={`ue-chip-toggle ${favoritesOnly ? "active" : ""}`}
@@ -440,6 +611,16 @@ export const GalleryWorkspace = ({
             >
               <Star size={13} />
               <span>{t("galleryFavoriteOnly")}</span>
+            </button>
+            <button
+              className={`ue-chip-toggle ${selectionMode ? "active" : ""}`}
+              onClick={() => {
+                setSelectionMode((current) => !current);
+                clearSelection();
+              }}
+            >
+              <CheckSquare size={13} />
+              <span>{t("bulkSelectMode")}</span>
             </button>
           </div>
           ) : null}
@@ -503,20 +684,40 @@ export const GalleryWorkspace = ({
           </div>
         ) : (
           <div
+            ref={gridRef}
             className="ue-gallery-grid"
             style={{ gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` }}
+            onPointerDown={handleSelectionPointerDown}
+            onPointerMove={handleSelectionPointerMove}
+            onPointerUp={handleSelectionPointerEnd}
+            onPointerCancel={handleSelectionPointerEnd}
           >
             {images.map((image) => {
-              const selected = selectedImagePaths.includes(image.relative_path);
+              const selected = pageSelectedPaths.includes(image.relative_path);
 
               return (
                 <article
                   key={image.relative_path}
                   className={`ue-gallery-card ${selected ? "is-selected" : ""}`}
                   onContextMenu={(event) => handleOpenContextMenu(event, image)}
+                  ref={(element) => {
+                    cardRefs.current[image.relative_path] = element;
+                  }}
                 >
                   <div className="ue-gallery-media">
-                    <GalleryCardImage image={image} onOpenDetail={onOpenDetail} />
+                    <GalleryCardImage
+                      image={image}
+                      onOpenDetail={(nextImage) => {
+                        if (selectionMode) {
+                          toggleSelection(nextImage.relative_path);
+                          return;
+                        }
+                        if (isDraggingSelectionRef.current) {
+                          return;
+                        }
+                        onOpenDetail(nextImage);
+                      }}
+                    />
 
                     <div className="ue-gallery-actions">
                       <button
@@ -553,12 +754,36 @@ export const GalleryWorkspace = ({
                       </button>
                     </div>
 
-                    <button className="ue-gallery-open" onClick={() => onOpenDetail(image)}>
+                    <button
+                      className="ue-gallery-open"
+                      onClick={() => {
+                        if (selectionMode) {
+                          toggleSelection(image.relative_path);
+                          return;
+                        }
+                        if (isDraggingSelectionRef.current) {
+                          return;
+                        }
+                        onOpenDetail(image);
+                      }}
+                    >
                       {t("galleryInspect")}
                     </button>
                   </div>
 
-                  <button className="ue-gallery-body" onClick={() => onOpenDetail(image)}>
+                  <button
+                    className="ue-gallery-body"
+                    onClick={() => {
+                      if (selectionMode) {
+                        toggleSelection(image.relative_path);
+                        return;
+                      }
+                      if (isDraggingSelectionRef.current) {
+                        return;
+                      }
+                      onOpenDetail(image);
+                    }}
+                  >
                     <span className="ue-gallery-title" title={image.title || image.filename}>
                       {image.title || image.filename}
                     </span>
@@ -577,6 +802,17 @@ export const GalleryWorkspace = ({
                 </article>
               );
             })}
+            {selectionMode && selectionBox ? (
+              <div
+                className="ue-selection-box"
+                style={{
+                  left: Math.min(selectionBox.startX, selectionBox.currentX),
+                  top: Math.min(selectionBox.startY, selectionBox.currentY),
+                  width: Math.abs(selectionBox.currentX - selectionBox.startX),
+                  height: Math.abs(selectionBox.currentY - selectionBox.startY),
+                }}
+              />
+            ) : null}
           </div>
         )}
 
@@ -589,7 +825,11 @@ export const GalleryWorkspace = ({
             </div>
 
             <div className="ue-pagination-actions">
+              {selectionMode ? (
+                <button onClick={selectAllVisible}>{t("bulkSelectVisible")}</button>
+              ) : (
               <button onClick={selectAllVisible}>{t("bulkSelectVisible")}</button>
+              )}
               <button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
                 {t("galleryPrevious")}
               </button>
@@ -621,25 +861,32 @@ export const GalleryWorkspace = ({
           </div>
         ) : null}
 
-        {selectedImagePaths.length > 0 ? (
+        {selectionMode ? (
           <div className="ue-bulkbar">
             <div className="ue-bulkbar-info">
-              <strong>{t("bulkSelected", { count: selectedImagePaths.length })}</strong>
+              <strong>{t("bulkSelected", { count: pageSelectedPaths.length })}</strong>
+              <span>{t("bulkSelectionHint")}</span>
               <span>{selectedSubfolder || t("galleryOutputFolder")}</span>
             </div>
 
             <div className="ue-bulkbar-actions">
+              <button className="ue-secondary-btn" onClick={selectAllVisible} aria-label={t("bulkSelectVisible")}>
+                <CheckSquare size={13} />
+                <span>{t("bulkSelectVisible")}</span>
+              </button>
               <button
                 className="ue-secondary-btn"
-                onClick={() => void onBatchUpdateImages(selectedImagePaths, { favorite: true })}
+                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { favorite: true })}
                 aria-label={t("bulkFavorite")}
+                disabled={!pageSelectedPaths.length}
               >
                 <Star size={13} />
               </button>
               <button
                 className="ue-secondary-btn"
-                onClick={() => void onBatchUpdateImages(selectedImagePaths, { favorite: false })}
+                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { favorite: false })}
                 aria-label={t("bulkUnfavorite")}
+                disabled={!pageSelectedPaths.length}
               >
                 <Heart size={13} />
               </button>
@@ -653,8 +900,9 @@ export const GalleryWorkspace = ({
               </label>
               <button
                 className="ue-secondary-btn"
-                onClick={() => void onBatchUpdateImages(selectedImagePaths, { category: bulkCategory })}
+                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { category: bulkCategory })}
                 aria-label={t("bulkSetCategory")}
+                disabled={!pageSelectedPaths.length || !bulkCategory.trim()}
               >
                 <Check size={13} />
               </button>
@@ -674,15 +922,64 @@ export const GalleryWorkspace = ({
                     ))}
                 </select>
               </label>
-              <button className="ue-secondary-btn" onClick={() => void handleBatchMove()} aria-label={t("bulkMoveTo")}>
+              <button
+                className="ue-secondary-btn"
+                onClick={() => void handleBatchMove()}
+                aria-label={t("bulkMoveTo")}
+                disabled={!pageSelectedPaths.length || !bulkTargetSubfolder}
+              >
                 <ImageIcon size={13} />
+              </button>
+              <label className="ue-select-field ue-select-field--input ue-bulk-rename-field">
+                <PencilLine size={13} />
+                <input
+                  value={bulkRenameTemplate}
+                  onChange={(event) => setBulkRenameTemplate(event.target.value)}
+                  placeholder={t("bulkRenameTemplatePlaceholder")}
+                />
+              </label>
+              <label className="ue-select-field ue-bulk-number-field">
+                <span>{t("bulkRenameStart")}</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={bulkRenameStart}
+                  onChange={(event) => setBulkRenameStart(Number(event.target.value) || 0)}
+                />
+              </label>
+              <label className="ue-select-field ue-bulk-number-field">
+                <span>{t("bulkRenamePadding")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={bulkRenamePadding}
+                  onChange={(event) => setBulkRenamePadding(Number(event.target.value) || 1)}
+                />
+              </label>
+              <button
+                className="ue-secondary-btn"
+                onClick={() => void handleBatchRename()}
+                aria-label={t("bulkRenameApply")}
+                disabled={!pageSelectedPaths.length || !bulkRenameTemplate.trim()}
+              >
+                <PencilLine size={13} />
+                <span>{t("bulkRenameApply")}</span>
               </button>
               <button className="ue-secondary-btn" onClick={clearSelection} aria-label={t("bulkClear")}>
                 <Square size={13} />
               </button>
-              <button className="ue-secondary-btn ue-danger-btn" onClick={() => void handleBatchDelete()}>
+              <button
+                className="ue-secondary-btn ue-danger-btn"
+                onClick={() => void handleBatchDelete()}
+                disabled={!pageSelectedPaths.length}
+              >
                 <Trash2 size={13} />
               </button>
+            </div>
+            <div className="ue-bulkbar-note">
+              <strong>{t("bulkRenameRuleTitle")}</strong>
+              <span>{t("bulkRenameRuleHint")}</span>
             </div>
           </div>
         ) : null}
