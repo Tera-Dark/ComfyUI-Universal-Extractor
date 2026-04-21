@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronDown,
+  ChevronUp,
   Check,
   CheckSquare,
   ExternalLink,
@@ -164,10 +165,12 @@ export const GalleryWorkspace = ({
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectionBox, setSelectionBox] = useState<SelectionBoxState | null>(null);
+  const [showBackToTop, setShowBackToTop] = useState(false);
   const dragDepthRef = useRef(0);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Record<string, HTMLElement | null>>({});
   const isDraggingSelectionRef = useRef(false);
+  const scrollContainerRef = useRef<HTMLElement | null>(null);
 
   const visibleImagePaths = useMemo(() => images.map((image) => image.relative_path), [images]);
   const selectedImagePathSet = useMemo(() => new Set(selectedImagePaths), [selectedImagePaths]);
@@ -237,6 +240,22 @@ export const GalleryWorkspace = ({
     setSelectionBox(null);
     isDraggingSelectionRef.current = false;
   }, [selectionMode]);
+
+  useEffect(() => {
+    const scrollContainer = gridRef.current?.closest(".ue-main-shell") as HTMLElement | null;
+    scrollContainerRef.current = scrollContainer;
+    if (!scrollContainer) {
+      return;
+    }
+
+    const handleScroll = () => {
+      setShowBackToTop(scrollContainer.scrollTop > 320);
+    };
+
+    handleScroll();
+    scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
+    return () => scrollContainer.removeEventListener("scroll", handleScroll);
+  }, []);
 
   const effectiveColumns = useMemo(() => {
     if (viewportWidth <= 640) return 1;
@@ -499,6 +518,10 @@ export const GalleryWorkspace = ({
     });
   };
 
+  const handleScrollToTop = () => {
+    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  };
+
   return (
     <div
       className={`ue-drop-shell ${dragActive ? "is-dragging" : ""}`}
@@ -675,6 +698,129 @@ export const GalleryWorkspace = ({
 
         {importMessage ? <div className="ue-inline-success">{importMessage}</div> : null}
         {error ? <div className="ue-inline-error">{error}</div> : null}
+
+        {selectionMode ? (
+          <div className="ue-bulkbar ue-bulkbar--top">
+            <div className="ue-bulkbar-info">
+              <strong>{t("bulkSelected", { count: pageSelectedPaths.length })}</strong>
+              <span>{t("bulkSelectionHint")}</span>
+              <span>{selectedSubfolder || t("galleryOutputFolder")}</span>
+            </div>
+
+            <div className="ue-bulkbar-actions">
+              <button className="ue-secondary-btn" onClick={selectAllVisible} aria-label={t("bulkSelectVisible")}>
+                <CheckSquare size={13} />
+                <span>{t("bulkSelectVisible")}</span>
+              </button>
+              <button
+                className="ue-secondary-btn"
+                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { favorite: true })}
+                aria-label={t("bulkFavorite")}
+                disabled={!pageSelectedPaths.length}
+              >
+                <Star size={13} />
+              </button>
+              <button
+                className="ue-secondary-btn"
+                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { favorite: false })}
+                aria-label={t("bulkUnfavorite")}
+                disabled={!pageSelectedPaths.length}
+              >
+                <Heart size={13} />
+              </button>
+              <label className="ue-select-field ue-select-field--input">
+                <Tag size={13} />
+                <input
+                  value={bulkCategory}
+                  onChange={(event) => setBulkCategory(event.target.value)}
+                  placeholder={t("galleryCategoryPlaceholder")}
+                />
+              </label>
+              <button
+                className="ue-secondary-btn"
+                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { category: bulkCategory })}
+                aria-label={t("bulkSetCategory")}
+                disabled={!pageSelectedPaths.length || !bulkCategory.trim()}
+              >
+                <Check size={13} />
+              </button>
+              <label className="ue-select-field ue-select-field--input">
+                <span>{t("bulkMoveTo")}</span>
+                <select
+                  value={bulkTargetSubfolder}
+                  onChange={(event) => setBulkTargetSubfolder(event.target.value)}
+                >
+                  <option value="">{t("galleryOutputFolder")}</option>
+                  {targetFolderOptions
+                    .filter((option) => option !== selectedSubfolder)
+                    .map((option) => (
+                      <option key={option || "__root"} value={option}>
+                        {option || "./"}
+                      </option>
+                    ))}
+                </select>
+              </label>
+              <button
+                className="ue-secondary-btn"
+                onClick={() => void handleBatchMove()}
+                aria-label={t("bulkMoveTo")}
+                disabled={!pageSelectedPaths.length || !bulkTargetSubfolder}
+              >
+                <ImageIcon size={13} />
+              </button>
+              <label className="ue-select-field ue-select-field--input ue-bulk-rename-field">
+                <PencilLine size={13} />
+                <input
+                  value={bulkRenameTemplate}
+                  onChange={(event) => setBulkRenameTemplate(event.target.value)}
+                  placeholder={t("bulkRenameTemplatePlaceholder")}
+                />
+              </label>
+              <label className="ue-select-field ue-bulk-number-field">
+                <span>{t("bulkRenameStart")}</span>
+                <input
+                  type="number"
+                  min={0}
+                  value={bulkRenameStart}
+                  onChange={(event) => setBulkRenameStart(Number(event.target.value) || 0)}
+                />
+              </label>
+              <label className="ue-select-field ue-bulk-number-field">
+                <span>{t("bulkRenamePadding")}</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={8}
+                  value={bulkRenamePadding}
+                  onChange={(event) => setBulkRenamePadding(Number(event.target.value) || 1)}
+                />
+              </label>
+              <button
+                className="ue-secondary-btn"
+                onClick={() => void handleBatchRename()}
+                aria-label={t("bulkRenameApply")}
+                disabled={!pageSelectedPaths.length || !bulkRenameTemplate.trim()}
+              >
+                <PencilLine size={13} />
+                <span>{t("bulkRenameApply")}</span>
+              </button>
+              <button className="ue-secondary-btn" onClick={clearSelection} aria-label={t("bulkClear")}>
+                <Square size={13} />
+              </button>
+              <button
+                className="ue-secondary-btn ue-danger-btn"
+                onClick={() => void handleBatchDelete()}
+                disabled={!pageSelectedPaths.length}
+              >
+                <Trash2 size={13} />
+              </button>
+            </div>
+            <div className="ue-bulkbar-note">
+              <strong>{t("bulkRenameRuleTitle")}</strong>
+              <span>{t("bulkRenameRuleHint")}</span>
+            </div>
+          </div>
+        ) : null}
 
         {isLoading && images.length === 0 ? (
           <div className="ue-gallery-state">
@@ -908,128 +1054,6 @@ export const GalleryWorkspace = ({
           </div>
         ) : null}
 
-        {selectionMode ? (
-          <div className="ue-bulkbar">
-            <div className="ue-bulkbar-info">
-              <strong>{t("bulkSelected", { count: pageSelectedPaths.length })}</strong>
-              <span>{t("bulkSelectionHint")}</span>
-              <span>{selectedSubfolder || t("galleryOutputFolder")}</span>
-            </div>
-
-            <div className="ue-bulkbar-actions">
-              <button className="ue-secondary-btn" onClick={selectAllVisible} aria-label={t("bulkSelectVisible")}>
-                <CheckSquare size={13} />
-                <span>{t("bulkSelectVisible")}</span>
-              </button>
-              <button
-                className="ue-secondary-btn"
-                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { favorite: true })}
-                aria-label={t("bulkFavorite")}
-                disabled={!pageSelectedPaths.length}
-              >
-                <Star size={13} />
-              </button>
-              <button
-                className="ue-secondary-btn"
-                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { favorite: false })}
-                aria-label={t("bulkUnfavorite")}
-                disabled={!pageSelectedPaths.length}
-              >
-                <Heart size={13} />
-              </button>
-              <label className="ue-select-field ue-select-field--input">
-                <Tag size={13} />
-                <input
-                  value={bulkCategory}
-                  onChange={(event) => setBulkCategory(event.target.value)}
-                  placeholder={t("galleryCategoryPlaceholder")}
-                />
-              </label>
-              <button
-                className="ue-secondary-btn"
-                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { category: bulkCategory })}
-                aria-label={t("bulkSetCategory")}
-                disabled={!pageSelectedPaths.length || !bulkCategory.trim()}
-              >
-                <Check size={13} />
-              </button>
-              <label className="ue-select-field ue-select-field--input">
-                <span>{t("bulkMoveTo")}</span>
-                <select
-                  value={bulkTargetSubfolder}
-                  onChange={(event) => setBulkTargetSubfolder(event.target.value)}
-                >
-                  <option value="">{t("galleryOutputFolder")}</option>
-                  {targetFolderOptions
-                    .filter((option) => option !== selectedSubfolder)
-                    .map((option) => (
-                      <option key={option || "__root"} value={option}>
-                        {option || "./"}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <button
-                className="ue-secondary-btn"
-                onClick={() => void handleBatchMove()}
-                aria-label={t("bulkMoveTo")}
-                disabled={!pageSelectedPaths.length || !bulkTargetSubfolder}
-              >
-                <ImageIcon size={13} />
-              </button>
-              <label className="ue-select-field ue-select-field--input ue-bulk-rename-field">
-                <PencilLine size={13} />
-                <input
-                  value={bulkRenameTemplate}
-                  onChange={(event) => setBulkRenameTemplate(event.target.value)}
-                  placeholder={t("bulkRenameTemplatePlaceholder")}
-                />
-              </label>
-              <label className="ue-select-field ue-bulk-number-field">
-                <span>{t("bulkRenameStart")}</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={bulkRenameStart}
-                  onChange={(event) => setBulkRenameStart(Number(event.target.value) || 0)}
-                />
-              </label>
-              <label className="ue-select-field ue-bulk-number-field">
-                <span>{t("bulkRenamePadding")}</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={8}
-                  value={bulkRenamePadding}
-                  onChange={(event) => setBulkRenamePadding(Number(event.target.value) || 1)}
-                />
-              </label>
-              <button
-                className="ue-secondary-btn"
-                onClick={() => void handleBatchRename()}
-                aria-label={t("bulkRenameApply")}
-                disabled={!pageSelectedPaths.length || !bulkRenameTemplate.trim()}
-              >
-                <PencilLine size={13} />
-                <span>{t("bulkRenameApply")}</span>
-              </button>
-              <button className="ue-secondary-btn" onClick={clearSelection} aria-label={t("bulkClear")}>
-                <Square size={13} />
-              </button>
-              <button
-                className="ue-secondary-btn ue-danger-btn"
-                onClick={() => void handleBatchDelete()}
-                disabled={!pageSelectedPaths.length}
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-            <div className="ue-bulkbar-note">
-              <strong>{t("bulkRenameRuleTitle")}</strong>
-              <span>{t("bulkRenameRuleHint")}</span>
-            </div>
-          </div>
-        ) : null}
       </section>
 
       {dragActive ? (
@@ -1116,6 +1140,17 @@ export const GalleryWorkspace = ({
             <span>{t("commonDelete")}</span>
           </button>
         </div>
+      ) : null}
+
+      {showBackToTop ? (
+        <button
+          className="ue-scrolltop-btn"
+          onClick={handleScrollToTop}
+          aria-label={t("galleryBackToTop")}
+          title={t("galleryBackToTop")}
+        >
+          <ChevronUp size={18} />
+        </button>
       ) : null}
     </div>
   );

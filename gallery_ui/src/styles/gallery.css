@@ -307,6 +307,35 @@
   background: var(--ue-red-soft);
 }
 
+.ue-scrolltop-btn {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 18;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
+  border: 1px solid rgba(228, 228, 231, 0.92);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
+  color: var(--ue-ink);
+  box-shadow: 0 16px 28px rgba(24, 24, 27, 0.12);
+  backdrop-filter: blur(18px);
+  cursor: pointer;
+  transition:
+    transform var(--ue-duration-fast) var(--ue-ease),
+    background-color var(--ue-duration-fast) var(--ue-ease),
+    box-shadow var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-scrolltop-btn:hover {
+  transform: translateY(-2px);
+  background: #ffffff;
+  box-shadow: 0 20px 32px rgba(24, 24, 27, 0.16);
+}
+
 @keyframes ue-shimmer {
   0% {
     background-position: 200% 0;
@@ -324,5 +353,10 @@
   .ue-gallery-open {
     opacity: 1;
     transform: translateY(0);
+  }
+
+  .ue-scrolltop-btn {
+    right: 16px;
+    bottom: 16px;
   }
 }

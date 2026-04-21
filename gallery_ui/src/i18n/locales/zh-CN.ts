@@ -53,6 +53,7 @@ const zhCN = {
   galleryDateFrom: "开始",
   galleryDateTo: "结束",
   galleryDateClear: "清空日期",
+  galleryBackToTop: "回到顶部",
   galleryColumns: "每行列数",
   galleryMoreCategories: "更多",
   galleryCategoryBrowse: "浏览全部分类",

@@ -54,6 +54,7 @@ const en = {
   galleryDateFrom: "From",
   galleryDateTo: "To",
   galleryDateClear: "Clear dates",
+  galleryBackToTop: "Back to top",
   galleryColumns: "Columns",
   galleryMoreCategories: "More",
   galleryCategoryBrowse: "Browse categories",
