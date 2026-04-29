@@ -1,5 +1,7 @@
 import { createContext, useContext, useMemo, useState, type ReactNode } from "react";
-import { AlertTriangle, Info, X } from "lucide-react";
+import { AlertTriangle, Check, Info, X } from "lucide-react";
+
+import { useI18n } from "../../i18n/I18nProvider";
 
 type ConfirmTone = "info" | "warning" | "danger";
 
@@ -22,6 +24,7 @@ interface ConfirmContextValue {
 const ConfirmContext = createContext<ConfirmContextValue | null>(null);
 
 export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
+  const { t } = useI18n();
   const [request, setRequest] = useState<ConfirmRequest | null>(null);
 
   const confirm = (options: ConfirmOptions) =>
@@ -46,7 +49,7 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
                 request.resolve(false);
                 setRequest(null);
               }}
-              aria-label="Close dialog"
+              aria-label={t("modalClose")}
             >
               <X size={18} />
             </button>
@@ -66,7 +69,8 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
                   setRequest(null);
                 }}
               >
-                <span>{request.cancelLabel || "Cancel"}</span>
+                <X size={14} />
+                <span>{request.cancelLabel || t("libraryCancel")}</span>
               </button>
               <button
                 className={`ue-primary-btn ${request.tone === "danger" ? "ue-primary-btn--danger" : ""}`}
@@ -75,7 +79,8 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
                   setRequest(null);
                 }}
               >
-                <span>{request.confirmLabel || "Confirm"}</span>
+                <Check size={14} />
+                <span>{request.confirmLabel || t("commonConfirm")}</span>
               </button>
             </div>
           </div>

@@ -13,9 +13,9 @@ import {
   Expand,
   ExternalLink,
   FileJson,
-  Heart,
   Palette,
   PencilLine,
+  Pin,
   Save,
   Shrink,
   Trash2,
@@ -57,7 +57,7 @@ interface DraftStateSnapshot {
   title: string;
   category: string;
   notes: string;
-  favorite: boolean;
+  pinned: boolean;
 }
 
 const MIN_ZOOM = 1;
@@ -93,7 +93,7 @@ export const ImageDetailModal = ({
   const [draftTitle, setDraftTitle] = useState(() => image.title || "");
   const [draftCategory, setDraftCategory] = useState(() => image.category || "");
   const [draftNotes, setDraftNotes] = useState(() => image.notes || "");
-  const [draftFavorite, setDraftFavorite] = useState(() => image.favorite || false);
+  const [draftPinned, setDraftPinned] = useState(() => image.pinned || image.favorite || false);
   const [draftFilename, setDraftFilename] = useState(() => image.filename || "");
   const [isExpandedView, setIsExpandedView] = useState(false);
   const [showInspector, setShowInspector] = useState(false);
@@ -101,7 +101,7 @@ export const ImageDetailModal = ({
     title: image.title || "",
     category: image.category || "",
     notes: image.notes || "",
-    favorite: image.favorite || false,
+    pinned: image.pinned || image.favorite || false,
   });
   const [isSavingState, setIsSavingState] = useState(false);
   const [stateSaveError, setStateSaveError] = useState<string | null>(null);
@@ -126,13 +126,13 @@ export const ImageDetailModal = ({
         setDraftTitle(response.state.title || image.title || "");
         setDraftCategory(response.state.category || image.category || "");
         setDraftNotes(response.state.notes || image.notes || "");
-        setDraftFavorite(response.state.favorite || image.favorite || false);
+        setDraftPinned(response.state.pinned || response.state.favorite || image.pinned || image.favorite || false);
         setDraftFilename(response.filename || image.filename || "");
         setSavedStateSnapshot({
           title: response.state.title || image.title || "",
           category: response.state.category || image.category || "",
           notes: response.state.notes || image.notes || "",
-          favorite: response.state.favorite || image.favorite || false,
+          pinned: response.state.pinned || response.state.favorite || image.pinned || image.favorite || false,
         });
         setStateSaveError(null);
       } catch (fetchError) {
@@ -173,7 +173,7 @@ export const ImageDetailModal = ({
   const totalItems = navigation?.items.length ?? 1;
   const isZoomed = zoomScale > MIN_ZOOM + 0.01;
   const zoomPercentage = Math.round(zoomScale * 100);
-  const favoriteLabel = draftFavorite ? t("galleryUnfavorite") : t("galleryFavorite");
+  const pinLabel = draftPinned ? t("galleryUnpin") : t("galleryPin");
   const getTooltipProps = (label: string) => ({
     title: label,
     "data-tooltip": label,
@@ -184,7 +184,7 @@ export const ImageDetailModal = ({
     draftTitle !== savedStateSnapshot.title ||
     draftCategory !== savedStateSnapshot.category ||
     draftNotes !== savedStateSnapshot.notes ||
-    draftFavorite !== savedStateSnapshot.favorite;
+    draftPinned !== savedStateSnapshot.pinned;
 
   const resetViewport = () => {
     dragStateRef.current = null;
@@ -302,13 +302,13 @@ export const ImageDetailModal = ({
         title: draftTitle,
         category: draftCategory,
         notes: draftNotes,
-        favorite: draftFavorite,
+        pinned: draftPinned,
       });
       setSavedStateSnapshot({
         title: draftTitle,
         category: draftCategory,
         notes: draftNotes,
-        favorite: draftFavorite,
+        pinned: draftPinned,
       });
       pushToast(t("modalSaveState"), "success");
     } catch (saveError) {
@@ -413,9 +413,15 @@ export const ImageDetailModal = ({
                 <h3>{draftFilename || image.filename}</h3>
                 <p>{detailStats.join(" · ")}</p>
               </div>
-              <a href={image.url} target="_blank" rel="noreferrer" className="ue-detail-link">
+              <a
+                href={image.url}
+                target="_blank"
+                rel="noreferrer"
+                className="ue-detail-link ue-detail-link--icon"
+                aria-label={t("modalOpenFull")}
+                title={t("modalOpenFull")}
+              >
                 <ExternalLink size={14} />
-                <span>{t("modalOpenFull")}</span>
               </a>
             </div>
 
@@ -462,12 +468,13 @@ export const ImageDetailModal = ({
                   <span>{t("modalSaveHint")}</span>
                 </div>
                 <button
-                  className="ue-primary-btn"
+                  className="ue-icon-action ue-icon-action--filled"
                   onClick={() => void handleSave()}
                   disabled={!isStateDirty || isSavingState}
+                  aria-label={isSavingState ? t("commonLoading") : t("modalSaveState")}
+                  title={isSavingState ? t("commonLoading") : t("modalSaveState")}
                 >
                   <Save size={14} />
-                  <span>{isSavingState ? t("commonLoading") : t("modalSaveState")}</span>
                 </button>
               </div>
               {stateSaveError ? <div className="ue-inline-error">{stateSaveError}</div> : null}
@@ -589,11 +596,11 @@ export const ImageDetailModal = ({
           ) : null}
           <button
             className="ue-toolbar-btn"
-            onClick={() => setDraftFavorite((current) => !current)}
-            aria-label={favoriteLabel}
-            {...getTooltipProps(favoriteLabel)}
+            onClick={() => setDraftPinned((current) => !current)}
+            aria-label={pinLabel}
+            {...getTooltipProps(pinLabel)}
           >
-            <Heart size={17} fill={draftFavorite ? "currentColor" : "none"} />
+            <Pin size={17} fill={draftPinned ? "currentColor" : "none"} />
           </button>
           <button
             className="ue-toolbar-btn"

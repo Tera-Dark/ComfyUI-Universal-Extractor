@@ -2,7 +2,7 @@ import json
 import os
 import random
 
-from ..constants import DATA_DIR
+from ..constants import DATA_DIR, RUNTIME_STATE_FILENAMES
 
 
 def list_json_files():
@@ -10,7 +10,7 @@ def list_json_files():
     files = [
         filename
         for filename in os.listdir(DATA_DIR)
-        if filename.endswith(".json") and filename != "gallery_state.json"
+        if filename.endswith(".json") and filename not in RUNTIME_STATE_FILENAMES
     ]
     return files if files else ["None"]
 

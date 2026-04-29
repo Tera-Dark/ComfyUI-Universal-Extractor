@@ -2,6 +2,8 @@ import { useMemo, useRef, useState } from "react";
 import {
   BookOpen,
   Boxes,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Download,
   FileJson,
@@ -145,7 +147,7 @@ export const LibraryWorkspace = ({
           post_count: 3200,
           tags: ["artist", "soft-light", "anime"],
           model: "Pony / SDXL",
-          description: "画师条目，优先保留原始标签名，方便生成器与检索一起工作。",
+          description: t("libraryTemplateArtistDescription"),
         },
       },
       {
@@ -157,7 +159,7 @@ export const LibraryWorkspace = ({
           prompt: "pastel lighting, soft bloom, clean lineart, airy composition",
           tags: ["style", "portrait", "pastel"],
           model: "SDXL",
-          description: "风格类条目适合存整段提示词，后续可以直接复制进工作流。",
+          description: t("libraryTemplateStyleDescription"),
         },
       },
       {
@@ -169,7 +171,7 @@ export const LibraryWorkspace = ({
           prompt: "sleepy girl, oversized monster hoodie, cross necklace, wink",
           other_names: ["hoodie girl"],
           tags: ["character", "original", "hoodie"],
-          description: "角色类条目建议把核心外观特征写进 prompt，把俗称放到 other_names。",
+          description: t("libraryTemplateCharacterDescription"),
         },
       },
     ],
@@ -238,7 +240,7 @@ export const LibraryWorkspace = ({
       return entry.prompt;
     }
     if (Array.isArray(entry.other_names) && entry.other_names.length) {
-      return entry.other_names.slice(0, 4).join(" 路 ");
+      return entry.other_names.slice(0, 4).join(" · ");
     }
     if (typeof entry.other_names === "string" && entry.other_names.trim()) {
       return entry.other_names;
@@ -258,17 +260,24 @@ export const LibraryWorkspace = ({
     }
   };
 
-  const prepareImportFile = (file: File | null) => {
+  const prepareImportFile = async (file: File | null) => {
     if (!file) {
       return;
     }
     const isJson = file.name.toLowerCase().endsWith(".json") || file.type.includes("json");
     if (!isJson) {
-      window.alert(t("errorImportLibrary"));
+      pushToast(t("errorImportLibrary"), "error");
       return;
     }
 
-    if (!window.confirm(t("libraryImportConfirmAsk", { name: file.name }))) {
+    const approved = await confirm({
+      title: t("libraryImport"),
+      message: t("libraryImportConfirmAsk", { name: file.name }),
+      tone: "info",
+      confirmLabel: t("libraryImport"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
       return;
     }
 
@@ -322,7 +331,7 @@ export const LibraryWorkspace = ({
           dragDepthRef.current = 0;
           setDragActive(false);
           const file = event.dataTransfer.files?.[0] ?? null;
-          prepareImportFile(file);
+          void prepareImportFile(file);
         }}
       >
         <div className="ue-pane-header">
@@ -345,66 +354,95 @@ export const LibraryWorkspace = ({
               className="ue-hidden-input"
               type="file"
               accept=".json,application/json"
-              onChange={(event) => prepareImportFile(event.target.files?.[0] ?? null)}
+              onChange={(event) => void prepareImportFile(event.target.files?.[0] ?? null)}
             />
-            <button className="ue-secondary-btn" onClick={() => fileInputRef.current?.click()}>
+            <button
+              className="ue-icon-action"
+              onClick={() => fileInputRef.current?.click()}
+              aria-label={t("libraryAddFile")}
+              title={t("libraryAddFile")}
+            >
               <FileUp size={14} />
-              <span>{t("libraryAddFile")}</span>
             </button>
             <button
-              className="ue-secondary-btn"
+              className="ue-icon-action"
               onClick={() => {
                 setPendingImportFile(null);
                 setShowImportModal(true);
               }}
+              aria-label={t("libraryImport")}
+              title={t("libraryImport")}
             >
               <Download size={14} />
-              <span>{t("libraryImport")}</span>
             </button>
-            <button className="ue-secondary-btn" onClick={onRefresh}>
+            <button className="ue-icon-action" onClick={onRefresh} aria-label={t("navRefresh")} title={t("navRefresh")}>
               <RefreshCw size={14} />
-              <span>{t("navRefresh")}</span>
-            </button>
-            <button className="ue-secondary-btn" onClick={onExportLibrary} disabled={!activeLibraryName}>
-              <Download size={14} />
-              <span>{t("libraryExport")}</span>
             </button>
             <button
-              className="ue-secondary-btn"
+              className="ue-icon-action"
+              onClick={onExportLibrary}
+              disabled={!activeLibraryName}
+              aria-label={t("libraryExport")}
+              title={t("libraryExport")}
+            >
+              <Download size={14} />
+            </button>
+            <button
+              className="ue-icon-action"
               onClick={() => openEntryEditor(entryTemplates[0].entry, null)}
               disabled={!activeLibraryName}
+              aria-label={t("libraryStarterTemplate")}
+              title={t("libraryStarterTemplate")}
             >
               <Sparkles size={14} />
-              <span>{t("libraryStarterTemplate")}</span>
             </button>
             <button
-              className="ue-secondary-btn"
+              className="ue-icon-action"
               onClick={() => openEntryEditor({}, null)}
               disabled={!activeLibraryName}
+              aria-label={t("libraryAddEntry")}
+              title={t("libraryAddEntry")}
             >
               <FilePlus2 size={14} />
-              <span>{t("libraryAddEntry")}</span>
             </button>
 
             {isEditing && canUseRawEditor ? (
               <>
-                <button className="ue-secondary-btn" onClick={onFormatEditor}>
+                <button
+                  className="ue-icon-action"
+                  onClick={onFormatEditor}
+                  aria-label={t("libraryFormat")}
+                  title={t("libraryFormat")}
+                >
                   <WandSparkles size={14} />
-                  <span>{t("libraryFormat")}</span>
                 </button>
-                <button className="ue-primary-btn" onClick={onSaveLibrary} disabled={isSubmitting}>
+                <button
+                  className="ue-icon-action ue-icon-action--filled"
+                  onClick={onSaveLibrary}
+                  disabled={isSubmitting}
+                  aria-label={t("librarySave")}
+                  title={t("librarySave")}
+                >
                   <Save size={14} />
-                  <span>{t("librarySave")}</span>
                 </button>
-                <button className="ue-secondary-btn" onClick={onCancelEditing}>
+                <button
+                  className="ue-icon-action"
+                  onClick={onCancelEditing}
+                  aria-label={t("libraryCancel")}
+                  title={t("libraryCancel")}
+                >
                   <X size={14} />
-                  <span>{t("libraryCancel")}</span>
                 </button>
               </>
             ) : canUseRawEditor ? (
-              <button className="ue-secondary-btn" onClick={onStartEditing} disabled={!activeLibraryName}>
+              <button
+                className="ue-icon-action"
+                onClick={onStartEditing}
+                disabled={!activeLibraryName}
+                aria-label={t("libraryEdit")}
+                title={t("libraryEdit")}
+              >
                 <PencilLine size={14} />
-                <span>{t("libraryEdit")}</span>
               </button>
             ) : (
               <span className="ue-editor-status">{t("libraryLargeEditHint")}</span>
@@ -430,7 +468,7 @@ export const LibraryWorkspace = ({
             <div className="ue-validation-list">
               {validationIssues.map((issue, index) => (
                 <p key={`${issue.index}-${issue.field}-${index}`}>
-                  {issue.index !== null ? `#${issue.index + 1}` : t("libraryValidationGlobal")} 路 {issue.message}
+                  {issue.index !== null ? `#${issue.index + 1}` : t("libraryValidationGlobal")} · {issue.message}
                 </p>
               ))}
             </div>
@@ -515,9 +553,13 @@ export const LibraryWorkspace = ({
                 <p>{t("librarySearchHint")}</p>
               </div>
               {searchTerm.trim() ? (
-                <button className="ue-secondary-btn" onClick={onSearchClear}>
+                <button
+                  className="ue-icon-action"
+                  onClick={onSearchClear}
+                  aria-label={t("librarySearchClear")}
+                  title={t("librarySearchClear")}
+                >
                   <X size={14} />
-                  <span>{t("librarySearchClear")}</span>
                 </button>
               ) : null}
             </div>
@@ -684,18 +726,25 @@ export const LibraryWorkspace = ({
               <div className="ue-pagination ue-pagination--library">
                 <div className="ue-pagination-meta">
                   <span>{t("galleryPage", { page, totalPages })}</span>
-                  <i aria-hidden="true">路</i>
+                  <i aria-hidden="true">·</i>
                   <span>{t("commonEntries", { count: totalEntries })}</span>
                 </div>
                 <div className="ue-pagination-actions">
-                  <button disabled={page <= 1} onClick={() => onPageChange(Math.max(1, page - 1))}>
-                    {t("galleryPrevious")}
+                  <button
+                    disabled={page <= 1}
+                    onClick={() => onPageChange(Math.max(1, page - 1))}
+                    aria-label={t("galleryPrevious")}
+                    title={t("galleryPrevious")}
+                  >
+                    <ChevronLeft size={14} />
                   </button>
                   <button
                     disabled={page >= totalPages}
                     onClick={() => onPageChange(Math.min(totalPages, page + 1))}
+                    aria-label={t("galleryNext")}
+                    title={t("galleryNext")}
                   >
-                    {t("galleryNext")}
+                    <ChevronRight size={14} />
                   </button>
                 </div>
               </div>

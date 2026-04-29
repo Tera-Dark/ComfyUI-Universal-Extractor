@@ -13,9 +13,11 @@ from typing import Any
 
 from ..constants import (
     DATA_DIR,
+    GALLERY_SOURCES_FILE,
     IMPORT_IMAGE_SUBFOLDER,
     SUPPORTED_IMAGE_EXTENSIONS,
     SUPPORTED_LIBRARY_EXTENSIONS,
+    RUNTIME_STATE_FILENAMES,
     THUMB_CACHE_DIR,
     TRASH_DIR,
 )
@@ -25,6 +27,7 @@ from ..paths import (
     ensure_unique_path,
     ensure_trash_dir,
     get_comfy_base_dir,
+    get_input_dir,
     get_output_dir,
     load_json,
     load_trash_state,
@@ -36,14 +39,19 @@ from ..paths import (
 from .metadata import build_prompt_summary, extract_artist_prompts, read_image_metadata
 from .state_store import (
     collect_categories,
+    create_board,
+    delete_board,
     extract_image_states,
     extract_image_states_by_prefix,
     get_image_state,
+    get_raw_boards,
     move_image_states,
     remove_image_states,
     remove_image_states_by_prefix,
     rename_image_state,
     restore_image_states,
+    set_image_board_membership,
+    update_board,
     update_image_state,
 )
 
@@ -56,10 +64,366 @@ except ImportError:
 
 
 THUMB_SIZE = 480
-IMAGE_INDEX_CACHE: dict[str, Any] = {"output_dir": None, "built_at": 0.0, "images": [], "subfolders": []}
+IMAGE_REF_SEPARATOR = "::"
+DEFAULT_OUTPUT_SOURCE_ID = "default_output"
+DEFAULT_INPUT_SOURCE_ID = "default_input"
+IMAGE_INDEX_CACHE: dict[str, Any] = {
+    "signature": None,
+    "output_dir": None,
+    "built_at": 0.0,
+    "images": [],
+    "subfolders": [],
+    "sources": [],
+}
 IMAGE_INDEX_LOCK = Lock()
 LIBRARY_CACHE: dict[str, dict[str, Any]] = {}
 LIBRARY_CACHE_LOCK = Lock()
+
+
+def _sanitize_source_id(value: str) -> str:
+    clean = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(value or "").strip())
+    clean = clean.strip("_-").lower()
+    return clean or f"source_{uuid.uuid4().hex[:10]}"
+
+
+def _real_abs(path: str) -> str:
+    return os.path.realpath(os.path.abspath(os.path.expanduser(str(path or "").strip())))
+
+
+def _ensure_within_directory(root_dir: str, full_path: str, label: str = "source") -> str:
+    normalized_root = _real_abs(root_dir)
+    normalized_path = _real_abs(full_path)
+    try:
+        common = os.path.commonpath([normalized_root, normalized_path])
+    except ValueError as error:
+        raise ValueError("invalid path") from error
+
+    if common != normalized_root:
+        raise ValueError(f"path must stay within {label} directory")
+    return normalized_path
+
+
+def make_image_ref(source_id: str, relative_path: str) -> str:
+    normalized_path = normalize_relative_path(relative_path)
+    clean_source_id = _sanitize_source_id(source_id)
+    if clean_source_id == DEFAULT_OUTPUT_SOURCE_ID:
+        return normalized_path
+    return f"{clean_source_id}{IMAGE_REF_SEPARATOR}{normalized_path}"
+
+
+def parse_image_ref(image_ref: str) -> tuple[str, str]:
+    value = str(image_ref or "").strip()
+    if IMAGE_REF_SEPARATOR in value:
+        source_id, relative_path = value.split(IMAGE_REF_SEPARATOR, 1)
+        source_id = _sanitize_source_id(source_id)
+        relative_path = normalize_relative_path(relative_path)
+    else:
+        source_id = DEFAULT_OUTPUT_SOURCE_ID
+        relative_path = normalize_relative_path(value)
+    if not relative_path:
+        raise ValueError("relative_path required")
+    return source_id, relative_path
+
+
+def make_folder_ref(source_id: str, subfolder: str = "") -> str:
+    return f"{_sanitize_source_id(source_id)}{IMAGE_REF_SEPARATOR}{normalize_relative_path(subfolder)}"
+
+
+def parse_folder_ref(folder_ref: str) -> tuple[str, str]:
+    value = str(folder_ref or "").strip()
+    if IMAGE_REF_SEPARATOR in value:
+        source_id, subfolder = value.split(IMAGE_REF_SEPARATOR, 1)
+        return _sanitize_source_id(source_id), normalize_relative_path(subfolder)
+    return DEFAULT_OUTPUT_SOURCE_ID, normalize_relative_path(value)
+
+
+def _default_gallery_sources() -> list[dict[str, Any]]:
+    output_dir = get_output_dir()
+    input_dir = get_input_dir()
+    sources = [
+        {
+            "id": DEFAULT_OUTPUT_SOURCE_ID,
+            "name": "ComfyUI Output",
+            "kind": "output",
+            "path": output_dir,
+            "enabled": True,
+            "writable": True,
+            "recursive": True,
+            "import_target": True,
+            "locked": True,
+        }
+    ]
+    sources.append(
+        {
+            "id": DEFAULT_INPUT_SOURCE_ID,
+            "name": "ComfyUI Input",
+            "kind": "input",
+            "path": input_dir,
+            "enabled": True,
+            "writable": False,
+            "recursive": True,
+            "import_target": False,
+            "locked": True,
+        }
+    )
+    return sources
+
+
+def _source_exists(path: str) -> bool:
+    return bool(path) and os.path.isdir(os.path.expanduser(str(path)))
+
+
+def _normalize_source(raw: dict[str, Any], existing: dict[str, Any] | None = None) -> dict[str, Any]:
+    existing = existing or {}
+    source_id = _sanitize_source_id(raw.get("id") or existing.get("id") or raw.get("name") or "custom")
+    locked = bool(existing.get("locked", raw.get("locked", False)))
+    kind = str(raw.get("kind") or existing.get("kind") or "custom").strip().lower()
+    if kind not in {"output", "input", "custom"}:
+        kind = "custom"
+    path = str(raw.get("path") if "path" in raw else existing.get("path", "")).strip()
+    source = {
+        "id": source_id,
+        "name": str(raw.get("name") or existing.get("name") or source_id).strip(),
+        "kind": kind,
+        "path": path,
+        "enabled": bool(raw.get("enabled", existing.get("enabled", True))),
+        "writable": bool(raw.get("writable", existing.get("writable", False))),
+        "recursive": bool(raw.get("recursive", existing.get("recursive", True))),
+        "import_target": bool(raw.get("import_target", raw.get("importTarget", existing.get("import_target", False)))),
+        "locked": locked,
+    }
+    if locked and existing.get("path"):
+        source["path"] = existing["path"]
+    if not source["name"]:
+        source["name"] = source_id
+    source["exists"] = _source_exists(source["path"])
+    return source
+
+
+def _load_gallery_sources_file() -> list[dict[str, Any]]:
+    ensure_data_dir()
+    data = load_json(GALLERY_SOURCES_FILE, {"sources": []})
+    if isinstance(data, dict):
+        raw_sources = data.get("sources", [])
+    elif isinstance(data, list):
+        raw_sources = data
+    else:
+        raw_sources = []
+    return [item for item in raw_sources if isinstance(item, dict)]
+
+
+def _write_gallery_sources_file(sources: list[dict[str, Any]]):
+    stored_sources = [
+        {key: value for key, value in source.items() if key not in {"exists", "image_count"}}
+        for source in sources
+    ]
+    save_json(GALLERY_SOURCES_FILE, {"sources": stored_sources})
+
+
+def list_gallery_sources() -> list[dict[str, Any]]:
+    defaults = _default_gallery_sources()
+    default_by_id = {source["id"]: source for source in defaults}
+    custom_sources: list[dict[str, Any]] = []
+
+    for raw_source in _load_gallery_sources_file():
+        source_id = _sanitize_source_id(raw_source.get("id") or raw_source.get("name") or "custom")
+        if source_id in default_by_id:
+            default_by_id[source_id] = _normalize_source(raw_source, default_by_id[source_id])
+        else:
+            custom_sources.append(_normalize_source({**raw_source, "id": source_id, "kind": "custom"}))
+
+    sources = [_normalize_source(default_by_id[source["id"]], source) for source in defaults]
+    sources.extend(custom_sources)
+    import_targets = [source for source in sources if source.get("enabled") and source.get("writable") and source.get("import_target")]
+    if not import_targets:
+        for source in sources:
+            if source["id"] == DEFAULT_OUTPUT_SOURCE_ID:
+                source["import_target"] = True
+                break
+    return sources
+
+
+def _source_signature(sources: list[dict[str, Any]]) -> str:
+    payload = [
+        {
+            "id": source.get("id"),
+            "path": _real_abs(source.get("path", "")) if source.get("path") else "",
+            "enabled": bool(source.get("enabled")),
+            "recursive": bool(source.get("recursive", True)),
+        }
+        for source in sources
+    ]
+    return json.dumps(payload, sort_keys=True, ensure_ascii=False)
+
+
+def get_gallery_source(source_id: str) -> dict[str, Any]:
+    normalized_id = _sanitize_source_id(source_id)
+    for source in list_gallery_sources():
+        if source["id"] == normalized_id:
+            return source
+    raise FileNotFoundError("gallery source not found")
+
+
+def save_gallery_source(payload: dict[str, Any]) -> dict[str, Any]:
+    sources = list_gallery_sources()
+    incoming_id = _sanitize_source_id(payload.get("id") or payload.get("name") or "custom")
+    existing = next((source for source in sources if source["id"] == incoming_id), None)
+    source = _normalize_source({**payload, "id": incoming_id}, existing)
+    if not source.get("path"):
+        raise ValueError("source path required")
+
+    if existing:
+        source["locked"] = bool(existing.get("locked", False))
+        if source["locked"]:
+            source["id"] = existing["id"]
+            source["kind"] = existing["kind"]
+            source["path"] = existing["path"]
+            source["name"] = existing["name"]
+        sources = [source if item["id"] == source["id"] else item for item in sources]
+    else:
+        source["kind"] = "custom"
+        source["locked"] = False
+        sources.append(source)
+
+    if source.get("import_target"):
+        for item in sources:
+            if item["id"] != source["id"]:
+                item["import_target"] = False
+
+    _write_gallery_sources_file(sources)
+    invalidate_image_index_cache()
+    return {"ok": True, "source": source, "sources": list_gallery_sources()}
+
+
+def delete_gallery_source(source_id: str) -> dict[str, Any]:
+    normalized_id = _sanitize_source_id(source_id)
+    sources = list_gallery_sources()
+    source = next((item for item in sources if item["id"] == normalized_id), None)
+    if not source:
+        raise FileNotFoundError("gallery source not found")
+    if source.get("locked"):
+        raise ValueError("default sources cannot be deleted")
+    remaining = [item for item in sources if item["id"] != normalized_id]
+    _write_gallery_sources_file(remaining)
+    invalidate_image_index_cache()
+    return {"ok": True, "id": normalized_id, "sources": list_gallery_sources()}
+
+
+def test_gallery_source_path(path: str) -> dict[str, Any]:
+    clean_path = str(path or "").strip()
+    if not clean_path:
+        raise ValueError("source path required")
+    full_path = _real_abs(clean_path)
+    exists = os.path.isdir(full_path)
+    writable = False
+    image_count = 0
+    if exists:
+        writable = os.access(full_path, os.W_OK)
+        try:
+            for entry in os.scandir(full_path):
+                if entry.is_file(follow_symlinks=False) and entry.name.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
+                    image_count += 1
+        except OSError:
+            pass
+    return {"ok": exists, "path": full_path, "exists": exists, "writable": writable, "image_count": image_count}
+
+
+def diagnose_gallery_sources() -> dict[str, Any]:
+    diagnostics: list[dict[str, Any]] = []
+    normalized_paths: dict[str, str] = {}
+    for source in list_gallery_sources():
+        path = source.get("path", "")
+        full_path = _real_abs(path) if path else ""
+        exists = bool(full_path) and os.path.isdir(full_path)
+        readable = bool(exists and os.access(full_path, os.R_OK))
+        writable_actual = bool(exists and os.access(full_path, os.W_OK))
+        image_count = 0
+        directory_count = 0
+        error = ""
+        free_bytes = None
+        total_bytes = None
+        overlaps: list[str] = []
+
+        if exists:
+            try:
+                usage = shutil.disk_usage(full_path)
+                free_bytes = usage.free
+                total_bytes = usage.total
+            except OSError:
+                pass
+            try:
+                if source.get("recursive", True):
+                    for root, dirs, files in os.walk(full_path):
+                        dirs[:] = [directory for directory in dirs if not os.path.islink(os.path.join(root, directory))]
+                        directory_count += len(dirs)
+                        image_count += sum(1 for filename in files if filename.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS))
+                else:
+                    with os.scandir(full_path) as iterator:
+                        for entry in iterator:
+                            if entry.is_dir(follow_symlinks=False):
+                                directory_count += 1
+                            elif entry.is_file(follow_symlinks=False) and entry.name.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
+                                image_count += 1
+            except OSError as scan_error:
+                error = str(scan_error)
+
+        for other_id, other_path in normalized_paths.items():
+            try:
+                if full_path and other_path and os.path.commonpath([full_path, other_path]) in {full_path, other_path}:
+                    overlaps.append(other_id)
+            except ValueError:
+                continue
+        if full_path:
+            normalized_paths[source["id"]] = full_path
+
+        if not exists:
+            status = "missing"
+        elif error:
+            status = "error"
+        elif not readable:
+            status = "unreadable"
+        elif source.get("writable") and not writable_actual:
+            status = "write_blocked"
+        elif overlaps:
+            status = "overlap"
+        else:
+            status = "ok"
+
+        diagnostics.append(
+            {
+                **source,
+                "path": full_path or path,
+                "status": status,
+                "readable": readable,
+                "writable_actual": writable_actual,
+                "configured_writable": bool(source.get("writable")),
+                "image_count": image_count,
+                "directory_count": directory_count,
+                "free_bytes": free_bytes,
+                "total_bytes": total_bytes,
+                "overlaps": overlaps,
+                "error": error,
+            }
+        )
+
+    return {"ok": True, "sources": diagnostics}
+
+
+def image_ref_for_full_path(full_path: str) -> str:
+    normalized_path = _real_abs(full_path)
+    for source in list_gallery_sources():
+        source_path = source.get("path", "")
+        if not source_path:
+            continue
+        try:
+            if os.path.commonpath([_real_abs(source_path), normalized_path]) != _real_abs(source_path):
+                continue
+        except ValueError:
+            continue
+        relative_path = normalize_relative_path(os.path.relpath(normalized_path, _real_abs(source_path)))
+        return make_image_ref(source["id"], relative_path)
+    output_dir = _ensure_output_dir()
+    return normalize_relative_path(os.path.relpath(normalized_path, output_dir))
 
 
 def ensure_trash_storage_dir() -> str:
@@ -151,6 +515,8 @@ def list_trash_items() -> list[dict[str, Any]]:
                     "category": "",
                     "notes": "",
                     "favorite": False,
+                    "pinned": False,
+                    "boards": [],
                 }
             )
         items.append(trash_item)
@@ -202,7 +568,7 @@ def restore_trash_item(item_id: str) -> dict[str, Any]:
     if kind in {"image", "folder"}:
         output_dir = _ensure_output_dir()
         original_path = normalize_relative_path(item.get("original_path", ""))
-        target_path = os.path.join(output_dir, original_path)
+        target_path = _ensure_within_output(output_dir, os.path.join(output_dir, original_path))
         parent_dir = os.path.dirname(target_path)
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
@@ -342,16 +708,7 @@ def _ensure_output_dir() -> str:
 
 
 def _ensure_within_output(output_dir: str, full_path: str) -> str:
-    normalized_output = os.path.abspath(output_dir)
-    normalized_path = os.path.abspath(full_path)
-    try:
-        common = os.path.commonpath([normalized_output, normalized_path])
-    except ValueError as error:
-        raise ValueError("invalid path") from error
-
-    if common != normalized_output:
-        raise ValueError("path must stay within output directory")
-    return normalized_path
+    return _ensure_within_directory(output_dir, full_path, "output")
 
 
 def resolve_subfolder_path(subfolder: str) -> tuple[str, str]:
@@ -361,12 +718,43 @@ def resolve_subfolder_path(subfolder: str) -> tuple[str, str]:
     return normalized_subfolder, full_path
 
 
+def resolve_source_subfolder_path(source_id: str, subfolder: str = "", *, require_writable: bool = False) -> tuple[dict[str, Any], str, str]:
+    source = get_gallery_source(source_id)
+    if not source.get("enabled", True):
+        raise ValueError("gallery source is disabled")
+    if require_writable and not source.get("writable"):
+        raise ValueError("target gallery source is read-only")
+    source_path = source.get("path", "")
+    if not source_path or not os.path.isdir(os.path.expanduser(source_path)):
+        raise FileNotFoundError("gallery source directory not found")
+    normalized_subfolder = normalize_relative_path(subfolder)
+    full_path = _ensure_within_directory(source_path, os.path.join(source_path, normalized_subfolder), source["name"])
+    return source, normalized_subfolder, full_path
+
+
+def resolve_image_path(relative_path: str) -> tuple[str, str]:
+    source_id, source_relative_path = parse_image_ref(relative_path)
+    source = get_gallery_source(source_id)
+    if not source.get("enabled", True):
+        raise ValueError("gallery source is disabled")
+    source_path = source.get("path", "")
+    if not source_path or not os.path.isdir(os.path.expanduser(source_path)):
+        raise FileNotFoundError("gallery source directory not found")
+    full_path = _ensure_within_directory(source_path, os.path.join(source_path, source_relative_path), source["name"])
+    return source_path, full_path
+
+
 def build_view_url(relative_path: str) -> tuple[str, str]:
     import urllib.parse
 
-    normalized = normalize_relative_path(relative_path)
-    filename = os.path.basename(normalized)
-    subfolder = to_posix(os.path.dirname(normalized)).strip(".")
+    source_id, source_relative_path = parse_image_ref(relative_path)
+    image_ref = make_image_ref(source_id, source_relative_path)
+    filename = os.path.basename(source_relative_path)
+    subfolder = to_posix(os.path.dirname(source_relative_path)).strip(".")
+    if source_id != DEFAULT_OUTPUT_SOURCE_ID:
+        params = urllib.parse.urlencode({"relative_path": image_ref})
+        return f"/universal_gallery/api/image-file?{params}", subfolder
+
     params: dict[str, str] = {"filename": filename, "type": "output"}
     if subfolder:
         params["subfolder"] = subfolder
@@ -376,7 +764,9 @@ def build_view_url(relative_path: str) -> tuple[str, str]:
 def build_thumb_url(relative_path: str) -> str:
     import urllib.parse
 
-    params = urllib.parse.urlencode({"relative_path": normalize_relative_path(relative_path), "size": str(THUMB_SIZE)})
+    source_id, source_relative_path = parse_image_ref(relative_path)
+    image_ref = make_image_ref(source_id, source_relative_path)
+    params = urllib.parse.urlencode({"relative_path": image_ref, "size": str(THUMB_SIZE)})
     return f"/universal_gallery/api/thumb?{params}"
 
 
@@ -384,84 +774,150 @@ def invalidate_image_index_cache():
     with IMAGE_INDEX_LOCK:
         IMAGE_INDEX_CACHE["images"] = []
         IMAGE_INDEX_CACHE["subfolders"] = []
+        IMAGE_INDEX_CACHE["sources"] = []
         IMAGE_INDEX_CACHE["built_at"] = 0.0
         IMAGE_INDEX_CACHE["output_dir"] = None
+        IMAGE_INDEX_CACHE["signature"] = None
 
 
-def _build_image_index(output_dir: str) -> dict[str, Any]:
+def _build_image_index(sources: list[dict[str, Any]]) -> dict[str, Any]:
     images: list[dict[str, Any]] = []
     subfolders = set()
-    stack = [output_dir]
+    source_counts: dict[str, int] = {source["id"]: 0 for source in sources}
 
-    while stack:
-      current_dir = stack.pop()
-      try:
-          with os.scandir(current_dir) as iterator:
-              entries = list(iterator)
-      except FileNotFoundError:
-          continue
+    for source in sources:
+        if not source.get("enabled", True) or not source.get("exists"):
+            continue
+        source_root = source.get("path", "")
+        if not source_root:
+            continue
+        stack = [source_root]
 
-      for entry in entries:
-          if entry.is_dir(follow_symlinks=False):
-              stack.append(entry.path)
-              continue
+        while stack:
+            current_dir = stack.pop()
+            try:
+                with os.scandir(current_dir) as iterator:
+                    entries = list(iterator)
+            except (FileNotFoundError, PermissionError, OSError):
+                continue
 
-          if not entry.is_file(follow_symlinks=False) or not entry.name.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
-              continue
+            for entry in entries:
+                if entry.is_dir(follow_symlinks=False):
+                    if source.get("recursive", True):
+                        stack.append(entry.path)
+                    continue
 
-          try:
-              stat = entry.stat()
-          except FileNotFoundError:
-              continue
+                if not entry.is_file(follow_symlinks=False) or not entry.name.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
+                    continue
 
-          relative_path = normalize_relative_path(os.path.relpath(entry.path, output_dir))
-          relative_dir = normalize_relative_path(os.path.dirname(relative_path))
-          if relative_dir:
-              parts = [part for part in relative_dir.split("/") if part]
-              for index in range(len(parts)):
-                  subfolders.add("/".join(parts[: index + 1]))
+                try:
+                    stat = entry.stat()
+                except FileNotFoundError:
+                    continue
 
-          original_url, resolved_subfolder = build_view_url(relative_path)
-          images.append(
-              {
-                  "filename": entry.name,
-                  "relative_path": relative_path,
-                  "relative_dir": relative_dir.lower(),
-                  "subfolder": resolved_subfolder,
-                  "url": original_url,
-                  "original_url": original_url,
-                  "thumb_url": build_thumb_url(relative_path),
-                  "size": stat.st_size,
-                  "created_at": int(stat.st_ctime),
-              }
-          )
+                relative_path = normalize_relative_path(os.path.relpath(entry.path, source_root))
+                image_ref = make_image_ref(source["id"], relative_path)
+                relative_dir = normalize_relative_path(os.path.dirname(relative_path))
+                display_dir = relative_dir
+                subfolder_ref = relative_dir
+                if source["id"] != DEFAULT_OUTPUT_SOURCE_ID:
+                    subfolder_ref = f'{source["id"]}{IMAGE_REF_SEPARATOR}{relative_dir}' if relative_dir else source["id"]
+                if relative_dir:
+                    parts = [part for part in relative_dir.split("/") if part]
+                    for index in range(len(parts)):
+                        folder_path = "/".join(parts[: index + 1])
+                        if source["id"] == DEFAULT_OUTPUT_SOURCE_ID:
+                            subfolders.add(folder_path)
+                        else:
+                            subfolders.add(f'{source["id"]}{IMAGE_REF_SEPARATOR}{folder_path}')
+
+                original_url, resolved_subfolder = build_view_url(image_ref)
+                source_counts[source["id"]] = source_counts.get(source["id"], 0) + 1
+                images.append(
+                    {
+                        "filename": entry.name,
+                        "relative_path": image_ref,
+                        "source_id": source["id"],
+                        "source_name": source["name"],
+                        "source_kind": source["kind"],
+                        "source_path": source["path"],
+                        "source_relative_path": relative_path,
+                        "relative_dir": relative_dir.lower(),
+                        "subfolder": subfolder_ref if relative_dir or source["id"] != DEFAULT_OUTPUT_SOURCE_ID else resolved_subfolder,
+                        "display_subfolder": display_dir,
+                        "url": original_url,
+                        "original_url": original_url,
+                        "thumb_url": build_thumb_url(image_ref),
+                        "size": stat.st_size,
+                        "created_at": int(stat.st_ctime),
+                    }
+                )
 
     images.sort(key=lambda item: item["created_at"], reverse=True)
+    indexed_sources = [{**source, "image_count": source_counts.get(source["id"], 0)} for source in sources]
     return {
-        "output_dir": output_dir,
+        "signature": _source_signature(sources),
+        "output_dir": get_output_dir(),
         "images": images,
         "subfolders": sorted(subfolders, key=lambda value: value.lower()),
+        "sources": indexed_sources,
         "built_at": time.time(),
     }
 
 
+def build_move_target_options(image_index: dict[str, Any]) -> list[dict[str, str]]:
+    sources = image_index.get("sources", [])
+    options: list[dict[str, str]] = []
+    for source in sources:
+        if not source.get("enabled") or not source.get("exists") or not source.get("writable"):
+            continue
+        source_id = source["id"]
+        source_name = source["name"]
+        options.append(
+            {
+                "value": make_folder_ref(source_id, ""),
+                "source_id": source_id,
+                "source_name": source_name,
+                "subfolder": "",
+                "label": f"{source_name} / ./",
+            }
+        )
+        for subfolder in image_index.get("subfolders", []):
+            folder_source_id, folder_relative = parse_folder_ref(subfolder)
+            if folder_source_id != source_id or not folder_relative:
+                continue
+            options.append(
+                {
+                    "value": make_folder_ref(source_id, folder_relative),
+                    "source_id": source_id,
+                    "source_name": source_name,
+                    "subfolder": folder_relative,
+                    "label": f"{source_name} / {folder_relative}",
+                }
+            )
+    return options
+
+
 def get_image_index(force_refresh: bool = False) -> dict[str, Any]:
-    output_dir = _ensure_output_dir()
+    sources = list_gallery_sources()
+    signature = _source_signature(sources)
 
     with IMAGE_INDEX_LOCK:
         should_rebuild = (
             force_refresh
-            or IMAGE_INDEX_CACHE["output_dir"] != output_dir
+            or IMAGE_INDEX_CACHE["signature"] != signature
             or not IMAGE_INDEX_CACHE["images"]
         )
 
         if should_rebuild:
-            IMAGE_INDEX_CACHE.update(_build_image_index(output_dir))
+            IMAGE_INDEX_CACHE.update(_build_image_index(sources))
 
         return {
+            "signature": IMAGE_INDEX_CACHE["signature"],
             "output_dir": IMAGE_INDEX_CACHE["output_dir"],
             "images": list(IMAGE_INDEX_CACHE["images"]),
             "subfolders": list(IMAGE_INDEX_CACHE["subfolders"]),
+            "sources": list(IMAGE_INDEX_CACHE["sources"]),
             "built_at": IMAGE_INDEX_CACHE["built_at"],
         }
 
@@ -476,6 +932,7 @@ def list_images(
     search: str = "",
     category: str = "",
     subfolder: str = "",
+    board_id: str = "",
     date_from: str = "",
     date_to: str = "",
     favorites_only: bool = False,
@@ -483,10 +940,14 @@ def list_images(
     sort_order: str = "desc",
     force_refresh: bool = False,
 ) -> list[dict]:
-    output_dir = _ensure_output_dir()
     normalized_search = search.strip().lower()
     normalized_category = category.strip().lower()
     normalized_subfolder = normalize_relative_path(subfolder).lower()
+    filter_source_id = ""
+    filter_relative_dir = normalized_subfolder
+    if IMAGE_REF_SEPARATOR in normalized_subfolder:
+        filter_source_id, filter_relative_dir = normalized_subfolder.split(IMAGE_REF_SEPARATOR, 1)
+    normalized_board_id = str(board_id or "").strip()
     date_from_ts = None
     date_to_ts = None
 
@@ -514,16 +975,21 @@ def list_images(
             continue
         if normalized_category and normalized_category != str(image_state.get("category", "")).strip().lower():
             continue
-        if normalized_subfolder and not (
-            indexed_image["relative_dir"] == normalized_subfolder
-            or indexed_image["relative_dir"].startswith(f"{normalized_subfolder}/")
-        ):
+        if normalized_subfolder:
+            if filter_source_id and indexed_image.get("source_id", "").lower() != filter_source_id:
+                continue
+            if filter_relative_dir and not (
+                indexed_image["relative_dir"] == filter_relative_dir
+                or indexed_image["relative_dir"].startswith(f"{filter_relative_dir}/")
+            ):
+                continue
+        if normalized_board_id and normalized_board_id not in image_state.get("boards", []):
             continue
         if date_from_ts is not None and indexed_image["created_at"] < date_from_ts:
             continue
         if date_to_ts is not None and indexed_image["created_at"] >= date_to_ts:
             continue
-        if favorites_only and not image_state.get("favorite", False):
+        if favorites_only and not image_state.get("pinned", image_state.get("favorite", False)):
             continue
 
         images.append({**indexed_image, **image_state})
@@ -539,11 +1005,99 @@ def list_images(
     return images
 
 
+def _board_cover_payload(relative_path: str) -> dict[str, str] | None:
+    if not relative_path:
+        return None
+    try:
+        _, full_path = resolve_image_path(relative_path)
+    except (FileNotFoundError, ValueError):
+        return None
+    if not os.path.exists(full_path):
+        return None
+    original_url, _ = build_view_url(relative_path)
+    return {
+        "relative_path": normalize_relative_path(relative_path),
+        "url": original_url,
+        "thumb_url": build_thumb_url(relative_path),
+    }
+
+
+def list_boards(force_refresh: bool = False) -> list[dict[str, Any]]:
+    boards = get_raw_boards()
+    indexed_images = get_image_index(force_refresh=force_refresh)["images"]
+    board_counts: dict[str, int] = {board_id: 0 for board_id in boards}
+    first_cover_by_board: dict[str, str] = {}
+
+    for indexed_image in indexed_images:
+        relative_path = indexed_image["relative_path"]
+        image_state = get_image_state(relative_path)
+        for board_id in image_state.get("boards", []):
+            if board_id not in boards:
+                continue
+            board_counts[board_id] = board_counts.get(board_id, 0) + 1
+            first_cover_by_board.setdefault(board_id, relative_path)
+
+    summaries = []
+    for board_id, board in boards.items():
+        preferred_cover = board.get("cover") or first_cover_by_board.get(board_id, "")
+        cover = _board_cover_payload(preferred_cover)
+        summaries.append(
+            {
+                **board,
+                "count": board_counts.get(board_id, 0),
+                "cover_image": cover,
+            }
+        )
+
+    summaries.sort(key=lambda item: (item.get("updated_at") or 0, item.get("name", "").lower()), reverse=True)
+    return summaries
+
+
+def create_gallery_board(name: str, description: str = "") -> dict[str, Any]:
+    board = create_board(name, description)
+    return {"ok": True, "board": {**board, "count": 0, "cover_image": None}, "boards": list_boards()}
+
+
+def update_gallery_board(board_id: str, updates: dict[str, Any]) -> dict[str, Any]:
+    board = update_board(board_id, updates)
+    return {"ok": True, "board": board, "boards": list_boards()}
+
+
+def delete_gallery_board(board_id: str) -> dict[str, Any]:
+    categories = delete_board(board_id)
+    return {"ok": True, "id": board_id, "boards": list_boards(), "categories": categories}
+
+
+def update_board_images(board_id: str, relative_paths: list[str], pinned: bool = True) -> dict[str, Any]:
+    normalized_paths = [normalize_relative_path(path) for path in relative_paths if str(path).strip()]
+    if not normalized_paths:
+        raise ValueError("relative_paths required")
+
+    for relative_path in normalized_paths:
+        _, full_path = resolve_image_path(relative_path)
+        if not os.path.exists(full_path):
+            raise FileNotFoundError(f"image not found: {relative_path}")
+
+    updated, categories = set_image_board_membership(normalized_paths, board_id, pinned=pinned)
+    return {
+        "ok": True,
+        "updated": updated,
+        "boards": list_boards(),
+        "categories": categories,
+    }
+
+
 def get_gallery_context(force_refresh: bool = False) -> dict:
     output_dir = get_output_dir()
     base_dir = get_comfy_base_dir()
     import_dir = os.path.join(output_dir, IMPORT_IMAGE_SUBFOLDER) if output_dir else ""
-    subfolders = collect_subfolders(output_dir, force_refresh=force_refresh) if output_dir else []
+    image_index = get_image_index(force_refresh=force_refresh)
+    subfolders = image_index["subfolders"]
+    pinned_count = sum(
+        1
+        for indexed_image in image_index["images"]
+        if get_image_state(indexed_image["relative_path"]).get("pinned", False)
+    )
 
     return {
         "base_dir": base_dir,
@@ -553,22 +1107,25 @@ def get_gallery_context(force_refresh: bool = False) -> dict:
         "import_image_target_relative": build_relative_display(import_dir, base_dir) if import_dir else "",
         "categories": collect_categories(),
         "subfolders": subfolders,
+        "move_targets": build_move_target_options(image_index),
+        "sources": image_index.get("sources", list_gallery_sources()),
+        "active_source_count": sum(1 for source in image_index.get("sources", []) if source.get("enabled") and source.get("exists")),
+        "pinned_count": pinned_count,
+        "boards": list_boards(force_refresh=force_refresh),
     }
 
 
-def resolve_image_path(relative_path: str) -> tuple[str, str]:
-    output_dir = get_output_dir()
-    return output_dir, os.path.join(output_dir, normalize_relative_path(relative_path))
-
-
 def get_image_metadata(relative_path: str) -> dict:
-    normalized = normalize_relative_path(relative_path)
+    source_id, source_relative_path = parse_image_ref(relative_path)
+    normalized = make_image_ref(source_id, source_relative_path)
     _, full_path = resolve_image_path(normalized)
     metadata = read_image_metadata(full_path)
     workflow = metadata.get("workflow")
     return {
-        "filename": os.path.basename(normalized),
+        "filename": os.path.basename(source_relative_path),
         "relative_path": normalized,
+        "source_id": source_id,
+        "source_relative_path": source_relative_path,
         "metadata": metadata,
         "workflow": workflow if isinstance(workflow, dict) else None,
         "artist_prompts": extract_artist_prompts(metadata),
@@ -583,7 +1140,8 @@ def ensure_thumb_cache_dir():
 
 
 def get_thumbnail_path(relative_path: str, size: int = THUMB_SIZE) -> tuple[str, str]:
-    normalized = normalize_relative_path(relative_path)
+    source_id, source_relative_path = parse_image_ref(relative_path)
+    normalized = make_image_ref(source_id, source_relative_path)
     _, full_path = resolve_image_path(normalized)
     if not os.path.exists(full_path):
         raise FileNotFoundError("image not found")
@@ -617,7 +1175,7 @@ def list_libraries() -> list[dict]:
     ensure_data_dir()
     libraries = []
     for filename in sorted(os.listdir(DATA_DIR)):
-        if filename == "gallery_state.json" or not filename.endswith(".json"):
+        if filename in RUNTIME_STATE_FILENAMES or not filename.endswith(".json"):
             continue
         full_path = os.path.join(DATA_DIR, filename)
         data = load_json(full_path, [])
@@ -902,52 +1460,81 @@ def delete_library(name: str):
     invalidate_library_cache(name)
 
 
-def import_files_from_parts(parts) -> dict:
-    output_dir = get_output_dir()
-    image_import_dir = os.path.join(output_dir, IMPORT_IMAGE_SUBFOLDER)
-    os.makedirs(image_import_dir, exist_ok=True)
+def get_import_target_for_filename(
+    filename: str,
+    target_source_id: str = "",
+    target_subfolder: str = IMPORT_IMAGE_SUBFOLDER,
+) -> tuple[str | None, str | None, dict[str, str] | None]:
     ensure_data_dir()
 
+    original_name = os.path.basename(filename)
+    extension = os.path.splitext(original_name)[1].lower()
+
+    if extension in SUPPORTED_IMAGE_EXTENSIONS:
+        sources = list_gallery_sources()
+        target_source = None
+        if target_source_id:
+            normalized_target_source_id = _sanitize_source_id(target_source_id)
+            target_source = next((source for source in sources if source["id"] == normalized_target_source_id), None)
+        if target_source is None:
+            target_source = next(
+                (source for source in sources if source.get("enabled") and source.get("writable") and source.get("import_target")),
+                None,
+            )
+        if target_source is None:
+            target_source = next((source for source in sources if source["id"] == DEFAULT_OUTPUT_SOURCE_ID), None)
+        if target_source is None or not target_source.get("path"):
+            raise FileNotFoundError("import target not found")
+        if not target_source.get("enabled"):
+            raise ValueError("import target source is disabled")
+        if not target_source.get("writable"):
+            raise ValueError("import target source is read-only")
+        normalized_target_subfolder = normalize_relative_path(target_subfolder or IMPORT_IMAGE_SUBFOLDER)
+        image_import_dir = os.path.join(target_source["path"], normalized_target_subfolder)
+        image_import_dir = _ensure_within_directory(target_source["path"], image_import_dir, target_source["name"])
+        os.makedirs(image_import_dir, exist_ok=True)
+        return "image", ensure_unique_path(image_import_dir, original_name), None
+    if extension in SUPPORTED_LIBRARY_EXTENSIONS:
+        return "library", ensure_unique_path(DATA_DIR, original_name), None
+
+    return None, None, {"filename": original_name, "reason": "unsupported file type"}
+
+
+def build_import_result(imported_images: list[dict], imported_libraries: list[dict], skipped: list[dict]) -> dict:
+    invalidate_image_index_cache()
+    return {
+        "ok": True,
+        "imported_images": imported_images,
+        "imported_libraries": imported_libraries,
+        "skipped": skipped,
+    }
+
+
+def import_files_from_parts(parts) -> dict:
+    # Kept for compatibility with older callers; aiohttp routes stream parts directly.
     imported_images = []
     imported_libraries = []
     skipped = []
 
     for part in parts:
-        original_name = os.path.basename(part.filename)
-        extension = os.path.splitext(original_name)[1].lower()
-
-        if extension in SUPPORTED_IMAGE_EXTENSIONS:
-            target_path = ensure_unique_path(image_import_dir, original_name)
-        elif extension in SUPPORTED_LIBRARY_EXTENSIONS:
-            target_path = ensure_unique_path(DATA_DIR, original_name)
-        else:
-            skipped.append({"filename": original_name, "reason": "unsupported file type"})
+        kind, target_path, skipped_item = get_import_target_for_filename(part.filename)
+        if skipped_item:
+            skipped.append(skipped_item)
             continue
 
         yield ("write", part, target_path)
 
-        if extension in SUPPORTED_IMAGE_EXTENSIONS:
+        if kind == "image":
             imported_images.append(
                 {
                     "filename": os.path.basename(target_path),
-                    "relative_path": normalize_relative_path(
-                        os.path.join(IMPORT_IMAGE_SUBFOLDER, os.path.basename(target_path))
-                    ),
+                    "relative_path": image_ref_for_full_path(target_path),
                 }
             )
         else:
             imported_libraries.append({"filename": os.path.basename(target_path)})
 
-    invalidate_image_index_cache()
-    yield (
-        "result",
-        {
-            "ok": True,
-            "imported_images": imported_images,
-            "imported_libraries": imported_libraries,
-            "skipped": skipped,
-        },
-    )
+    yield ("result", build_import_result(imported_images, imported_libraries, skipped))
 
 
 def persist_image_state(relative_path: str, updates: dict) -> dict:
@@ -956,7 +1543,11 @@ def persist_image_state(relative_path: str, updates: dict) -> dict:
 
 
 def rename_image(relative_path: str, new_filename: str) -> dict:
-    normalized = normalize_relative_path(relative_path)
+    source_id, source_relative_path = parse_image_ref(relative_path)
+    normalized = make_image_ref(source_id, source_relative_path)
+    source = get_gallery_source(source_id)
+    if not source.get("writable"):
+        raise ValueError("gallery source is read-only")
     output_dir, full_path = resolve_image_path(normalized)
     if not os.path.exists(full_path):
         raise FileNotFoundError("image not found")
@@ -965,12 +1556,13 @@ def rename_image(relative_path: str, new_filename: str) -> dict:
     if not clean_name:
         raise ValueError("new filename required")
 
-    original_ext = os.path.splitext(normalized)[1]
+    original_ext = os.path.splitext(source_relative_path)[1]
     if not os.path.splitext(clean_name)[1]:
         clean_name = f"{clean_name}{original_ext}"
 
-    target_relative = normalize_relative_path(os.path.join(os.path.dirname(normalized), clean_name))
-    target_full_path = os.path.join(output_dir, target_relative)
+    target_source_relative = normalize_relative_path(os.path.join(os.path.dirname(source_relative_path), clean_name))
+    target_relative = make_image_ref(source_id, target_source_relative)
+    target_full_path = _ensure_within_directory(output_dir, os.path.join(output_dir, target_source_relative), source["name"])
     if os.path.exists(target_full_path):
         raise FileExistsError("target filename already exists")
 
@@ -983,8 +1575,13 @@ def rename_image(relative_path: str, new_filename: str) -> dict:
     return {
         "ok": True,
         "image": {
-            "filename": os.path.basename(target_relative),
+            "filename": os.path.basename(target_source_relative),
             "relative_path": target_relative,
+            "source_id": source_id,
+            "source_name": source["name"],
+            "source_kind": source["kind"],
+            "source_path": source["path"],
+            "source_relative_path": target_source_relative,
             "subfolder": subfolder,
             "url": url,
             "original_url": url,
@@ -1011,23 +1608,38 @@ def batch_rename_images(
     if not clean_template:
         raise ValueError("template required")
 
-    output_dir = _ensure_output_dir()
     padding = max(1, min(8, int(padding)))
     start_number = max(0, int(start_number))
     current_page = max(1, int(current_page))
 
-    source_paths: list[tuple[str, str, str]] = []
-    selected_set = {normalize_relative_path(path) for path in relative_paths}
+    source_paths: list[tuple[str, str, str, str]] = []
+    selected_set = set()
+    source_id = ""
+    source_root = ""
+    source_meta: dict[str, Any] | None = None
 
     for normalized in relative_paths:
-        normalized_source = normalize_relative_path(normalized)
+        current_source_id, source_relative_path = parse_image_ref(normalized)
+        if source_id and current_source_id != source_id:
+            raise ValueError("batch rename only supports one source at a time")
+        source_id = current_source_id
+        source_meta = get_gallery_source(source_id)
+        if not source_meta.get("writable"):
+            raise ValueError("gallery source is read-only")
+        normalized_source = make_image_ref(source_id, source_relative_path)
+        selected_set.add(normalized_source)
         _, full_path = resolve_image_path(normalized_source)
+        source_root = os.path.dirname(full_path[: -len(source_relative_path)]).rstrip("\\/") if not source_root else source_root
         if not os.path.exists(full_path):
             raise FileNotFoundError(f"image not found: {normalized_source}")
 
-        filename = os.path.basename(normalized_source)
+        filename = os.path.basename(source_relative_path)
         stem, ext = os.path.splitext(filename)
-        source_paths.append((normalized_source, stem, ext))
+        source_paths.append((normalized_source, source_relative_path, stem, ext))
+
+    if not source_meta:
+        raise ValueError("relative_paths required")
+    source_root = source_meta["path"]
 
     def build_target_name(original_name: str, index: int, extension: str) -> str:
         serial = str(start_number + index).zfill(padding)
@@ -1045,34 +1657,40 @@ def batch_rename_images(
     target_mapping: dict[str, str] = {}
     seen_targets: set[str] = set()
 
-    for index, (source_relative, original_stem, extension) in enumerate(source_paths):
+    for index, (source_relative, source_relative_path, original_stem, extension) in enumerate(source_paths):
         next_filename = build_target_name(original_stem, index, extension)
-        target_relative = normalize_relative_path(os.path.join(os.path.dirname(source_relative), next_filename))
+        target_source_relative = normalize_relative_path(os.path.join(os.path.dirname(source_relative_path), next_filename))
+        target_relative = make_image_ref(source_id, target_source_relative)
 
         if target_relative in seen_targets:
             raise FileExistsError(f"duplicate target filename: {next_filename}")
         seen_targets.add(target_relative)
 
-        target_full_path = os.path.join(output_dir, target_relative)
+        target_full_path = _ensure_within_directory(source_root, os.path.join(source_root, target_source_relative), source_meta["name"])
         if os.path.exists(target_full_path) and target_relative not in selected_set:
             raise FileExistsError(f"target filename already exists: {next_filename}")
 
         target_mapping[source_relative] = target_relative
 
     temporary_mapping: dict[str, str] = {}
-    for source_relative, _, extension in source_paths:
+    for source_relative, source_relative_path, _, extension in source_paths:
         temp_filename = f".ue-rename-{uuid.uuid4().hex}{extension}"
-        temp_relative = normalize_relative_path(os.path.join(os.path.dirname(source_relative), temp_filename))
+        temp_source_relative = normalize_relative_path(os.path.join(os.path.dirname(source_relative_path), temp_filename))
+        temp_relative = make_image_ref(source_id, temp_source_relative)
         temporary_mapping[source_relative] = temp_relative
-        os.rename(os.path.join(output_dir, source_relative), os.path.join(output_dir, temp_relative))
+        os.rename(os.path.join(source_root, source_relative_path), os.path.join(source_root, temp_source_relative))
 
     try:
         for source_relative, temp_relative in temporary_mapping.items():
-          os.rename(os.path.join(output_dir, temp_relative), os.path.join(output_dir, target_mapping[source_relative]))
+            _, temp_source_relative = parse_image_ref(temp_relative)
+            _, target_source_relative = parse_image_ref(target_mapping[source_relative])
+            os.rename(os.path.join(source_root, temp_source_relative), os.path.join(source_root, target_source_relative))
     except Exception:
         for source_relative, temp_relative in temporary_mapping.items():
-            temp_full_path = os.path.join(output_dir, temp_relative)
-            source_full_path = os.path.join(output_dir, source_relative)
+            _, temp_source_relative = parse_image_ref(temp_relative)
+            _, source_relative_path = parse_image_ref(source_relative)
+            temp_full_path = os.path.join(source_root, temp_source_relative)
+            source_full_path = os.path.join(source_root, source_relative_path)
             if os.path.exists(temp_full_path) and not os.path.exists(source_full_path):
                 os.rename(temp_full_path, source_full_path)
         raise
@@ -1165,25 +1783,38 @@ def merge_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any]
     }
 
 
-def move_images(relative_paths: list[str], target_subfolder: str) -> dict[str, Any]:
-    normalized_target, target_full_path = resolve_subfolder_path(target_subfolder)
+def move_images(relative_paths: list[str], target_subfolder: str, target_source_id: str = "") -> dict[str, Any]:
+    parsed_target_source_id, parsed_target_subfolder = parse_folder_ref(target_subfolder)
+    target_source_id = _sanitize_source_id(target_source_id or parsed_target_source_id)
+    target_subfolder = parsed_target_subfolder
+    target_source, normalized_target, target_full_path = resolve_source_subfolder_path(
+        target_source_id,
+        target_subfolder,
+        require_writable=True,
+    )
     os.makedirs(target_full_path, exist_ok=True)
 
     moved: list[str] = []
     missing: list[str] = []
+    blocked: list[str] = []
     path_mapping: dict[str, str] = {}
 
-    output_dir = _ensure_output_dir()
     for relative_path in relative_paths:
-        normalized_source = normalize_relative_path(relative_path)
+        source_id, source_relative_path = parse_image_ref(relative_path)
+        source = get_gallery_source(source_id)
+        if not source.get("writable"):
+            blocked.append(make_image_ref(source_id, source_relative_path))
+            continue
+        normalized_source = make_image_ref(source_id, source_relative_path)
         _, source_full_path = resolve_image_path(normalized_source)
         if not os.path.exists(source_full_path):
             missing.append(normalized_source)
             continue
 
-        destination_file = ensure_unique_path(target_full_path, os.path.basename(normalized_source))
+        destination_file = ensure_unique_path(target_full_path, os.path.basename(source_relative_path))
         shutil.move(source_full_path, destination_file)
-        destination_relative = normalize_relative_path(os.path.relpath(destination_file, output_dir))
+        destination_source_relative = normalize_relative_path(os.path.relpath(destination_file, target_source["path"]))
+        destination_relative = make_image_ref(target_source["id"], destination_source_relative)
         path_mapping[normalized_source] = destination_relative
         moved.append(destination_relative)
 
@@ -1193,31 +1824,39 @@ def move_images(relative_paths: list[str], target_subfolder: str) -> dict[str, A
         "ok": True,
         "moved": moved,
         "missing": missing,
+        "blocked": blocked,
         "categories": categories,
-        "subfolders": collect_subfolders(output_dir),
+        "subfolders": get_image_index(force_refresh=True)["subfolders"],
+        "target_source_id": target_source["id"],
+        "target_subfolder": normalized_target,
     }
 
 
 def delete_images(relative_paths: list[str]) -> dict:
     deleted = []
     missing = []
-    output_dir = get_output_dir()
-    state_snapshot, categories = extract_image_states(relative_paths)
 
     for relative_path in relative_paths:
-        normalized = normalize_relative_path(relative_path)
+        source_id, source_relative_path = parse_image_ref(relative_path)
+        source = get_gallery_source(source_id)
+        normalized = make_image_ref(source_id, source_relative_path)
+        if not source.get("writable"):
+            missing.append(normalized)
+            continue
         _, full_path = resolve_image_path(normalized)
         if os.path.exists(full_path):
+            image_state = get_image_state(normalized)
             move_path_to_trash(
                 full_path=full_path,
                 kind="image",
                 original_path=normalized,
-                state_snapshot={normalized: state_snapshot.get(normalized, {})} if normalized in state_snapshot else {},
+                state_snapshot={normalized: image_state},
             )
             deleted.append(normalized)
         else:
             missing.append(normalized)
 
+    categories = remove_image_states(deleted) if deleted else collect_categories()
     invalidate_image_index_cache()
     return {"ok": True, "deleted": deleted, "missing": missing, "categories": categories}
 

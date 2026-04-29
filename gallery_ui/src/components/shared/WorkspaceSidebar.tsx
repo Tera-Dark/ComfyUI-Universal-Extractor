@@ -8,15 +8,17 @@ import {
   FolderPlus,
   FolderTree,
   HardDrive,
+  Images,
   ListTree,
   Minimize2,
+  Pin,
   Tag,
   Trash,
   Trash2,
 } from "lucide-react";
 
 import { useI18n } from "../../i18n/I18nProvider";
-import type { GalleryContext, LibraryInfo, WorkspaceTab } from "../../types/universal-gallery";
+import type { BoardSummary, GalleryContext, LibraryInfo, WorkspaceTab } from "../../types/universal-gallery";
 
 interface TreeNode {
   path: string;
@@ -32,8 +34,13 @@ interface WorkspaceSidebarProps {
   onFolderViewModeChange: (mode: "tree" | "list") => void;
   selectedCategory: string;
   selectedSubfolder: string;
+  selectedBoardId: string;
+  pinnedOnly: boolean;
   onCategorySelect: (value: string) => void;
   onSubfolderSelect: (value: string) => void;
+  onBoardSelect: (value: string) => void;
+  onPinnedOnlySelect: () => void;
+  onCreateBoard: () => void;
   onCreateFolder: () => void;
   onDeleteFolder: () => void;
   onMergeFolder: () => void;
@@ -155,8 +162,13 @@ export const WorkspaceSidebar = ({
   onFolderViewModeChange,
   selectedCategory,
   selectedSubfolder,
+  selectedBoardId,
+  pinnedOnly,
   onCategorySelect,
   onSubfolderSelect,
+  onBoardSelect,
+  onPinnedOnlySelect,
+  onCreateBoard,
   onCreateFolder,
   onDeleteFolder,
   onMergeFolder,
@@ -168,7 +180,8 @@ export const WorkspaceSidebar = ({
   onDraftNameChange,
   onCreateLibrary,
 }: WorkspaceSidebarProps) => {
-  const { locale, t } = useI18n();
+  const { t } = useI18n();
+  const boards = galleryContext?.boards ?? [];
   const folderTree = useMemo(
     () => buildFolderTree(galleryContext?.subfolders ?? []),
     [galleryContext?.subfolders],
@@ -207,8 +220,6 @@ export const WorkspaceSidebar = ({
     setExpandedPaths(new Set());
   };
 
-  const collapseAllLabel = locale === "zh-CN" ? "全部收起" : "Collapse all";
-
   return (
     <aside className={`ue-sidebar ${collapsed ? "is-collapsed" : ""}`}>
       {activeTab === "gallery" ? (
@@ -219,14 +230,16 @@ export const WorkspaceSidebar = ({
               <button
                 className={folderViewMode === "list" ? "active" : ""}
                 onClick={() => onFolderViewModeChange("list")}
-                title="List"
+                title={t("sidebarListView")}
+                aria-label={t("sidebarListView")}
               >
                 <ListTree size={14} />
               </button>
               <button
                 className={folderViewMode === "tree" ? "active" : ""}
                 onClick={() => onFolderViewModeChange("tree")}
-                title="Tree"
+                title={t("sidebarTreeView")}
+                aria-label={t("sidebarTreeView")}
               >
                 <FolderTree size={14} />
               </button>
@@ -234,19 +247,65 @@ export const WorkspaceSidebar = ({
           </div>
 
           <button
-            className={`ue-tree-item ue-tree-item--root ${selectedSubfolder === "" ? "active" : ""}`}
+            className={`ue-tree-item ue-tree-item--root ${selectedSubfolder === "" && selectedBoardId === "" && !pinnedOnly ? "active" : ""}`}
             onClick={() => onSubfolderSelect("")}
           >
             <HardDrive size={14} />
             <span>{galleryContext?.output_dir_relative || "./output"}</span>
           </button>
           <button
-            className={`ue-tree-item ue-tree-item--root ${selectedSubfolder === "__trash__" ? "active" : ""}`}
+            className={`ue-tree-item ue-tree-item--root ${selectedSubfolder === "__trash__" && selectedBoardId === "" ? "active" : ""}`}
             onClick={() => onSubfolderSelect("__trash__")}
           >
             <Trash size={14} />
-            <span>{locale === "zh-CN" ? "垃圾箱" : "Trash"}</span>
+            <span>{t("sidebarTrash")}</span>
           </button>
+
+          <div className="ue-sidebar-subsection">
+            <div className="ue-sidebar-subheading">
+              <div className="ue-sidebar-subheading-main">
+                <Images size={14} />
+                <span>{t("sidebarBoards")}</span>
+              </div>
+              <div className="ue-sidebar-subactions">
+                <button
+                  className="ue-sidebar-subaction"
+                  onClick={onCreateBoard}
+                  title={t("sidebarCreateBoard")}
+                  aria-label={t("sidebarCreateBoard")}
+                >
+                  <FolderPlus size={12} />
+                </button>
+              </div>
+            </div>
+
+            <div className="ue-board-list">
+              <button
+                className={`ue-board-list-item ${selectedBoardId === "" && pinnedOnly ? "active" : ""}`}
+                onClick={onPinnedOnlySelect}
+              >
+                <span className="ue-board-cover ue-board-cover--empty">
+                  <Pin size={14} />
+                </span>
+                <span>{t("sidebarAllPins")}</span>
+                <em>{galleryContext?.pinned_count ?? 0}</em>
+              </button>
+              {boards.map((board: BoardSummary) => (
+                <button
+                  key={board.id}
+                  className={`ue-board-list-item ${selectedBoardId === board.id ? "active" : ""}`}
+                  onClick={() => onBoardSelect(board.id)}
+                  title={board.name}
+                >
+                  <span className="ue-board-cover">
+                    {board.cover_image ? <img src={board.cover_image.thumb_url} alt="" loading="lazy" /> : <Images size={14} />}
+                  </span>
+                  <span>{board.name}</span>
+                  <em>{board.count}</em>
+                </button>
+              ))}
+            </div>
+          </div>
 
           <div className="ue-sidebar-subsection">
             <div className="ue-sidebar-subheading">
@@ -259,8 +318,8 @@ export const WorkspaceSidebar = ({
                   <button
                     className="ue-sidebar-subaction"
                     onClick={onCreateFolder}
-                    title={locale === "zh-CN" ? "新建目录" : "Create folder"}
-                    aria-label={locale === "zh-CN" ? "新建目录" : "Create folder"}
+                    title={t("sidebarCreateFolder")}
+                    aria-label={t("sidebarCreateFolder")}
                   >
                     <FolderPlus size={12} />
                   </button>
@@ -268,8 +327,8 @@ export const WorkspaceSidebar = ({
                     className="ue-sidebar-subaction"
                     onClick={onMergeFolder}
                     disabled={!selectedSubfolder}
-                    title={locale === "zh-CN" ? "合并目录" : "Merge folder"}
-                    aria-label={locale === "zh-CN" ? "合并目录" : "Merge folder"}
+                    title={t("sidebarMergeFolder")}
+                    aria-label={t("sidebarMergeFolder")}
                   >
                     <ArrowRightLeft size={12} />
                   </button>
@@ -277,16 +336,16 @@ export const WorkspaceSidebar = ({
                     className="ue-sidebar-subaction"
                     onClick={onDeleteFolder}
                     disabled={!selectedSubfolder}
-                    title={locale === "zh-CN" ? "删除目录" : "Delete folder"}
-                    aria-label={locale === "zh-CN" ? "删除目录" : "Delete folder"}
+                    title={t("sidebarDeleteFolder")}
+                    aria-label={t("sidebarDeleteFolder")}
                   >
                     <Trash2 size={12} />
                   </button>
                   <button
                     className="ue-sidebar-subaction"
                     onClick={collapseAllFolders}
-                    title={collapseAllLabel}
-                    aria-label={collapseAllLabel}
+                    title={t("sidebarCollapseAll")}
+                    aria-label={t("sidebarCollapseAll")}
                   >
                     <Minimize2 size={12} />
                   </button>
@@ -311,7 +370,7 @@ export const WorkspaceSidebar = ({
             ) : (
               <div className="ue-tree-list ue-tree-list--flat">
                 <button
-                  className={`ue-tree-item ue-tree-item--compact ${selectedSubfolder === "" ? "active" : ""}`}
+                  className={`ue-tree-item ue-tree-item--compact ${selectedSubfolder === "" && selectedBoardId === "" && !pinnedOnly ? "active" : ""}`}
                   onClick={() => onSubfolderSelect("")}
                 >
                   <Folder size={14} />

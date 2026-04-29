@@ -1,4 +1,38 @@
-export type WorkspaceTab = "gallery" | "library" | "workbench";
+export type WorkspaceTab = "gallery" | "library" | "workbench" | "settings";
+
+export interface GallerySource {
+  id: string;
+  name: string;
+  kind: "output" | "input" | "custom";
+  path: string;
+  enabled: boolean;
+  writable: boolean;
+  recursive: boolean;
+  import_target: boolean;
+  exists: boolean;
+  image_count?: number;
+  locked?: boolean;
+}
+
+export interface GallerySourceDiagnostic extends GallerySource {
+  status: "ok" | "missing" | "error" | "unreadable" | "write_blocked" | "overlap";
+  readable: boolean;
+  writable_actual: boolean;
+  configured_writable: boolean;
+  directory_count: number;
+  free_bytes: number | null;
+  total_bytes: number | null;
+  overlaps: string[];
+  error: string;
+}
+
+export interface MoveTargetOption {
+  value: string;
+  source_id: string;
+  source_name: string;
+  subfolder: string;
+  label: string;
+}
 
 export interface ImageRecord {
   filename: string;
@@ -10,9 +44,16 @@ export interface ImageRecord {
   size: number;
   created_at: number;
   favorite: boolean;
+  pinned: boolean;
+  boards: string[];
   category: string;
   title: string;
   notes: string;
+  source_id?: string;
+  source_name?: string;
+  source_kind?: string;
+  source_path?: string;
+  source_relative_path?: string;
 }
 
 export interface PromptSummary {
@@ -29,6 +70,8 @@ export interface PromptSummary {
 
 export interface ImageState {
   favorite: boolean;
+  pinned: boolean;
+  boards: string[];
   category: string;
   title: string;
   notes: string;
@@ -43,6 +86,8 @@ export interface ImageMetadata {
   artist_prompts: string[];
   summary: PromptSummary;
   state: ImageState;
+  source_id?: string;
+  source_relative_path?: string;
 }
 
 export interface LibraryInfo {
@@ -112,6 +157,28 @@ export interface GalleryContext {
   import_image_target_relative: string;
   categories: string[];
   subfolders: string[];
+  move_targets: MoveTargetOption[];
+  sources: GallerySource[];
+  active_source_count: number;
+  pinned_count: number;
+  boards: BoardSummary[];
+}
+
+export interface BoardCoverImage {
+  relative_path: string;
+  url: string;
+  thumb_url: string;
+}
+
+export interface BoardSummary {
+  id: string;
+  name: string;
+  description: string;
+  cover: string;
+  cover_image: BoardCoverImage | null;
+  count: number;
+  created_at: number;
+  updated_at: number;
 }
 
 export interface ImportResult {
@@ -126,6 +193,7 @@ export interface BatchUpdateResult {
   updated: string[];
   last_state: ImageState | null;
   categories: string[];
+  boards?: BoardSummary[];
 }
 
 export interface DeleteImagesResult {
@@ -139,8 +207,11 @@ export interface MoveImagesResult {
   ok: boolean;
   moved: string[];
   missing: string[];
+  blocked?: string[];
   categories: string[];
   subfolders: string[];
+  target_source_id?: string;
+  target_subfolder?: string;
 }
 
 export interface FolderMutationResult {
@@ -151,6 +222,15 @@ export interface FolderMutationResult {
   moved?: number;
   subfolders: string[];
   categories?: string[];
+}
+
+export interface BoardMutationResult {
+  ok: boolean;
+  board?: BoardSummary;
+  boards: BoardSummary[];
+  categories?: string[];
+  updated?: string[];
+  id?: string;
 }
 
 export interface TrashItem {

@@ -2,7 +2,7 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 
 import { useI18n } from "../i18n/I18nProvider";
 import { galleryApi } from "../services/galleryApi";
-import type { DetailNavigationState, GalleryContext, ImageRecord, TrashItem } from "../types/universal-gallery";
+import type { BoardSummary, DetailNavigationState, GalleryContext, ImageRecord, MoveTargetOption, TrashItem } from "../types/universal-gallery";
 import { PAGE_SIZE } from "../utils/formatters";
 
 const TRASH_SUBFOLDER_KEY = "__trash__";
@@ -16,6 +16,7 @@ export const useGalleryData = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [selectedSubfolder, setSelectedSubfolder] = useState("");
+  const [selectedBoardId, setSelectedBoardId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
@@ -35,6 +36,7 @@ export const useGalleryData = () => {
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
   const [importMessage, setImportMessage] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const hasLoadedImagesRef = useRef(false);
   const consumedContextRefreshKeyRef = useRef(0);
   const consumedImagesRefreshKeyRef = useRef(0);
   const deferredSearchTerm = useDeferredValue(searchTerm);
@@ -79,8 +81,7 @@ export const useGalleryData = () => {
       consumedImagesRefreshKeyRef.current = refreshKey;
     }
 
-    const hasLoadedBefore = images.length > 0 || total > 0 || context !== null;
-    if (hasLoadedBefore) {
+    if (hasLoadedImagesRef.current) {
       setIsRefreshing(true);
     } else {
       setIsLoading(true);
@@ -106,6 +107,7 @@ export const useGalleryData = () => {
           deferredSearchTerm,
           selectedCategory,
           selectedSubfolder,
+          selectedBoardId,
           dateFrom,
           dateTo,
           favoritesOnly,
@@ -127,6 +129,7 @@ export const useGalleryData = () => {
         }
       } finally {
         if (!isCancelled) {
+          hasLoadedImagesRef.current = true;
           setIsLoading(false);
           setIsRefreshing(false);
         }
@@ -138,7 +141,7 @@ export const useGalleryData = () => {
     return () => {
       isCancelled = true;
     };
-  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, dateFrom, dateTo, favoritesOnly, sortBy, sortOrder, refreshKey, t, isTrashView]);
+  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, sortBy, sortOrder, refreshKey, t, isTrashView]);
 
   const refresh = () => setRefreshKey((value) => value + 1);
 
@@ -153,6 +156,7 @@ export const useGalleryData = () => {
     applyContextPatch((current) => ({
       ...current,
       categories: response.categories ?? current.categories,
+      boards: response.boards ?? current.boards,
     }));
     setImages((current) =>
       current.map((image) =>
@@ -162,6 +166,9 @@ export const useGalleryData = () => {
     setSelectedImage((current) =>
       current && current.relative_path === relativePath ? { ...current, ...response.state } : current,
     );
+    if ("pinned" in updates || "favorite" in updates) {
+      refresh();
+    }
   };
 
   const batchUpdateImages = async (relativePaths: string[], updates: Record<string, unknown>) => {
@@ -169,13 +176,33 @@ export const useGalleryData = () => {
     applyContextPatch((current) => ({
       ...current,
       categories: response.categories ?? current.categories,
+      boards: response.boards ?? current.boards,
     }));
-    refresh();
+    const updatedPaths = new Set(response.updated ?? relativePaths);
+    const imagePatch = response.last_state
+      ? {
+          favorite: response.last_state.favorite,
+          pinned: response.last_state.pinned,
+          boards: response.last_state.boards,
+          category: response.last_state.category,
+          title: response.last_state.title,
+          notes: response.last_state.notes,
+        }
+      : updates;
+    setImages((current) =>
+      current.map((image) => (updatedPaths.has(image.relative_path) ? { ...image, ...imagePatch } : image)),
+    );
+    setSelectedImage((current) =>
+      current && updatedPaths.has(current.relative_path) ? { ...current, ...imagePatch } : current,
+    );
+    if (deferredSearchTerm.trim() || selectedCategory || selectedBoardId || favoritesOnly || "pinned" in updates || "favorite" in updates) {
+      refresh();
+    }
     return response;
   };
 
-  const moveImages = async (relativePaths: string[], targetSubfolder: string) => {
-    const response = await galleryApi.moveImages(relativePaths, targetSubfolder);
+  const moveImages = async (relativePaths: string[], targetSubfolder: string, targetSourceId = "") => {
+    const response = await galleryApi.moveImages(relativePaths, targetSubfolder, targetSourceId);
     applyContextPatch((current) => ({
       ...current,
       categories: response.categories ?? current.categories,
@@ -263,8 +290,8 @@ export const useGalleryData = () => {
     return response;
   };
 
-  const importFiles = async (files: File[]) => {
-    const response = await galleryApi.importFiles(files);
+  const importFiles = async (files: File[], targetSourceId = "") => {
+    const response = await galleryApi.importFiles(files, targetSourceId);
     const importedCount = response.imported_images.length + response.imported_libraries.length;
     const skippedCount = response.skipped.length;
 
@@ -283,7 +310,52 @@ export const useGalleryData = () => {
     return response;
   };
 
-  const targetFolderOptions = useMemo(() => ["", ...(context?.subfolders ?? [])], [context?.subfolders]);
+  const targetFolderOptions = useMemo<MoveTargetOption[]>(() => context?.move_targets ?? [], [context?.move_targets]);
+  const boards = useMemo<BoardSummary[]>(() => context?.boards ?? [], [context?.boards]);
+
+  const patchBoards = (nextBoards: BoardSummary[]) => {
+    applyContextPatch((current) => ({
+      ...current,
+      boards: nextBoards,
+    }));
+  };
+
+  const createBoard = async (name: string, description = "") => {
+    const response = await galleryApi.createBoard(name, description);
+    patchBoards(response.boards ?? boards);
+    return response;
+  };
+
+  const updateBoard = async (id: string, updates: Record<string, unknown>) => {
+    const response = await galleryApi.updateBoard(id, updates);
+    patchBoards(response.boards ?? boards);
+    return response;
+  };
+
+  const deleteBoard = async (id: string) => {
+    const response = await galleryApi.deleteBoard(id);
+    applyContextPatch((current) => ({
+      ...current,
+      boards: response.boards ?? current.boards,
+      categories: response.categories ?? current.categories,
+    }));
+    if (selectedBoardId === id) {
+      setSelectedBoardId("");
+    }
+    refresh();
+    return response;
+  };
+
+  const updateBoardPins = async (id: string, relativePaths: string[], pinned = true) => {
+    const response = await galleryApi.updateBoardPins(id, relativePaths, pinned);
+    applyContextPatch((current) => ({
+      ...current,
+      boards: response.boards ?? current.boards,
+      categories: response.categories ?? current.categories,
+    }));
+    refresh();
+    return response;
+  };
 
   const restoreTrashItem = async (id: string) => {
     await galleryApi.restoreTrashItem(id);
@@ -308,6 +380,8 @@ export const useGalleryData = () => {
     setSelectedCategory,
     selectedSubfolder,
     setSelectedSubfolder,
+    selectedBoardId,
+    setSelectedBoardId,
     dateFrom,
     setDateFrom,
     dateTo,
@@ -334,6 +408,7 @@ export const useGalleryData = () => {
     importMessage,
     setImportMessage,
     targetFolderOptions,
+    boards,
     refresh,
     updateImageState,
     batchUpdateImages,
@@ -344,6 +419,10 @@ export const useGalleryData = () => {
     createFolder,
     deleteFolder,
     mergeFolder,
+    createBoard,
+    updateBoard,
+    deleteBoard,
+    updateBoardPins,
     importFiles,
     restoreTrashItem,
     purgeTrashItem,

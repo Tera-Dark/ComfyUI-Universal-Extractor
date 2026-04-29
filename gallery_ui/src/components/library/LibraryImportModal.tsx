@@ -120,12 +120,14 @@ export const LibraryImportModal = ({
         )}
 
         <div className="ue-library-modal-actions">
-          <button className="ue-secondary-btn" onClick={onClose}>
-            <span>{t("libraryCancel")}</span>
+          <button className="ue-icon-action" onClick={onClose} aria-label={t("libraryCancel")} title={t("libraryCancel")}>
+            <X size={14} />
           </button>
           <button
-            className="ue-primary-btn"
+            className="ue-icon-action ue-icon-action--filled"
             disabled={!canSubmit || isSubmitting}
+            aria-label={t("libraryImportConfirm")}
+            title={t("libraryImportConfirm")}
             onClick={async () => {
               if (!file) {
                 return;
@@ -137,7 +139,6 @@ export const LibraryImportModal = ({
             }}
           >
             <FileUp size={14} />
-            <span>{t("libraryImportConfirm")}</span>
           </button>
         </div>
       </div>

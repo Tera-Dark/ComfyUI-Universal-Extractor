@@ -3,6 +3,7 @@ import { Save, Sparkles, Trash2, X } from "lucide-react";
 
 import { useI18n } from "../../i18n/I18nProvider";
 import type { LibraryEntry } from "../../types/universal-gallery";
+import { useToast } from "../shared/ToastViewport";
 
 interface EntryTemplate {
   id: string;
@@ -33,6 +34,7 @@ export const LibraryEntryEditorModal = ({
   onDelete,
 }: LibraryEntryEditorModalProps) => {
   const { t } = useI18n();
+  const { pushToast } = useToast();
   const [value, setValue] = useState(() => JSON.stringify(initialEntry ?? {}, null, 2));
 
   if (!open) {
@@ -92,7 +94,7 @@ export const LibraryEntryEditorModal = ({
         <div className="ue-library-modal-actions">
           {onDelete ? (
             <button
-              className="ue-secondary-btn ue-danger-btn"
+              className="ue-icon-action ue-icon-action--danger"
               onClick={async () => {
                 const ok = await onDelete();
                 if (ok) {
@@ -100,18 +102,21 @@ export const LibraryEntryEditorModal = ({
                 }
               }}
               disabled={isSubmitting}
+              aria-label={t("commonDelete")}
+              title={t("commonDelete")}
             >
               <Trash2 size={14} />
-              <span>{t("commonDelete")}</span>
             </button>
           ) : null}
 
-          <button className="ue-secondary-btn" onClick={onClose}>
-            <span>{t("libraryCancel")}</span>
+          <button className="ue-icon-action" onClick={onClose} aria-label={t("libraryCancel")} title={t("libraryCancel")}>
+            <X size={14} />
           </button>
           <button
-            className="ue-primary-btn"
+            className="ue-icon-action ue-icon-action--filled"
             disabled={isSubmitting}
+            aria-label={t("librarySave")}
+            title={t("librarySave")}
             onClick={async () => {
               try {
                 const parsed = JSON.parse(value) as LibraryEntry;
@@ -120,12 +125,11 @@ export const LibraryEntryEditorModal = ({
                   onClose();
                 }
               } catch (error) {
-                window.alert(error instanceof Error ? error.message : t("errorJsonInvalid"));
+                pushToast(error instanceof Error ? error.message : t("errorJsonInvalid"), "error");
               }
             }}
           >
             <Save size={14} />
-            <span>{t("librarySave")}</span>
           </button>
         </div>
       </div>

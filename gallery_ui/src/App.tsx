@@ -5,6 +5,8 @@ import { ImageDetailModal } from "./components/gallery/ImageDetailModal";
 import { LibraryWorkspace } from "./components/library/LibraryWorkspace";
 import { TopNavigation } from "./components/shared/TopNavigation";
 import { WorkspaceSidebar } from "./components/shared/WorkspaceSidebar";
+import { TextInputDialog } from "./components/shared/TextInputDialog";
+import { SettingsWorkspace } from "./components/settings/SettingsWorkspace";
 import { WorkbenchWorkspace } from "./components/workbench/WorkbenchWorkspace";
 import { useGalleryData } from "./hooks/useGalleryData";
 import { useI18n } from "./i18n/I18nProvider";
@@ -20,6 +22,13 @@ const WORKFLOW_CHANNEL_NAME = "universal-extractor-workflow";
 const COMFY_WINDOW_NAME = "comfyui-main";
 const WORKFLOW_MESSAGE_TYPE = "universal-extractor:workflow-message";
 const MAX_STORAGE_WORKFLOW_BYTES = 1_500_000;
+
+type FolderDialogMode = "create" | "merge";
+
+interface FolderDialogState {
+  mode: FolderDialogMode;
+  initialValue: string;
+}
 
 const matchesLibrarySearch = (library: LibraryInfo, searchTerm: string) => {
   const query = searchTerm.trim().toLowerCase();
@@ -37,6 +46,8 @@ function App() {
   const [librarySearchTerm, setLibrarySearchTerm] = useState("");
   const [folderViewMode, setFolderViewMode] = useState<"tree" | "list">("tree");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
+  const [boardDialogOpen, setBoardDialogOpen] = useState(false);
 
   const gallery = useGalleryData();
   const library = useLibraryData(true);
@@ -48,15 +59,21 @@ function App() {
 
   const canUseRawLibraryEditor = library.entryTotal <= 5000;
 
-  const confirmDiscardLibraryEdits = () => {
+  const confirmDiscardLibraryEdits = async () => {
     if (!library.isDirty) {
       return true;
     }
-    return window.confirm(t("libraryUnsavedConfirm"));
+    return confirm({
+      title: t("libraryUnsavedTitle"),
+      message: t("libraryUnsavedConfirm"),
+      tone: "warning",
+      confirmLabel: t("libraryDiscardChanges"),
+      cancelLabel: t("libraryCancel"),
+    });
   };
 
-  const handleTabChange = (tab: WorkspaceTab) => {
-    if (activeTab === "library" && tab !== "library" && !confirmDiscardLibraryEdits()) {
+  const handleTabChange = async (tab: WorkspaceTab) => {
+    if (activeTab === "library" && tab !== "library" && !(await confirmDiscardLibraryEdits())) {
       return;
     }
     startTransition(() => {
@@ -81,7 +98,7 @@ function App() {
   };
 
   const handleLibrarySelect = async (name: string) => {
-    if (activeTab === "library" && library.activeLibraryName !== name && !confirmDiscardLibraryEdits()) {
+    if (activeTab === "library" && library.activeLibraryName !== name && !(await confirmDiscardLibraryEdits())) {
       return;
     }
     startTransition(() => {
@@ -109,7 +126,7 @@ function App() {
   };
 
   const handleDeleteLibrary = async (name: string) => {
-    if (library.activeLibraryName === name && !confirmDiscardLibraryEdits()) {
+    if (library.activeLibraryName === name && !(await confirmDiscardLibraryEdits())) {
       return;
     }
     const approved = await confirm({
@@ -144,10 +161,14 @@ function App() {
   };
 
   const handleRefresh = async () => {
-    if (activeTab === "library" && !confirmDiscardLibraryEdits()) {
+    if (activeTab === "library" && !(await confirmDiscardLibraryEdits())) {
       return;
     }
     if (activeTab === "gallery") {
+      gallery.refresh();
+      return;
+    }
+    if (activeTab === "settings") {
       gallery.refresh();
       return;
     }
@@ -173,23 +194,49 @@ function App() {
       anchor.remove();
       URL.revokeObjectURL(objectUrl);
     }).catch((error) => {
-      window.alert(error instanceof Error ? error.message : t("errorOpenLibrary"));
+      pushToast(error instanceof Error ? error.message : t("errorOpenLibrary"), "error");
     });
   };
 
-  const handleCreateFolder = async () => {
+  const handleCreateFolder = () => {
     const basePath = gallery.selectedSubfolder ? `${gallery.selectedSubfolder}/` : "";
-    const nextPath = window.prompt(t("folderCreatePrompt"), basePath);
-    if (!nextPath?.trim()) {
+    setFolderDialog({ mode: "create", initialValue: basePath });
+  };
+
+  const handleSubmitBoardDialog = async (name: string) => {
+    try {
+      const result = await gallery.createBoard(name);
+      if (result.board?.id) {
+        gallery.setSelectedBoardId(result.board.id);
+        gallery.setSelectedSubfolder("");
+        gallery.setFavoritesOnly(false);
+        gallery.setPage(1);
+      }
+      pushToast(t("boardCreateSuccess"), "success");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("boardCreateError"), "error");
+      throw error;
+    }
+  };
+
+  const handleSubmitFolderDialog = async (path: string) => {
+    if (!folderDialog) {
       return;
     }
 
     try {
-      await gallery.createFolder(nextPath.trim());
-      gallery.refresh();
-      pushToast(t("folderCreateSuccess"), "success");
+      if (folderDialog.mode === "create") {
+        await gallery.createFolder(path);
+        gallery.refresh();
+        pushToast(t("folderCreateSuccess"), "success");
+      } else {
+        await gallery.mergeFolder(gallery.selectedSubfolder, path);
+        pushToast(t("folderMergeSuccess"), "success");
+      }
     } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("folderCreateError"), "error");
+      const fallback = folderDialog.mode === "create" ? t("folderCreateError") : t("folderMergeError");
+      pushToast(error instanceof Error ? error.message : fallback, "error");
+      throw error;
     }
   };
 
@@ -216,21 +263,11 @@ function App() {
     }
   };
 
-  const handleMergeFolder = async () => {
+  const handleMergeFolder = () => {
     if (!gallery.selectedSubfolder) {
       return;
     }
-    const targetPath = window.prompt(t("folderMergePrompt"), "");
-    if (!targetPath?.trim()) {
-      return;
-    }
-
-    try {
-      await gallery.mergeFolder(gallery.selectedSubfolder, targetPath.trim());
-      pushToast(t("folderMergeSuccess"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("folderMergeError"), "error");
-    }
+    setFolderDialog({ mode: "merge", initialValue: "" });
   };
 
   const handleWorkbenchLibrarySelect = async (name: string) => {
@@ -241,8 +278,8 @@ function App() {
     }
   };
 
-  const handleImportFiles = async (files: File[]) => {
-    const response = await gallery.importFiles(files);
+  const handleImportFiles = async (files: File[], targetSourceId = "") => {
+    const response = await gallery.importFiles(files, targetSourceId);
     await library.refreshLibraries();
     const importedCount = response.imported_images.length + response.imported_libraries.length;
     if (importedCount > 0) {
@@ -366,14 +403,31 @@ function App() {
           onFolderViewModeChange={setFolderViewMode}
           selectedCategory={gallery.selectedCategory}
           selectedSubfolder={gallery.selectedSubfolder}
+          selectedBoardId={gallery.selectedBoardId}
+          pinnedOnly={gallery.favoritesOnly}
           onCategorySelect={(value) => {
             gallery.setSelectedCategory(value);
             gallery.setPage(1);
           }}
           onSubfolderSelect={(value) => {
+            gallery.setSelectedBoardId("");
+            gallery.setFavoritesOnly(false);
             gallery.setSelectedSubfolder(value);
             gallery.setPage(1);
           }}
+          onBoardSelect={(value) => {
+            gallery.setSelectedBoardId(value);
+            gallery.setFavoritesOnly(false);
+            gallery.setSelectedSubfolder("");
+            gallery.setPage(1);
+          }}
+          onPinnedOnlySelect={() => {
+            gallery.setSelectedBoardId("");
+            gallery.setSelectedSubfolder("");
+            gallery.setFavoritesOnly(true);
+            gallery.setPage(1);
+          }}
+          onCreateBoard={() => setBoardDialogOpen(true)}
           onCreateFolder={handleCreateFolder}
           onDeleteFolder={handleDeleteFolder}
           onMergeFolder={handleMergeFolder}
@@ -396,6 +450,7 @@ function App() {
               totalPages={gallery.totalPages}
               selectedCategory={gallery.selectedCategory}
               selectedSubfolder={gallery.selectedSubfolder}
+              selectedBoardId={gallery.selectedBoardId}
               dateFrom={gallery.dateFrom}
               dateTo={gallery.dateTo}
               favoritesOnly={gallery.favoritesOnly}
@@ -410,6 +465,7 @@ function App() {
               isRefreshing={gallery.isRefreshing}
               error={gallery.error}
               targetFolderOptions={gallery.targetFolderOptions}
+              boards={gallery.boards}
               onOpenDetail={(image) => {
                 gallery.setSelectedImage(image);
                 gallery.setDetailNavigation({
@@ -419,6 +475,7 @@ function App() {
               }}
               onPageChange={gallery.setPage}
               onCategoryChange={gallery.setSelectedCategory}
+              onBoardChange={gallery.setSelectedBoardId}
               onDateFromChange={gallery.setDateFrom}
               onDateToChange={gallery.setDateTo}
               onFavoritesOnlyChange={gallery.setFavoritesOnly}
@@ -429,6 +486,9 @@ function App() {
               onSelectionChange={gallery.setSelectedImagePaths}
               onUpdateImageState={handleUpdateImageState}
               onBatchUpdateImages={gallery.batchUpdateImages}
+              onCreateBoard={gallery.createBoard}
+              onUpdateBoardPins={gallery.updateBoardPins}
+              onDeleteBoard={gallery.deleteBoard}
               onMoveImages={gallery.moveImages}
               onBatchRenameImages={async (relativePaths, template, startNumber, padding, currentPage) => {
                 try {
@@ -486,8 +546,8 @@ function App() {
               onEditorValueChange={library.setEditorValue}
               onStartEditing={library.startEditing}
               onPageChange={library.setEntryPage}
-              onCancelEditing={() => {
-                if (!confirmDiscardLibraryEdits()) {
+              onCancelEditing={async () => {
+                if (!(await confirmDiscardLibraryEdits())) {
                   return;
                 }
                 library.cancelEditing();
@@ -529,11 +589,16 @@ function App() {
                 return result.ok;
               }}
             />
-          ) : (
+          ) : activeTab === "workbench" ? (
             <WorkbenchWorkspace
               libraries={library.libraries}
               activeLibraryName={library.activeLibraryName}
               onLibrarySelect={handleWorkbenchLibrarySelect}
+            />
+          ) : (
+            <SettingsWorkspace
+              sources={gallery.context?.sources ?? []}
+              onSourcesChange={() => gallery.refresh()}
             />
           )}
         </main>
@@ -561,6 +626,29 @@ function App() {
           }}
         />
       ) : null}
+
+      <TextInputDialog
+        open={folderDialog !== null}
+        title={folderDialog?.mode === "merge" ? t("folderMergeTitle") : t("folderCreateTitle")}
+        text={folderDialog?.mode === "merge" ? t("folderMergeText") : t("folderCreateText")}
+        label={folderDialog?.mode === "merge" ? t("folderMergePrompt") : t("folderCreatePrompt")}
+        placeholder={t("folderPathPlaceholder")}
+        initialValue={folderDialog?.initialValue ?? ""}
+        confirmLabel={folderDialog?.mode === "merge" ? t("sidebarMergeFolder") : t("commonCreate")}
+        onClose={() => setFolderDialog(null)}
+        onSubmit={handleSubmitFolderDialog}
+      />
+      <TextInputDialog
+        open={boardDialogOpen}
+        title={t("boardCreateTitle")}
+        text={t("boardCreateText")}
+        label={t("boardNameLabel")}
+        placeholder={t("boardNamePlaceholder")}
+        initialValue=""
+        confirmLabel={t("commonCreate")}
+        onClose={() => setBoardDialogOpen(false)}
+        onSubmit={handleSubmitBoardDialog}
+      />
     </div>
   );
 }

@@ -191,6 +191,87 @@
   font-size: 12px;
 }
 
+.ue-board-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ue-board-list-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 40px;
+  padding: 5px 8px 5px 6px;
+  border-radius: var(--ue-r-sm);
+  color: var(--ue-ink-soft);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--ue-duration-fast) var(--ue-ease),
+    color var(--ue-duration-fast) var(--ue-ease),
+    transform var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-board-list-item:hover {
+  background: rgba(244, 244, 245, 0.88);
+  color: var(--ue-ink);
+  transform: translateX(1px);
+}
+
+.ue-board-list-item.active {
+  background: var(--ue-accent);
+  color: #ffffff;
+}
+
+.ue-board-list-item span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ue-board-list-item em {
+  min-width: 20px;
+  font-size: 11px;
+  font-style: normal;
+  color: currentColor;
+  opacity: 0.58;
+  text-align: right;
+}
+
+.ue-board-cover {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  overflow: hidden;
+  border-radius: 8px;
+  background: var(--ue-surface-alt);
+  color: var(--ue-ink-muted);
+  box-shadow: inset 0 0 0 1px rgba(24, 24, 27, 0.06);
+}
+
+.ue-board-list-item.active .ue-board-cover {
+  background: rgba(255, 255, 255, 0.16);
+  color: #ffffff;
+}
+
+.ue-board-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.ue-board-cover--empty {
+  background:
+    linear-gradient(135deg, rgba(24, 24, 27, 0.08), rgba(24, 24, 27, 0.02)),
+    var(--ue-surface-alt);
+}
+
 .ue-tree-label span,
 .ue-tree-item span,
 .ue-library-main strong,

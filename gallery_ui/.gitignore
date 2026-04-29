@@ -8,9 +8,13 @@ pnpm-debug.log*
 lerna-debug.log*
 
 node_modules
-dist
 dist-ssr
 *.local
+.qa-*.png
+
+# Keep dist tracked for normal ComfyUI installs.
+!dist/
+!dist/**
 
 # Editor directories and files
 .vscode/*

@@ -23,6 +23,8 @@
   display: flex;
   flex-direction: column;
   min-width: 0;
+  content-visibility: auto;
+  contain-intrinsic-size: 320px 450px;
   transform: translateY(0);
   transition:
     transform var(--ue-duration-base) var(--ue-ease),
@@ -45,6 +47,7 @@
   border-radius: 10px;
   background: #f5f5f5;
   aspect-ratio: 3 / 4;
+  contain: layout paint;
 }
 
 .ue-gallery-media::after {
@@ -76,7 +79,10 @@
 
 .ue-gallery-image-shell {
   position: relative;
+  width: 100%;
+  height: 100%;
   overflow: hidden;
+  background: #f4f4f5;
 }
 
 .ue-gallery-image-shell::before {
@@ -123,7 +129,8 @@
 }
 
 .ue-select-btn,
-.ue-favorite-btn,
+.ue-board-btn,
+.ue-pin-btn,
 .ue-send-btn {
   display: inline-flex;
   align-items: center;
@@ -145,22 +152,24 @@
 }
 
 .ue-gallery-card:hover .ue-select-btn,
-.ue-gallery-card:hover .ue-favorite-btn,
+.ue-gallery-card:hover .ue-board-btn,
+.ue-gallery-card:hover .ue-pin-btn,
 .ue-gallery-card:hover .ue-send-btn,
 .ue-gallery-card.is-selected .ue-select-btn,
-.ue-favorite-btn.active {
+.ue-pin-btn.active {
   opacity: 1;
   transform: translateY(0);
 }
 
 .ue-select-btn:hover,
-.ue-favorite-btn:hover,
+.ue-board-btn:hover,
+.ue-pin-btn:hover,
 .ue-send-btn:hover {
   background: #ffffff;
   color: var(--ue-ink);
 }
 
-.ue-favorite-btn.active {
+.ue-pin-btn.active {
   color: var(--ue-favorite);
 }
 
@@ -168,6 +177,9 @@
   position: absolute;
   right: 10px;
   bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   min-height: 28px;
   padding: 0 10px;
   border-radius: 999px;
@@ -182,6 +194,13 @@
     opacity var(--ue-duration-fast) var(--ue-ease),
     transform var(--ue-duration-fast) var(--ue-ease),
     background-color var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-gallery-open--icon {
+  width: 30px;
+  height: 30px;
+  min-height: 30px;
+  padding: 0;
 }
 
 .ue-gallery-open:hover {
@@ -349,7 +368,8 @@
 @media (max-width: 960px) {
   .ue-select-btn,
   .ue-send-btn,
-  .ue-favorite-btn,
+  .ue-board-btn,
+  .ue-pin-btn,
   .ue-gallery-open {
     opacity: 1;
     transform: translateY(0);

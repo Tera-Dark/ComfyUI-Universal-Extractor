@@ -6,6 +6,7 @@ import {
   PanelLeftOpen,
   RefreshCw,
   Search,
+  Settings,
   Wrench,
 } from "lucide-react";
 
@@ -37,7 +38,7 @@ export const TopNavigation = ({
   const [inputValue, setInputValue] = useState(searchValue);
   const [isComposing, setIsComposing] = useState(false);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const searchEnabled = activeTab !== "workbench";
+  const searchEnabled = activeTab === "gallery" || activeTab === "library";
   const searchOpen = searchEnabled && (searchExpanded || Boolean(searchValue.trim()));
 
   useEffect(() => {
@@ -68,8 +69,8 @@ export const TopNavigation = ({
         <button
           className="ue-topbar-icon-btn"
           onClick={onSidebarToggle}
-          aria-label={locale === "zh-CN" ? "切换侧边栏" : "Toggle sidebar"}
-          title={locale === "zh-CN" ? "切换侧边栏" : "Toggle sidebar"}
+          aria-label={t("navToggleSidebar")}
+          title={t("navToggleSidebar")}
         >
           {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
         </button>
@@ -100,6 +101,13 @@ export const TopNavigation = ({
           <Wrench size={15} />
           <span>{t("navWorkbench")}</span>
         </button>
+        <button
+          className={`ue-topbar-tab ${activeTab === "settings" ? "active" : ""}`}
+          onClick={() => onTabChange("settings")}
+        >
+          <Settings size={15} />
+          <span>{t("navSettings")}</span>
+        </button>
       </nav>
 
       <div className="ue-topbar-tools">
@@ -112,8 +120,8 @@ export const TopNavigation = ({
               }
               setSearchExpanded((current) => !current);
             }}
-            aria-label={locale === "zh-CN" ? "展开搜索" : "Toggle search"}
-            title={locale === "zh-CN" ? "展开搜索" : "Toggle search"}
+            aria-label={t("navToggleSearch")}
+            title={t("navToggleSearch")}
             disabled={!searchEnabled}
           >
             <Search size={14} />
@@ -151,9 +159,9 @@ export const TopNavigation = ({
           className="ue-topbar-icon-btn ue-locale-toggle"
           onClick={toggleLocale}
           aria-label={t("navLanguage")}
-          title={locale === "zh-CN" ? "Switch to English" : "切换到中文"}
+          title={locale === "zh-CN" ? t("navSwitchToEnglish") : t("navSwitchToChinese")}
         >
-          <span>{locale === "zh-CN" ? "中" : "EN"}</span>
+          <span>{locale === "zh-CN" ? t("navLanguageZhShort") : t("navLanguageEnShort")}</span>
         </button>
 
         <button

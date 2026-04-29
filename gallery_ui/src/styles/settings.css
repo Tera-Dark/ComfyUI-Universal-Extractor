@@ -1,0 +1,371 @@
+﻿.ue-settings-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 24px;
+}
+
+.ue-settings-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 4px 2px 14px;
+  border-bottom: 1px solid var(--ue-line);
+}
+
+.ue-settings-hero h1 {
+  margin: 4px 0 8px;
+  font-size: 28px;
+  line-height: 1.15;
+}
+
+.ue-settings-hero p,
+.ue-settings-panel-heading p {
+  margin: 0;
+  color: var(--ue-ink-muted);
+}
+
+.ue-settings-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(104px, 1fr));
+  gap: 10px;
+}
+
+.ue-settings-metrics div {
+  padding: 12px;
+  border: 1px solid var(--ue-line);
+  border-radius: 8px;
+  background: var(--ue-surface);
+}
+
+.ue-settings-metrics strong {
+  display: block;
+  font-size: 22px;
+}
+
+.ue-settings-metrics span {
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+}
+
+.ue-settings-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  gap: 18px;
+  min-height: 0;
+}
+
+.ue-settings-source-list,
+.ue-settings-editor {
+  border: 1px solid var(--ue-line);
+  border-radius: 8px;
+  background: var(--ue-surface);
+}
+
+.ue-settings-source-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px;
+}
+
+.ue-settings-editor {
+  padding: 18px;
+}
+
+.ue-settings-diagnostics {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+  border: 1px solid var(--ue-line);
+  border-radius: 8px;
+  background: var(--ue-surface);
+}
+
+.ue-settings-panel-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.ue-settings-panel-heading h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.ue-source-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.ue-source-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--ue-line);
+  border-radius: 8px;
+  background: var(--ue-canvas);
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ue-source-card:hover,
+.ue-source-card.active {
+  border-color: var(--ue-accent);
+  background: var(--ue-accent-soft);
+}
+
+.ue-source-card.is-missing {
+  border-color: rgba(239, 68, 68, 0.35);
+}
+
+.ue-source-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--ue-surface-alt);
+}
+
+.ue-source-main {
+  min-width: 0;
+}
+
+.ue-source-main strong,
+.ue-source-main small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ue-source-main small {
+  margin-top: 3px;
+  color: var(--ue-ink-muted);
+}
+
+.ue-source-meta {
+  min-width: 32px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: var(--ue-surface-alt);
+  color: var(--ue-ink-muted);
+  text-align: center;
+  font-size: 12px;
+}
+
+.ue-settings-form {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+}
+
+.ue-settings-form label {
+  display: grid;
+  gap: 7px;
+  color: var(--ue-ink-muted);
+  font-size: 13px;
+}
+
+.ue-settings-form input {
+  width: 100%;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid var(--ue-line);
+  border-radius: 8px;
+  background: var(--ue-canvas);
+  color: var(--ue-ink);
+}
+
+.ue-settings-form input:disabled {
+  opacity: 0.68;
+}
+
+.ue-settings-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ue-toggle-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-height: 42px;
+  padding: 9px 10px;
+  border: 1px solid var(--ue-line);
+  border-radius: 8px;
+  background: var(--ue-canvas);
+  color: var(--ue-ink);
+  cursor: pointer;
+}
+
+.ue-toggle-row.active {
+  border-color: var(--ue-accent);
+  background: var(--ue-accent-soft);
+}
+
+.ue-toggle-dot {
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--ue-line);
+  border-radius: 999px;
+}
+
+.ue-toggle-row.active .ue-toggle-dot {
+  border-color: var(--ue-accent);
+  background: var(--ue-accent);
+  color: white;
+}
+
+.ue-settings-test-result {
+  margin: 0;
+  color: var(--ue-ink-muted);
+  font-size: 13px;
+}
+
+.ue-settings-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ue-diagnostics-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 10px;
+}
+
+.ue-diagnostic-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--ue-line);
+  border-radius: 8px;
+  background: var(--ue-canvas);
+}
+
+.ue-diagnostic-card.status-ok {
+  border-color: rgba(22, 163, 74, 0.32);
+}
+
+.ue-diagnostic-card.status-missing,
+.ue-diagnostic-card.status-error,
+.ue-diagnostic-card.status-unreadable,
+.ue-diagnostic-card.status-write_blocked {
+  border-color: rgba(220, 38, 38, 0.34);
+}
+
+.ue-diagnostic-card.status-overlap {
+  border-color: rgba(245, 158, 11, 0.42);
+}
+
+.ue-diagnostic-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ue-diagnostic-title strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ue-diagnostic-title span {
+  margin-left: auto;
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+}
+
+.ue-diagnostic-card p,
+.ue-diagnostic-card small {
+  margin: 0;
+  color: var(--ue-ink-muted);
+  overflow-wrap: anywhere;
+}
+
+.ue-diagnostic-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.ue-diagnostic-meta span {
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: var(--ue-surface-alt);
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+}
+
+.ue-primary-action,
+.ue-secondary-action,
+.ue-danger-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.ue-primary-action {
+  border: 1px solid var(--ue-accent);
+  background: var(--ue-accent);
+  color: white;
+}
+
+.ue-secondary-action {
+  border: 1px solid var(--ue-line);
+  background: var(--ue-canvas);
+  color: var(--ue-ink);
+}
+
+.ue-danger-action {
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.1);
+  color: rgb(220, 38, 38);
+}
+
+.ue-primary-action:disabled,
+.ue-secondary-action:disabled,
+.ue-danger-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 900px) {
+  .ue-settings-hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ue-settings-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 620px) {
+  .ue-settings-workspace {
+    padding: 16px;
+  }
+
+  .ue-settings-toggle-grid,
+  .ue-settings-metrics {
+    grid-template-columns: 1fr;
+  }
+}
+

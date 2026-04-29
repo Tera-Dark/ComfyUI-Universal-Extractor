@@ -5,25 +5,33 @@ from pathlib import Path
 
 from aiohttp import web
 
-from ..constants import GALLERY_INDEX_FILE, GALLERY_UI_DIR, TRASH_DIR
+from ..constants import GALLERY_INDEX_FILE, GALLERY_UI_DIR, IMPORT_IMAGE_SUBFOLDER, TRASH_DIR
 from .service import (
     LibraryValidationError,
     batch_update_images,
     batch_rename_images,
+    create_gallery_board,
+    build_import_result,
     create_folder,
+    delete_gallery_board,
+    delete_gallery_source,
     delete_images,
     delete_folder,
     delete_library,
+    diagnose_gallery_sources,
+    get_import_target_for_filename,
     get_gallery_context,
     get_image_metadata,
+    image_ref_for_full_path,
     get_library,
     get_library_entries_page,
     get_library_raw_text,
     get_thumbnail_path,
     get_trash_item,
     import_library_data,
-    import_files_from_parts,
     list_images,
+    list_boards,
+    list_gallery_sources,
     list_libraries,
     list_trash_items,
     merge_folder,
@@ -31,7 +39,11 @@ from .service import (
     persist_image_state,
     purge_trash_item,
     restore_trash_item,
+    save_gallery_source,
+    update_board_images,
+    update_gallery_board,
     search_library_artists,
+    test_gallery_source_path,
     generate_artist_string,
     rename_image,
     resolve_image_path,
@@ -40,6 +52,35 @@ from .service import (
     update_library_entry,
     delete_library_entry,
 )
+
+
+def _bad_request(message: str) -> web.Response:
+    return web.json_response({"error": message}, status=400)
+
+
+def _parse_int(value, field: str, default: int, min_value: int | None = None, max_value: int | None = None) -> int:
+    if value in (None, ""):
+        parsed = default
+    else:
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError) as error:
+            raise ValueError(f"{field} must be an integer") from error
+
+    if min_value is not None:
+        parsed = max(min_value, parsed)
+    if max_value is not None:
+        parsed = min(max_value, parsed)
+    return parsed
+
+
+def _parse_float(value, field: str, default: float) -> float:
+    if value in (None, ""):
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError) as error:
+        raise ValueError(f"{field} must be a number") from error
 
 
 def _safe_add_route(router, method: str, path: str, handler):
@@ -75,26 +116,34 @@ async def api_list_images(request: web.Request) -> web.Response:
     search = request.query.get("search", "")
     category = request.query.get("category", "")
     subfolder = request.query.get("subfolder", "")
+    board_id = request.query.get("board_id", "")
     date_from = request.query.get("date_from", "")
     date_to = request.query.get("date_to", "")
-    favorites_only = request.query.get("favorites", "").lower() in {"1", "true", "yes"}
+    favorites_only = (
+        request.query.get("favorites", "").lower() in {"1", "true", "yes"}
+        or request.query.get("pinned", "").lower() in {"1", "true", "yes"}
+    )
     force_refresh = request.query.get("force_refresh", "").lower() in {"1", "true", "yes"}
     sort_by = request.query.get("sort_by", "created_at")
     sort_order = request.query.get("sort_order", "desc")
-    page = max(1, int(request.query.get("page", "1")))
-    limit = max(1, int(request.query.get("limit", "60")))
+    try:
+        page = _parse_int(request.query.get("page"), "page", 1, min_value=1)
+        limit = _parse_int(request.query.get("limit"), "limit", 60, min_value=1)
+        items = list_images(
+            search=search,
+            category=category,
+            subfolder=subfolder,
+            board_id=board_id,
+            date_from=date_from,
+            date_to=date_to,
+            favorites_only=favorites_only,
+            sort_by=sort_by,
+            sort_order=sort_order,
+            force_refresh=force_refresh,
+        )
+    except ValueError as error:
+        return _bad_request(str(error))
 
-    items = list_images(
-        search=search,
-        category=category,
-        subfolder=subfolder,
-        date_from=date_from,
-        date_to=date_to,
-        favorites_only=favorites_only,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        force_refresh=force_refresh,
-    )
     total = len(items)
     start = (page - 1) * limit
     paged_items = items[start : start + limit]
@@ -106,7 +155,13 @@ async def api_image_metadata(request: web.Request) -> web.Response:
     if not relative_path:
         return web.json_response({"error": "relative_path required"}, status=400)
 
-    _, full_path = resolve_image_path(relative_path)
+    try:
+        _, full_path = resolve_image_path(relative_path)
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except ValueError as error:
+        return _bad_request(str(error))
+
     if not os.path.exists(full_path):
         return web.json_response({"error": "not found"}, status=404)
 
@@ -115,9 +170,13 @@ async def api_image_metadata(request: web.Request) -> web.Response:
 
 async def api_thumbnail(request: web.Request) -> web.StreamResponse:
     relative_path = request.query.get("relative_path", "")
-    size = max(64, min(1024, int(request.query.get("size", "480"))))
+    try:
+        size = _parse_int(request.query.get("size"), "size", 480, min_value=64, max_value=1024)
+    except ValueError as error:
+        return _bad_request(str(error))
+
     if not relative_path:
-        return web.json_response({"error": "relative_path required"}, status=400)
+        return _bad_request("relative_path required")
 
     try:
         _, thumb_path = get_thumbnail_path(relative_path, size=size)
@@ -127,6 +186,24 @@ async def api_thumbnail(request: web.Request) -> web.StreamResponse:
         return web.json_response({"error": str(error)}, status=400)
 
     return web.FileResponse(Path(thumb_path))
+
+
+async def api_image_file(request: web.Request) -> web.StreamResponse:
+    relative_path = request.query.get("relative_path", "")
+    if not relative_path:
+        return _bad_request("relative_path required")
+
+    try:
+        _, full_path = resolve_image_path(relative_path)
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except ValueError as error:
+        return _bad_request(str(error))
+
+    if not os.path.exists(full_path):
+        return web.json_response({"error": "not found"}, status=404)
+
+    return web.FileResponse(Path(full_path))
 
 
 async def api_list_trash(_request: web.Request) -> web.Response:
@@ -139,7 +216,14 @@ async def api_trash_file(request: web.Request) -> web.StreamResponse:
     if not item:
         return web.Response(status=404)
 
-    storage_path = Path(os.path.join(TRASH_DIR, item.get("storage_path", "")))
+    trash_root = os.path.realpath(os.path.abspath(TRASH_DIR))
+    storage_path = Path(os.path.realpath(os.path.abspath(os.path.join(TRASH_DIR, item.get("storage_path", "")))))
+    try:
+        if os.path.commonpath([trash_root, str(storage_path)]) != trash_root:
+            return _bad_request("trash path must stay within trash directory")
+    except ValueError:
+        return _bad_request("invalid trash path")
+
     if not storage_path.exists():
         return web.Response(status=404)
 
@@ -182,7 +266,13 @@ async def api_update_image_state(request: web.Request) -> web.Response:
     if not relative_path or not isinstance(updates, dict):
         return web.json_response({"error": "relative_path and updates required"}, status=400)
 
-    _, full_path = resolve_image_path(relative_path)
+    try:
+        _, full_path = resolve_image_path(relative_path)
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except ValueError as error:
+        return _bad_request(str(error))
+
     if not os.path.exists(full_path):
         return web.json_response({"error": "image not found"}, status=404)
 
@@ -191,28 +281,47 @@ async def api_update_image_state(request: web.Request) -> web.Response:
 
 async def api_import_files(request: web.Request) -> web.Response:
     reader = await request.multipart()
-    parts = []
+    imported_images = []
+    imported_libraries = []
+    skipped = []
+    target_source_id = ""
+    target_subfolder = IMPORT_IMAGE_SUBFOLDER
+
     while True:
         part = await reader.next()
         if part is None:
             break
         if getattr(part, "filename", None):
-            parts.append(part)
+            kind, target_path, skipped_item = get_import_target_for_filename(part.filename, target_source_id, target_subfolder)
+            if skipped_item:
+                skipped.append(skipped_item)
+                continue
 
-    result = None
-    for item in import_files_from_parts(parts):
-        if item[0] == "write":
-            _, part, target_path = item
             with open(target_path, "wb") as file:
                 while True:
                     chunk = await part.read_chunk()
                     if not chunk:
                         break
                     file.write(chunk)
-        else:
-            _, result = item
 
-    return web.json_response(result or {"ok": True, "imported_images": [], "imported_libraries": [], "skipped": []})
+            if kind == "image":
+                imported_images.append(
+                    {
+                        "filename": os.path.basename(target_path),
+                        "relative_path": image_ref_for_full_path(target_path),
+                    }
+                )
+            else:
+                imported_libraries.append({"filename": os.path.basename(target_path)})
+            continue
+
+        field_value = (await part.text()).strip()
+        if part.name == "target_source_id":
+            target_source_id = field_value
+        elif part.name == "target_subfolder":
+            target_subfolder = field_value or IMPORT_IMAGE_SUBFOLDER
+
+    return web.json_response(build_import_result(imported_images, imported_libraries, skipped))
 
 
 async def api_delete_images(request: web.Request) -> web.Response:
@@ -220,7 +329,10 @@ async def api_delete_images(request: web.Request) -> web.Response:
     relative_paths = body.get("relative_paths", [])
     if not isinstance(relative_paths, list) or not relative_paths:
         return web.json_response({"error": "relative_paths required"}, status=400)
-    return web.json_response(delete_images(relative_paths))
+    try:
+        return web.json_response(delete_images(relative_paths))
+    except ValueError as error:
+        return _bad_request(str(error))
 
 
 async def api_batch_update_images(request: web.Request) -> web.Response:
@@ -229,18 +341,80 @@ async def api_batch_update_images(request: web.Request) -> web.Response:
     updates = body.get("updates", {})
     if not isinstance(relative_paths, list) or not relative_paths or not isinstance(updates, dict):
         return web.json_response({"error": "relative_paths and updates required"}, status=400)
-    return web.json_response(batch_update_images(relative_paths, updates))
+    try:
+        return web.json_response(batch_update_images(relative_paths, updates))
+    except ValueError as error:
+        return _bad_request(str(error))
+
+
+async def api_list_boards(request: web.Request) -> web.Response:
+    force_refresh = request.query.get("force_refresh", "").lower() in {"1", "true", "yes"}
+    try:
+        return web.json_response({"boards": list_boards(force_refresh=force_refresh)})
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+
+
+async def api_create_board(request: web.Request) -> web.Response:
+    body = await request.json()
+    name = str(body.get("name", "")).strip()
+    description = str(body.get("description", "")).strip()
+    try:
+        return web.json_response(create_gallery_board(name, description))
+    except ValueError as error:
+        return web.json_response({"error": str(error)}, status=400)
+
+
+async def api_update_board(request: web.Request) -> web.Response:
+    body = await request.json()
+    board_id = str(body.get("id", "")).strip()
+    updates = body.get("updates", {})
+    if not board_id or not isinstance(updates, dict):
+        return web.json_response({"error": "id and updates required"}, status=400)
+    try:
+        return web.json_response(update_gallery_board(board_id, updates))
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except ValueError as error:
+        return web.json_response({"error": str(error)}, status=400)
+
+
+async def api_delete_board(request: web.Request) -> web.Response:
+    body = await request.json()
+    board_id = str(body.get("id", "")).strip()
+    if not board_id:
+        return web.json_response({"error": "id required"}, status=400)
+    try:
+        return web.json_response(delete_gallery_board(board_id))
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+
+
+async def api_update_board_pins(request: web.Request) -> web.Response:
+    body = await request.json()
+    board_id = str(body.get("id", "")).strip()
+    relative_paths = body.get("relative_paths", [])
+    pinned = bool(body.get("pinned", True))
+    if not board_id or not isinstance(relative_paths, list):
+        return web.json_response({"error": "id and relative_paths required"}, status=400)
+    try:
+        return web.json_response(update_board_images(board_id, relative_paths, pinned=pinned))
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except ValueError as error:
+        return web.json_response({"error": str(error)}, status=400)
 
 
 async def api_move_images(request: web.Request) -> web.Response:
     body = await request.json()
     relative_paths = body.get("relative_paths", [])
     target_subfolder = str(body.get("target_subfolder", "")).strip()
+    target_source_id = str(body.get("target_source_id", "")).strip()
     if not isinstance(relative_paths, list) or not relative_paths:
         return web.json_response({"error": "relative_paths required"}, status=400)
 
     try:
-        return web.json_response(move_images(relative_paths, target_subfolder))
+        return web.json_response(move_images(relative_paths, target_subfolder, target_source_id))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -268,9 +442,12 @@ async def api_batch_rename_images(request: web.Request) -> web.Response:
     body = await request.json()
     relative_paths = body.get("relative_paths", [])
     template = str(body.get("template", "")).strip()
-    start_number = int(body.get("start_number", 1))
-    padding = int(body.get("padding", 2))
-    current_page = int(body.get("current_page", 1))
+    try:
+        start_number = _parse_int(body.get("start_number"), "start_number", 1)
+        padding = _parse_int(body.get("padding"), "padding", 2)
+        current_page = _parse_int(body.get("current_page"), "current_page", 1)
+    except ValueError as error:
+        return _bad_request(str(error))
 
     if not isinstance(relative_paths, list) or not relative_paths or not template:
         return web.json_response({"error": "relative_paths and template required"}, status=400)
@@ -311,8 +488,11 @@ async def api_get_library_entries(request: web.Request) -> web.Response:
         return web.json_response({"error": "name required"}, status=400)
 
     search = request.query.get("search", "")
-    page = max(1, int(request.query.get("page", "1")))
-    limit = max(1, int(request.query.get("limit", "120")))
+    try:
+        page = _parse_int(request.query.get("page"), "page", 1, min_value=1)
+        limit = _parse_int(request.query.get("limit"), "limit", 120, min_value=1)
+    except ValueError as error:
+        return _bad_request(str(error))
     return web.json_response(get_library_entries_page(name, search=search, page=page, limit=limit))
 
 
@@ -334,8 +514,11 @@ async def api_search_library_artists(request: web.Request) -> web.Response:
 
     query = request.query.get("query", "")
     filter_mode = request.query.get("filter_mode", "none")
-    post_threshold = int(request.query.get("post_threshold", "0"))
-    limit = max(1, int(request.query.get("limit", "12")))
+    try:
+        post_threshold = _parse_int(request.query.get("post_threshold"), "post_threshold", 0)
+        limit = _parse_int(request.query.get("limit"), "limit", 12, min_value=1)
+    except ValueError as error:
+        return _bad_request(str(error))
     return web.json_response(
         search_library_artists(
             name=name,
@@ -358,17 +541,17 @@ async def api_generate_artist_string(request: web.Request) -> web.Response:
             generate_artist_string(
                 name=name,
                 query=str(body.get("query", "")),
-                count=int(body.get("count", 3)),
+                count=_parse_int(body.get("count"), "count", 3),
                 mode=str(body.get("mode", "standard")),
                 preselected_names=body.get("preselected_names", []),
                 filter_mode=str(body.get("filter_mode", "none")),
-                post_threshold=int(body.get("post_threshold", 0)),
+                post_threshold=_parse_int(body.get("post_threshold"), "post_threshold", 0),
                 creative_bracket_style=str(body.get("creative_bracket_style", "paren")),
-                creative_nest_levels=int(body.get("creative_nest_levels", 0)),
-                standard_weight_min=float(body.get("standard_weight_min", 0.5)),
-                standard_weight_max=float(body.get("standard_weight_max", 1.5)),
-                nai_weight_min=float(body.get("nai_weight_min", 0.5)),
-                nai_weight_max=float(body.get("nai_weight_max", 1.5)),
+                creative_nest_levels=_parse_int(body.get("creative_nest_levels"), "creative_nest_levels", 0),
+                standard_weight_min=_parse_float(body.get("standard_weight_min"), "standard_weight_min", 0.5),
+                standard_weight_max=_parse_float(body.get("standard_weight_max"), "standard_weight_max", 1.5),
+                nai_weight_min=_parse_float(body.get("nai_weight_min"), "nai_weight_min", 0.5),
+                nai_weight_max=_parse_float(body.get("nai_weight_max"), "nai_weight_max", 1.5),
                 enable_custom_format=bool(body.get("enable_custom_format", False)),
                 custom_format_string=str(body.get("custom_format_string", "{name}")),
             )
@@ -525,11 +708,55 @@ async def api_delete_library(request: web.Request) -> web.Response:
     return web.json_response({"ok": True})
 
 
+async def api_list_gallery_sources(request: web.Request) -> web.Response:
+    force_refresh = request.query.get("force_refresh", "").lower() in {"1", "true", "yes"}
+    context = get_gallery_context(force_refresh=force_refresh)
+    return web.json_response({"sources": context.get("sources", []), "active_source_count": context.get("active_source_count", 0)})
+
+
+async def api_save_gallery_source(request: web.Request) -> web.Response:
+    body = await request.json()
+    if not isinstance(body, dict):
+        return _bad_request("source payload required")
+    try:
+        return web.json_response(save_gallery_source(body))
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except ValueError as error:
+        return _bad_request(str(error))
+
+
+async def api_delete_gallery_source(request: web.Request) -> web.Response:
+    body = await request.json()
+    source_id = str(body.get("id", "")).strip()
+    if not source_id:
+        return _bad_request("id required")
+    try:
+        return web.json_response(delete_gallery_source(source_id))
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except ValueError as error:
+        return _bad_request(str(error))
+
+
+async def api_test_gallery_source_path(request: web.Request) -> web.Response:
+    body = await request.json()
+    try:
+        return web.json_response(test_gallery_source_path(str(body.get("path", ""))))
+    except ValueError as error:
+        return _bad_request(str(error))
+
+
+async def api_diagnose_gallery_sources(_request: web.Request) -> web.Response:
+    return web.json_response(diagnose_gallery_sources())
+
+
 def register_routes(app):
     _safe_add_route(app.router, "get", "/universal_gallery/api/context", api_gallery_context)
     _safe_add_route(app.router, "get", "/universal_gallery/api/images", api_list_images)
     _safe_add_route(app.router, "get", "/universal_gallery/api/metadata", api_image_metadata)
     _safe_add_route(app.router, "get", "/universal_gallery/api/thumb", api_thumbnail)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/image-file", api_image_file)
     _safe_add_route(app.router, "get", "/universal_gallery/api/trash", api_list_trash)
     _safe_add_route(app.router, "get", "/universal_gallery/api/trash/file", api_trash_file)
     _safe_add_route(app.router, "post", "/universal_gallery/api/image-state", api_update_image_state)
@@ -538,6 +765,11 @@ def register_routes(app):
     _safe_add_route(app.router, "post", "/universal_gallery/api/import", api_import_files)
     _safe_add_route(app.router, "post", "/universal_gallery/api/images/delete", api_delete_images)
     _safe_add_route(app.router, "post", "/universal_gallery/api/images/batch-update", api_batch_update_images)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/boards", api_list_boards)
+    _safe_add_route(app.router, "post", "/universal_gallery/api/boards", api_create_board)
+    _safe_add_route(app.router, "patch", "/universal_gallery/api/boards", api_update_board)
+    _safe_add_route(app.router, "delete", "/universal_gallery/api/boards", api_delete_board)
+    _safe_add_route(app.router, "post", "/universal_gallery/api/boards/pins", api_update_board_pins)
     _safe_add_route(app.router, "post", "/universal_gallery/api/images/move", api_move_images)
     _safe_add_route(app.router, "post", "/universal_gallery/api/images/rename", api_rename_image)
     _safe_add_route(app.router, "post", "/universal_gallery/api/images/batch-rename", api_batch_rename_images)
@@ -555,6 +787,12 @@ def register_routes(app):
     _safe_add_route(app.router, "post", "/universal_gallery/api/folders/create", api_create_folder)
     _safe_add_route(app.router, "post", "/universal_gallery/api/folders/delete", api_delete_folder)
     _safe_add_route(app.router, "post", "/universal_gallery/api/folders/merge", api_merge_folder)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/settings/gallery-sources", api_list_gallery_sources)
+    _safe_add_route(app.router, "post", "/universal_gallery/api/settings/gallery-sources", api_save_gallery_source)
+    _safe_add_route(app.router, "patch", "/universal_gallery/api/settings/gallery-sources", api_save_gallery_source)
+    _safe_add_route(app.router, "delete", "/universal_gallery/api/settings/gallery-sources", api_delete_gallery_source)
+    _safe_add_route(app.router, "post", "/universal_gallery/api/settings/gallery-sources/test-path", api_test_gallery_source_path)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/settings/gallery-sources/diagnostics", api_diagnose_gallery_sources)
 
     if os.path.exists(GALLERY_UI_DIR):
         _safe_add_route(app.router, "get", "/gallery", redirect_gallery_root)

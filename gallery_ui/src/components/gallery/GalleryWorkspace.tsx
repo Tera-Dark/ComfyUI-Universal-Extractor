@@ -1,18 +1,25 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
+  CalendarX,
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ChevronUp,
   Check,
   CheckSquare,
+  CornerDownRight,
+  Eye,
   ExternalLink,
   Folder as FolderIcon,
-  Heart,
+  FolderMinus,
+  FolderPlus,
   Image as ImageIcon,
   PencilLine,
+  Pin,
   RotateCcw,
   Send,
+  Share2,
   Square,
-  Star,
   Tag,
   Trash2,
 } from "lucide-react";
@@ -20,26 +27,65 @@ import {
 import { useI18n } from "../../i18n/I18nProvider";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
-import type { GalleryContext, ImageRecord, TrashItem } from "../../types/universal-gallery";
+import type { BoardMutationResult, BoardSummary, GalleryContext, ImageRecord, MoveTargetOption, TrashItem } from "../../types/universal-gallery";
 import { formatCompactDate, formatFileSize } from "../../utils/formatters";
+import { BoardPickerModal } from "./BoardPickerModal";
+import { BoardShareModal } from "./BoardShareModal";
 import { CategoryPickerModal } from "./CategoryPickerModal";
+
+const loadedImageUrls = new Set<string>();
+const prefetchedImageUrls = new Set<string>();
+
+const getGalleryImageUrl = (image: ImageRecord) => image.thumb_url || image.url;
+
+const prefetchGalleryImage = (image: ImageRecord) => {
+  const imageUrl = getGalleryImageUrl(image);
+  if (!imageUrl || loadedImageUrls.has(imageUrl) || prefetchedImageUrls.has(imageUrl)) {
+    return;
+  }
+
+  prefetchedImageUrls.add(imageUrl);
+  const preloadImage = new Image();
+  preloadImage.decoding = "async";
+  preloadImage.onload = () => {
+    loadedImageUrls.add(imageUrl);
+  };
+  preloadImage.onerror = () => {
+    prefetchedImageUrls.delete(imageUrl);
+  };
+  preloadImage.src = imageUrl;
+};
 
 const GalleryCardImage = ({
   image,
+  priority = false,
   onOpenDetail,
 }: {
   image: ImageRecord;
+  priority?: boolean;
   onOpenDetail: (image: ImageRecord) => void;
 }) => {
-  const [loaded, setLoaded] = useState(false);
+  const imageUrl = getGalleryImageUrl(image);
+  const [loaded, setLoaded] = useState(() => loadedImageUrls.has(imageUrl));
+
+  useEffect(() => {
+    setLoaded(loadedImageUrls.has(imageUrl));
+  }, [imageUrl]);
+
+  const markLoaded = () => {
+    loadedImageUrls.add(imageUrl);
+    setLoaded(true);
+  };
 
   return (
     <div className={`ue-gallery-image-shell ${loaded ? "is-loaded" : ""}`}>
       <img
-        src={image.thumb_url || image.url}
+        src={imageUrl}
         alt={image.title || image.filename}
-        loading="lazy"
-        onLoad={() => setLoaded(true)}
+        loading={priority ? "eager" : "lazy"}
+        decoding="async"
+        onLoad={markLoaded}
+        onError={markLoaded}
         onClick={() => onOpenDetail(image)}
       />
     </div>
@@ -54,6 +100,7 @@ interface GalleryWorkspaceProps {
   totalPages: number;
   selectedCategory: string;
   selectedSubfolder: string;
+  selectedBoardId: string;
   dateFrom: string;
   dateTo: string;
   favoritesOnly: boolean;
@@ -67,10 +114,12 @@ interface GalleryWorkspaceProps {
   isLoading: boolean;
   isRefreshing: boolean;
   error: string | null;
-  targetFolderOptions: string[];
+  targetFolderOptions: MoveTargetOption[];
+  boards: BoardSummary[];
   onOpenDetail: (image: ImageRecord) => void;
   onPageChange: (page: number) => void;
   onCategoryChange: (category: string) => void;
+  onBoardChange: (boardId: string) => void;
   onDateFromChange: (value: string) => void;
   onDateToChange: (value: string) => void;
   onFavoritesOnlyChange: (value: boolean) => void;
@@ -81,7 +130,10 @@ interface GalleryWorkspaceProps {
   onSelectionChange: (relativePaths: string[]) => void;
   onUpdateImageState: (relativePath: string, updates: Record<string, unknown>) => Promise<void>;
   onBatchUpdateImages: (relativePaths: string[], updates: Record<string, unknown>) => Promise<unknown>;
-  onMoveImages: (relativePaths: string[], targetSubfolder: string) => Promise<unknown>;
+  onCreateBoard: (name: string, description?: string) => Promise<BoardMutationResult>;
+  onUpdateBoardPins: (boardId: string, relativePaths: string[], pinned?: boolean) => Promise<unknown>;
+  onDeleteBoard: (boardId: string) => Promise<unknown>;
+  onMoveImages: (relativePaths: string[], targetSubfolder: string, targetSourceId?: string) => Promise<unknown>;
   onBatchRenameImages: (
     relativePaths: string[],
     template: string,
@@ -90,7 +142,7 @@ interface GalleryWorkspaceProps {
     currentPage: number,
   ) => Promise<unknown>;
   onDeleteImages: (relativePaths: string[]) => Promise<unknown>;
-  onImportFiles: (files: File[]) => Promise<unknown>;
+  onImportFiles: (files: File[], targetSourceId?: string) => Promise<unknown>;
   onRestoreTrashItem: (id: string) => Promise<void>;
   onPurgeTrashItem: (id: string) => Promise<void>;
 }
@@ -116,6 +168,7 @@ export const GalleryWorkspace = ({
   totalPages,
   selectedCategory,
   selectedSubfolder,
+  selectedBoardId,
   dateFrom,
   dateTo,
   favoritesOnly,
@@ -130,9 +183,11 @@ export const GalleryWorkspace = ({
   isRefreshing,
   error,
   targetFolderOptions,
+  boards,
   onOpenDetail,
   onPageChange,
   onCategoryChange,
+  onBoardChange,
   onDateFromChange,
   onDateToChange,
   onFavoritesOnlyChange,
@@ -143,6 +198,9 @@ export const GalleryWorkspace = ({
   onSelectionChange,
   onUpdateImageState,
   onBatchUpdateImages,
+  onCreateBoard,
+  onUpdateBoardPins,
+  onDeleteBoard,
   onMoveImages,
   onBatchRenameImages,
   onDeleteImages,
@@ -156,6 +214,9 @@ export const GalleryWorkspace = ({
   const [dragActive, setDragActive] = useState(false);
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkTargetSubfolder, setBulkTargetSubfolder] = useState("");
+  const [importTargetSourceId, setImportTargetSourceId] = useState("");
+  const [boardPickerPaths, setBoardPickerPaths] = useState<string[]>([]);
+  const [shareBoardId, setShareBoardId] = useState("");
   const [bulkRenameTemplate, setBulkRenameTemplate] = useState("set-{page}-{n}");
   const [bulkRenameStart, setBulkRenameStart] = useState(1);
   const [bulkRenamePadding, setBulkRenamePadding] = useState(2);
@@ -178,6 +239,27 @@ export const GalleryWorkspace = ({
     () => images.filter((image) => selectedImagePathSet.has(image.relative_path)).map((image) => image.relative_path),
     [images, selectedImagePathSet],
   );
+  const selectedCount = pageSelectedPaths.length;
+  const hasSelection = selectedCount > 0;
+  const selectedBoard = useMemo(
+    () => boards.find((board) => board.id === selectedBoardId) ?? null,
+    [boards, selectedBoardId],
+  );
+  const shareBoard = useMemo(
+    () => boards.find((board) => board.id === shareBoardId) ?? null,
+    [boards, shareBoardId],
+  );
+  const writableSources = useMemo(
+    () => (context?.sources ?? []).filter((source) => source.enabled && source.exists && source.writable),
+    [context?.sources],
+  );
+  const activeImportSourceId = importTargetSourceId || writableSources.find((source) => source.import_target)?.id || writableSources[0]?.id || "";
+
+  useEffect(() => {
+    if (activeImportSourceId && activeImportSourceId !== importTargetSourceId) {
+      setImportTargetSourceId(activeImportSourceId);
+    }
+  }, [activeImportSourceId, importTargetSourceId]);
 
   useEffect(() => {
     const handleResize = () => setViewportWidth(window.innerWidth);
@@ -255,7 +337,7 @@ export const GalleryWorkspace = ({
     handleScroll();
     scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
     return () => scrollContainer.removeEventListener("scroll", handleScroll);
-  }, []);
+  }, [images.length]);
 
   const effectiveColumns = useMemo(() => {
     if (viewportWidth <= 640) return 1;
@@ -264,6 +346,49 @@ export const GalleryWorkspace = ({
     if (viewportWidth <= 1600) return Math.min(gridColumns, 4);
     return gridColumns;
   }, [gridColumns, viewportWidth]);
+
+  useEffect(() => {
+    if (!images.length || isTrashView || typeof IntersectionObserver === "undefined") {
+      return;
+    }
+
+    const indexByPath = new Map(images.map((image, index) => [image.relative_path, index]));
+    const prefetchSpan = Math.max(effectiveColumns * 3, 8);
+    const root = gridRef.current?.closest(".ue-main-shell") as HTMLElement | null;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) {
+            return;
+          }
+
+          const relativePath = (entry.target as HTMLElement).dataset.imagePath;
+          const startIndex = relativePath ? indexByPath.get(relativePath) : undefined;
+          if (startIndex === undefined) {
+            return;
+          }
+
+          const endIndex = Math.min(images.length, startIndex + prefetchSpan);
+          for (let index = startIndex; index < endIndex; index += 1) {
+            prefetchGalleryImage(images[index]);
+          }
+          observer.unobserve(entry.target);
+        });
+      },
+      { root, rootMargin: "900px 0px", threshold: 0.01 },
+    );
+
+    images.forEach((image) => {
+      const element = cardRefs.current[image.relative_path];
+      if (!element) {
+        return;
+      }
+      element.dataset.imagePath = image.relative_path;
+      observer.observe(element);
+    });
+
+    return () => observer.disconnect();
+  }, [effectiveColumns, images, isTrashView]);
 
   const topCategories = useMemo(() => {
     const categories = context?.categories ?? [];
@@ -295,7 +420,7 @@ export const GalleryWorkspace = ({
     setDragActive(false);
     const files = Array.from(event.dataTransfer.files ?? []);
     if (files.length) {
-      await onImportFiles(files);
+      await onImportFiles(files, activeImportSourceId);
     }
   };
 
@@ -317,17 +442,17 @@ export const GalleryWorkspace = ({
   };
 
   const handleBatchDelete = async () => {
-    if (!pageSelectedPaths.length) {
+    if (!hasSelection) {
       return;
     }
 
     const approved = await confirm({
       title: t("bulkDelete"),
       message:
-        pageSelectedPaths.length >= 20
-          ? t("bulkDeleteHeavyConfirm", { count: pageSelectedPaths.length })
-          : t("bulkDeleteConfirm", { count: pageSelectedPaths.length }),
-      tone: pageSelectedPaths.length >= 20 ? "danger" : "warning",
+        selectedCount >= 20
+          ? t("bulkDeleteHeavyConfirm", { count: selectedCount })
+          : t("bulkDeleteConfirm", { count: selectedCount }),
+      tone: selectedCount >= 20 ? "danger" : "warning",
       confirmLabel: t("commonDelete"),
       cancelLabel: t("libraryCancel"),
     });
@@ -339,17 +464,54 @@ export const GalleryWorkspace = ({
     clearSelection();
   };
 
+  const handleAddToBoard = async (boardId: string) => {
+    if (!boardPickerPaths.length) {
+      return;
+    }
+    await onUpdateBoardPins(boardId, boardPickerPaths, true);
+    pushToast(t("boardAddSuccess", { count: boardPickerPaths.length }), "success");
+    setBoardPickerPaths([]);
+  };
+
+  const handleDeleteSelectedBoard = async () => {
+    if (!selectedBoard) {
+      return;
+    }
+    const approved = await confirm({
+      title: t("boardDeleteTitle"),
+      message: t("boardDeleteConfirm", { name: selectedBoard.name }),
+      tone: "warning",
+      confirmLabel: t("commonDelete"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+    await onDeleteBoard(selectedBoard.id);
+    onBoardChange("");
+    pushToast(t("boardDeleteSuccess"), "success");
+  };
+
+  const handleRemoveFromSelectedBoard = async () => {
+    if (!selectedBoard || !hasSelection) {
+      return;
+    }
+    await onUpdateBoardPins(selectedBoard.id, pageSelectedPaths, false);
+    clearSelection();
+  };
+
   const handleBatchMove = async () => {
-    if (!pageSelectedPaths.length || !bulkTargetSubfolder) {
+    if (!hasSelection || !bulkTargetSubfolder) {
       return;
     }
 
-    await onMoveImages(pageSelectedPaths, bulkTargetSubfolder);
+    const target = targetFolderOptions.find((option) => option.value === bulkTargetSubfolder);
+    await onMoveImages(pageSelectedPaths, bulkTargetSubfolder, target?.source_id);
     clearSelection();
   };
 
   const handleBatchRename = async () => {
-    if (!pageSelectedPaths.length || !bulkRenameTemplate.trim()) {
+    if (!hasSelection || !bulkRenameTemplate.trim()) {
       return;
     }
 
@@ -533,11 +695,14 @@ export const GalleryWorkspace = ({
       <section className="ue-workspace ue-workspace--gallery ue-animate-in">
         <div className="ue-filter-bar ue-filter-bar--gallery">
           <div className="ue-filter-copy">
-            <p className="ue-filter-kicker">{isTrashView ? (t("trashTitle")) : (selectedSubfolder || t("galleryOutputFolder"))}</p>
+            <p className="ue-filter-kicker">
+              {isTrashView ? t("trashTitle") : selectedBoard ? selectedBoard.name : selectedSubfolder || t("galleryOutputFolder")}
+            </p>
             <div className="ue-filter-summary">
               <strong>{total}</strong>
               <span>{t("galleryFilterResult", { count: total })}</span>
-              {favoritesOnly ? <em>{t("galleryFavoriteOnly")}</em> : null}
+              {favoritesOnly ? <em>{t("galleryPinnedOnly")}</em> : null}
+              {selectedBoard ? <em>{t("sidebarBoards")}</em> : null}
               {isRefreshing ? <em>{t("commonLoading")}</em> : null}
             </div>
           </div>
@@ -632,14 +797,16 @@ export const GalleryWorkspace = ({
 
             {dateFrom || dateTo ? (
               <button
-                className="ue-secondary-btn"
+                className="ue-icon-action"
                 onClick={() => {
                   onDateFromChange("");
                   onDateToChange("");
                   onPageChange(1);
                 }}
+                aria-label={t("galleryDateClear")}
+                title={t("galleryDateClear")}
               >
-                {t("galleryDateClear")}
+                <CalendarX size={14} />
               </button>
             ) : null}
 
@@ -676,22 +843,59 @@ export const GalleryWorkspace = ({
             </div>
 
             <button
-              className={`ue-chip-toggle ${favoritesOnly ? "active" : ""}`}
+              className={`ue-chip-toggle ue-chip-toggle--icon ${favoritesOnly ? "active" : ""}`}
               onClick={() => onFavoritesOnlyChange(!favoritesOnly)}
+              aria-label={t("galleryPinnedOnly")}
+              title={t("galleryPinnedOnly")}
             >
-              <Star size={13} />
-              <span>{t("galleryFavoriteOnly")}</span>
+              <Pin size={13} />
             </button>
+            {selectedBoard ? (
+              <>
+                <button
+                  className="ue-chip-toggle ue-chip-toggle--icon"
+                  onClick={() => setShareBoardId(selectedBoard.id)}
+                  aria-label={t("boardShareTitle")}
+                  title={t("boardShareTitle")}
+                >
+                  <Share2 size={13} />
+                </button>
+                <button
+                  className="ue-chip-toggle ue-chip-toggle--icon"
+                  onClick={() => void handleDeleteSelectedBoard()}
+                  aria-label={t("boardDeleteTitle")}
+                  title={t("boardDeleteTitle")}
+                >
+                  <Trash2 size={13} />
+                </button>
+              </>
+            ) : null}
             <button
-              className={`ue-chip-toggle ${selectionMode ? "active" : ""}`}
+              className={`ue-chip-toggle ue-chip-toggle--icon ${selectionMode ? "active" : ""}`}
+              title={t("bulkSelectionHint")}
+              aria-label={t("bulkSelectMode")}
               onClick={() => {
                 setSelectionMode((current) => !current);
                 clearSelection();
               }}
             >
               <CheckSquare size={13} />
-              <span>{t("bulkSelectMode")}</span>
             </button>
+            {writableSources.length > 0 ? (
+              <label className="ue-select-field ue-select-field--compact" title={t("galleryImportTarget")}>
+                <select
+                  value={activeImportSourceId}
+                  onChange={(event) => setImportTargetSourceId(event.target.value)}
+                  aria-label={t("galleryImportTarget")}
+                >
+                  {writableSources.map((source) => (
+                    <option key={source.id} value={source.id}>
+                      {source.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
           </div>
           ) : null}
         </div>
@@ -701,123 +905,189 @@ export const GalleryWorkspace = ({
 
         {selectionMode ? (
           <div className="ue-bulkbar ue-bulkbar--top">
-            <div className="ue-bulkbar-info">
-              <strong>{t("bulkSelected", { count: pageSelectedPaths.length })}</strong>
-              <span>{t("bulkSelectionHint")}</span>
+            <div className="ue-bulkbar-status">
+              <div className="ue-bulkbar-count">
+                <CheckSquare size={16} />
+                <strong>{t("bulkSelected", { count: selectedCount })}</strong>
+              </div>
               <span>{selectedSubfolder || t("galleryOutputFolder")}</span>
+              <p>{t("bulkSelectionHint")}</p>
             </div>
 
-            <div className="ue-bulkbar-actions">
-              <button className="ue-secondary-btn" onClick={selectAllVisible} aria-label={t("bulkSelectVisible")}>
-                <CheckSquare size={13} />
-                <span>{t("bulkSelectVisible")}</span>
-              </button>
-              <button
-                className="ue-secondary-btn"
-                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { favorite: true })}
-                aria-label={t("bulkFavorite")}
-                disabled={!pageSelectedPaths.length}
-              >
-                <Star size={13} />
-              </button>
-              <button
-                className="ue-secondary-btn"
-                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { favorite: false })}
-                aria-label={t("bulkUnfavorite")}
-                disabled={!pageSelectedPaths.length}
-              >
-                <Heart size={13} />
-              </button>
-              <label className="ue-select-field ue-select-field--input">
-                <Tag size={13} />
-                <input
-                  value={bulkCategory}
-                  onChange={(event) => setBulkCategory(event.target.value)}
-                  placeholder={t("galleryCategoryPlaceholder")}
-                />
-              </label>
-              <button
-                className="ue-secondary-btn"
-                onClick={() => void onBatchUpdateImages(pageSelectedPaths, { category: bulkCategory })}
-                aria-label={t("bulkSetCategory")}
-                disabled={!pageSelectedPaths.length || !bulkCategory.trim()}
-              >
-                <Check size={13} />
-              </button>
-              <label className="ue-select-field ue-select-field--input">
-                <span>{t("bulkMoveTo")}</span>
-                <select
-                  value={bulkTargetSubfolder}
-                  onChange={(event) => setBulkTargetSubfolder(event.target.value)}
+            <div className="ue-bulkbar-main">
+              <div className="ue-bulkbar-quick-actions" aria-label={t("bulkActions")}>
+                <button
+                  className="ue-icon-action"
+                  onClick={selectAllVisible}
+                  aria-label={t("bulkSelectVisible")}
+                  title={t("bulkSelectVisible")}
                 >
-                  <option value="">{t("galleryOutputFolder")}</option>
-                  {targetFolderOptions
-                    .filter((option) => option !== selectedSubfolder)
-                    .map((option) => (
-                      <option key={option || "__root"} value={option}>
-                        {option || "./"}
-                      </option>
-                    ))}
-                </select>
-              </label>
-              <button
-                className="ue-secondary-btn"
-                onClick={() => void handleBatchMove()}
-                aria-label={t("bulkMoveTo")}
-                disabled={!pageSelectedPaths.length || !bulkTargetSubfolder}
-              >
-                <ImageIcon size={13} />
-              </button>
-              <label className="ue-select-field ue-select-field--input ue-bulk-rename-field">
-                <PencilLine size={13} />
-                <input
-                  value={bulkRenameTemplate}
-                  onChange={(event) => setBulkRenameTemplate(event.target.value)}
-                  placeholder={t("bulkRenameTemplatePlaceholder")}
-                />
-              </label>
-              <label className="ue-select-field ue-bulk-number-field">
-                <span>{t("bulkRenameStart")}</span>
-                <input
-                  type="number"
-                  min={0}
-                  value={bulkRenameStart}
-                  onChange={(event) => setBulkRenameStart(Number(event.target.value) || 0)}
-                />
-              </label>
-              <label className="ue-select-field ue-bulk-number-field">
-                <span>{t("bulkRenamePadding")}</span>
-                <input
-                  type="number"
-                  min={1}
-                  max={8}
-                  value={bulkRenamePadding}
-                  onChange={(event) => setBulkRenamePadding(Number(event.target.value) || 1)}
-                />
-              </label>
-              <button
-                className="ue-secondary-btn"
-                onClick={() => void handleBatchRename()}
-                aria-label={t("bulkRenameApply")}
-                disabled={!pageSelectedPaths.length || !bulkRenameTemplate.trim()}
-              >
-                <PencilLine size={13} />
-                <span>{t("bulkRenameApply")}</span>
-              </button>
-              <button className="ue-secondary-btn" onClick={clearSelection} aria-label={t("bulkClear")}>
-                <Square size={13} />
-              </button>
-              <button
-                className="ue-secondary-btn ue-danger-btn"
-                onClick={() => void handleBatchDelete()}
-                disabled={!pageSelectedPaths.length}
-              >
-                <Trash2 size={13} />
-              </button>
-            </div>
-            <div className="ue-bulkbar-note">
-              <strong>{t("bulkRenameRuleTitle")}</strong>
-              <span>{t("bulkRenameRuleHint")}</span>
+                  <CheckSquare size={14} />
+                </button>
+                <button
+                  className="ue-icon-action"
+                  onClick={clearSelection}
+                  aria-label={t("bulkClear")}
+                  title={t("bulkClear")}
+                >
+                  <Square size={14} />
+                </button>
+                <button
+                  className="ue-icon-action"
+                  onClick={() => void onBatchUpdateImages(pageSelectedPaths, { pinned: true })}
+                  aria-label={t("bulkPin")}
+                  title={t("bulkPin")}
+                  disabled={!hasSelection}
+                >
+                  <Pin size={14} />
+                </button>
+                <button
+                  className="ue-icon-action"
+                  onClick={() => void onBatchUpdateImages(pageSelectedPaths, { pinned: false })}
+                  aria-label={t("bulkUnpin")}
+                  title={t("bulkUnpin")}
+                  disabled={!hasSelection}
+                >
+                  <Pin size={14} />
+                </button>
+                <button
+                  className="ue-icon-action"
+                  onClick={() => setBoardPickerPaths(pageSelectedPaths)}
+                  aria-label={t("bulkAddToBoard")}
+                  title={t("bulkAddToBoard")}
+                  disabled={!hasSelection}
+                >
+                  <FolderPlus size={14} />
+                </button>
+                {selectedBoard ? (
+                  <button
+                    className="ue-icon-action"
+                    onClick={() => void handleRemoveFromSelectedBoard()}
+                    aria-label={t("bulkRemoveFromBoard")}
+                    title={t("bulkRemoveFromBoard")}
+                    disabled={!hasSelection}
+                  >
+                    <FolderMinus size={14} />
+                  </button>
+                ) : null}
+                <button
+                  className="ue-icon-action ue-icon-action--danger"
+                  onClick={() => void handleBatchDelete()}
+                  aria-label={t("bulkDelete")}
+                  title={t("bulkDelete")}
+                  disabled={!hasSelection}
+                >
+                  <Trash2 size={14} />
+                </button>
+              </div>
+
+              <div className="ue-bulkbar-tools">
+                <div className="ue-bulk-tool">
+                  <span className="ue-bulk-tool-title">
+                    <Tag size={13} />
+                    {t("bulkSetCategory")}
+                  </span>
+                  <div className="ue-bulk-tool-field">
+                    <label className="ue-select-field ue-select-field--input">
+                      <input
+                        value={bulkCategory}
+                        onChange={(event) => setBulkCategory(event.target.value)}
+                        placeholder={t("galleryCategoryPlaceholder")}
+                      />
+                    </label>
+                    <button
+                      className="ue-icon-action ue-icon-action--filled"
+                      onClick={() => void onBatchUpdateImages(pageSelectedPaths, { category: bulkCategory })}
+                      aria-label={t("bulkSetCategory")}
+                      title={t("bulkSetCategory")}
+                      disabled={!hasSelection || !bulkCategory.trim()}
+                    >
+                      <Check size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="ue-bulk-tool">
+                  <span className="ue-bulk-tool-title">
+                    <ImageIcon size={13} />
+                    {t("bulkMoveTo")}
+                  </span>
+                  <div className="ue-bulk-tool-field">
+                    <label className="ue-select-field ue-select-field--input">
+                      <select
+                        value={bulkTargetSubfolder}
+                        onChange={(event) => setBulkTargetSubfolder(event.target.value)}
+                      >
+                        {targetFolderOptions
+                          .filter((option) => option.value !== selectedSubfolder)
+                          .map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                      </select>
+                    </label>
+                    <button
+                      className="ue-icon-action ue-icon-action--filled"
+                      onClick={() => void handleBatchMove()}
+                      aria-label={t("bulkMoveTo")}
+                      title={t("bulkMoveTo")}
+                      disabled={!hasSelection || !bulkTargetSubfolder}
+                    >
+                      <Check size={14} />
+                    </button>
+                  </div>
+                </div>
+
+                <div className="ue-bulk-tool ue-bulk-tool--rename">
+                  <span className="ue-bulk-tool-title">
+                    <PencilLine size={13} />
+                    {t("bulkRenameApply")}
+                  </span>
+                  <div className="ue-bulk-tool-field">
+                    <label className="ue-select-field ue-select-field--input ue-bulk-rename-field">
+                      <input
+                        value={bulkRenameTemplate}
+                        onChange={(event) => setBulkRenameTemplate(event.target.value)}
+                        placeholder={t("bulkRenameTemplatePlaceholder")}
+                      />
+                    </label>
+                    <label className="ue-select-field ue-bulk-number-field">
+                      <span>{t("bulkRenameStart")}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={bulkRenameStart}
+                        onChange={(event) => setBulkRenameStart(Number(event.target.value) || 0)}
+                      />
+                    </label>
+                    <label className="ue-select-field ue-bulk-number-field">
+                      <span>{t("bulkRenamePadding")}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={8}
+                        value={bulkRenamePadding}
+                        onChange={(event) => setBulkRenamePadding(Number(event.target.value) || 1)}
+                      />
+                    </label>
+                    <button
+                      className="ue-icon-action ue-icon-action--accent"
+                      onClick={() => void handleBatchRename()}
+                      aria-label={t("bulkRenameApply")}
+                      title={t("bulkRenameRuleHint")}
+                      disabled={!hasSelection || !bulkRenameTemplate.trim()}
+                    >
+                      <PencilLine size={13} />
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="ue-bulkbar-note">
+                <strong>{t("bulkRenameRuleTitle")}</strong>
+                <span>{t("bulkRenameRuleHint")}</span>
+              </div>
             </div>
           </div>
         ) : null}
@@ -854,13 +1124,21 @@ export const GalleryWorkspace = ({
                     </div>
                   </div>
                   <div className="ue-trash-card-actions">
-                    <button className="ue-secondary-btn" onClick={() => void onRestoreTrashItem(item.id)}>
+                    <button
+                      className="ue-icon-action"
+                      onClick={() => void onRestoreTrashItem(item.id)}
+                      aria-label={t("trashRestore")}
+                      title={t("trashRestore")}
+                    >
                       <RotateCcw size={14} />
-                      <span>{t("trashRestore")}</span>
                     </button>
-                    <button className="ue-secondary-btn ue-danger-btn" onClick={() => void onPurgeTrashItem(item.id)}>
+                    <button
+                      className="ue-icon-action ue-icon-action--danger"
+                      onClick={() => void onPurgeTrashItem(item.id)}
+                      aria-label={t("trashDeleteForever")}
+                      title={t("trashDeleteForever")}
+                    >
                       <Trash2 size={14} />
-                      <span>{t("trashDeleteForever")}</span>
                     </button>
                   </div>
                 </article>
@@ -885,7 +1163,7 @@ export const GalleryWorkspace = ({
             onPointerUp={handleSelectionPointerEnd}
             onPointerCancel={handleSelectionPointerEnd}
           >
-            {images.map((image) => {
+            {images.map((image, index) => {
               const selected = pageSelectedPaths.includes(image.relative_path);
 
               return (
@@ -900,6 +1178,7 @@ export const GalleryWorkspace = ({
                   <div className="ue-gallery-media">
                     <GalleryCardImage
                       image={image}
+                      priority={index < effectiveColumns * 2}
                       onOpenDetail={(nextImage) => {
                         if (selectionMode) {
                           toggleSelection(nextImage.relative_path);
@@ -930,25 +1209,39 @@ export const GalleryWorkspace = ({
                           event.stopPropagation();
                           toggleSelection(image.relative_path);
                         }}
-                        aria-label={selected ? "Deselect image" : "Select image"}
+                        aria-label={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
+                        title={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
                       >
                         {selected ? <CheckSquare size={13} /> : <Square size={13} />}
                       </button>
 
                       <button
-                        className={`ue-favorite-btn ${image.favorite ? "active" : ""}`}
+                        className="ue-board-btn"
                         onClick={(event) => {
                           event.stopPropagation();
-                          void onUpdateImageState(image.relative_path, { favorite: !image.favorite });
+                          setBoardPickerPaths([image.relative_path]);
                         }}
-                        aria-label={image.favorite ? t("galleryUnfavorite") : t("galleryFavorite")}
+                        aria-label={t("bulkAddToBoard")}
+                        title={t("bulkAddToBoard")}
                       >
-                        <Heart size={13} fill={image.favorite ? "currentColor" : "none"} />
+                        <FolderPlus size={13} />
+                      </button>
+
+                      <button
+                        className={`ue-pin-btn ${image.pinned ? "active" : ""}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          void onUpdateImageState(image.relative_path, { pinned: !image.pinned });
+                        }}
+                        aria-label={image.pinned ? t("galleryUnpin") : t("galleryPin")}
+                        title={image.pinned ? t("galleryUnpin") : t("galleryPin")}
+                      >
+                        <Pin size={13} fill={image.pinned ? "currentColor" : "none"} />
                       </button>
                     </div>
 
                     <button
-                      className="ue-gallery-open"
+                      className="ue-gallery-open ue-gallery-open--icon"
                       onClick={() => {
                         if (selectionMode) {
                           toggleSelection(image.relative_path);
@@ -959,8 +1252,10 @@ export const GalleryWorkspace = ({
                         }
                         onOpenDetail(image);
                       }}
+                      aria-label={t("galleryInspect")}
+                      title={t("galleryInspect")}
                     >
-                      {t("galleryInspect")}
+                      <Eye size={14} />
                     </button>
                   </div>
 
@@ -982,11 +1277,11 @@ export const GalleryWorkspace = ({
                     </span>
                     <span className="ue-gallery-meta">
                       {formatCompactDate(image.created_at)}
-                      <i aria-hidden="true">·</i>
+                      <i aria-hidden="true">/</i>
                       {formatFileSize(image.size)}
                       {image.category ? (
                         <>
-                          <i aria-hidden="true">·</i>
+                          <i aria-hidden="true">/</i>
                           {image.category}
                         </>
                       ) : null}
@@ -1013,21 +1308,35 @@ export const GalleryWorkspace = ({
           <div className="ue-pagination">
             <div className="ue-pagination-meta">
               <span>{t("galleryPage", { page, totalPages })}</span>
-              <i aria-hidden="true">·</i>
+              <i aria-hidden="true">/</i>
               <span>{total} {t("galleryStatsTotal")}</span>
             </div>
 
             <div className="ue-pagination-actions">
               {selectionMode ? (
-                <button onClick={selectAllVisible}>{t("bulkSelectVisible")}</button>
-              ) : (
-              <button onClick={selectAllVisible}>{t("bulkSelectVisible")}</button>
-              )}
-              <button disabled={page <= 1} onClick={() => onPageChange(page - 1)}>
-                {t("galleryPrevious")}
+                <button
+                  aria-label={t("bulkSelectVisible")}
+                  title={t("bulkSelectVisible")}
+                  onClick={selectAllVisible}
+                >
+                  <CheckSquare size={14} />
+                </button>
+              ) : null}
+              <button
+                disabled={page <= 1}
+                onClick={() => onPageChange(page - 1)}
+                aria-label={t("galleryPrevious")}
+                title={t("galleryPrevious")}
+              >
+                <ChevronLeft size={14} />
               </button>
-              <button disabled={page >= totalPages} onClick={() => onPageChange(page + 1)}>
-                {t("galleryNext")}
+              <button
+                disabled={page >= totalPages}
+                onClick={() => onPageChange(page + 1)}
+                aria-label={t("galleryNext")}
+                title={t("galleryNext")}
+              >
+                <ChevronRight size={14} />
               </button>
               <form
                 key={page}
@@ -1048,7 +1357,9 @@ export const GalleryWorkspace = ({
                     aria-label={t("galleryJumpTo")}
                   />
                 </label>
-                <button type="submit">{t("galleryJump")}</button>
+                <button type="submit" aria-label={t("galleryJump")} title={t("galleryJump")}>
+                  <CornerDownRight size={14} />
+                </button>
               </form>
             </div>
           </div>
@@ -1071,6 +1382,21 @@ export const GalleryWorkspace = ({
         selectedCategory={selectedCategory}
         onClose={() => setShowCategoryPicker(false)}
         onSelect={onCategoryChange}
+      />
+
+      <BoardPickerModal
+        open={boardPickerPaths.length > 0}
+        boards={boards}
+        selectedCount={boardPickerPaths.length}
+        onClose={() => setBoardPickerPaths([])}
+        onCreateBoard={onCreateBoard}
+        onAddToBoard={handleAddToBoard}
+      />
+
+      <BoardShareModal
+        open={Boolean(shareBoard)}
+        board={shareBoard}
+        onClose={() => setShareBoardId("")}
       />
 
       {contextMenu ? (

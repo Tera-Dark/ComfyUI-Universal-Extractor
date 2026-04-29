@@ -1,8 +1,12 @@
 import type {
   BatchUpdateResult,
+  BoardMutationResult,
+  BoardSummary,
   DeleteImagesResult,
   FolderMutationResult,
   GalleryContext,
+  GallerySource,
+  GallerySourceDiagnostic,
   ImageListResponse,
   ImageMetadata,
   ImportResult,
@@ -71,6 +75,7 @@ export const galleryApi = {
     search: string,
     category = "",
     subfolder = "",
+    boardId = "",
     dateFrom = "",
     dateTo = "",
     favoritesOnly = false,
@@ -91,6 +96,9 @@ export const galleryApi = {
     if (subfolder.trim()) {
       params.set("subfolder", subfolder.trim());
     }
+    if (boardId.trim()) {
+      params.set("board_id", boardId.trim());
+    }
     if (dateFrom.trim()) {
       params.set("date_from", dateFrom.trim());
     }
@@ -98,7 +106,7 @@ export const galleryApi = {
       params.set("date_to", dateTo.trim());
     }
     if (favoritesOnly) {
-      params.set("favorites", "true");
+      params.set("pinned", "true");
     }
     params.set("sort_by", sortBy);
     params.set("sort_order", sortOrder);
@@ -116,7 +124,7 @@ export const galleryApi = {
   },
 
   async updateImageState(relativePath: string, updates: Record<string, unknown>) {
-    return requestJson<{ ok: boolean; state: ImageMetadata["state"]; categories: string[] }>(
+    return requestJson<{ ok: boolean; state: ImageMetadata["state"]; categories: string[]; boards?: BoardSummary[] }>(
       "/universal_gallery/api/image-state",
       {
         method: "POST",
@@ -128,8 +136,14 @@ export const galleryApi = {
     );
   },
 
-  async importFiles(files: File[]) {
+  async importFiles(files: File[], targetSourceId = "", targetSubfolder = "universal_gallery_imports") {
     const formData = new FormData();
+    if (targetSourceId.trim()) {
+      formData.append("target_source_id", targetSourceId.trim());
+    }
+    if (targetSubfolder.trim()) {
+      formData.append("target_subfolder", targetSubfolder.trim());
+    }
     files.forEach((file) => {
       formData.append("files", file, file.name);
     });
@@ -160,13 +174,67 @@ export const galleryApi = {
     });
   },
 
-  async moveImages(relativePaths: string[], targetSubfolder: string) {
+  async listBoards(forceRefresh = false) {
+    const params = new URLSearchParams();
+    if (forceRefresh) {
+      params.set("force_refresh", "true");
+    }
+    const query = params.size ? `?${params}` : "";
+    const response = await requestJson<{ boards?: BoardSummary[] }>(`/universal_gallery/api/boards${query}`);
+    return response.boards ?? [];
+  },
+
+  async createBoard(name: string, description = "") {
+    return requestJson<BoardMutationResult>("/universal_gallery/api/boards", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ name, description }),
+    });
+  },
+
+  async updateBoard(id: string, updates: Record<string, unknown>) {
+    return requestJson<BoardMutationResult>("/universal_gallery/api/boards", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ id, updates }),
+    });
+  },
+
+  async deleteBoard(id: string) {
+    return requestJson<BoardMutationResult>("/universal_gallery/api/boards", {
+      method: "DELETE",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ id }),
+    });
+  },
+
+  async updateBoardPins(id: string, relativePaths: string[], pinned = true) {
+    return requestJson<BoardMutationResult>("/universal_gallery/api/boards/pins", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ id, relative_paths: relativePaths, pinned }),
+    });
+  },
+
+  async moveImages(relativePaths: string[], targetSubfolder: string, targetSourceId = "") {
     return requestJson<MoveImagesResult>("/universal_gallery/api/images/move", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ relative_paths: relativePaths, target_subfolder: targetSubfolder }),
+      body: JSON.stringify({
+        relative_paths: relativePaths,
+        target_subfolder: targetSubfolder,
+        target_source_id: targetSourceId,
+      }),
     });
   },
 
@@ -382,5 +450,63 @@ export const galleryApi = {
       },
       body: JSON.stringify({ id }),
     });
+  },
+
+  async listGallerySources(forceRefresh = false) {
+    const params = new URLSearchParams();
+    if (forceRefresh) {
+      params.set("force_refresh", "true");
+    }
+    const query = params.size ? `?${params}` : "";
+    const response = await requestJson<{ sources?: GallerySource[]; active_source_count?: number }>(
+      `/universal_gallery/api/settings/gallery-sources${query}`,
+    );
+    return response.sources ?? [];
+  },
+
+  async saveGallerySource(source: Partial<GallerySource>) {
+    return requestJson<{ ok: boolean; source: GallerySource; sources: GallerySource[] }>(
+      "/universal_gallery/api/settings/gallery-sources",
+      {
+        method: source.id ? "PATCH" : "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(source),
+      },
+    );
+  },
+
+  async deleteGallerySource(id: string) {
+    return requestJson<{ ok: boolean; id: string; sources: GallerySource[] }>(
+      "/universal_gallery/api/settings/gallery-sources",
+      {
+        method: "DELETE",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ id }),
+      },
+    );
+  },
+
+  async testGallerySourcePath(path: string) {
+    return requestJson<{ ok: boolean; path: string; exists: boolean; writable: boolean; image_count: number }>(
+      "/universal_gallery/api/settings/gallery-sources/test-path",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ path }),
+      },
+    );
+  },
+
+  async diagnoseGallerySources() {
+    const response = await requestJson<{ ok: boolean; sources?: GallerySourceDiagnostic[] }>(
+      "/universal_gallery/api/settings/gallery-sources/diagnostics",
+    );
+    return response.sources ?? [];
   },
 };

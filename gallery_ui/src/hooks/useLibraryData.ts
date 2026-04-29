@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { useI18n } from "../i18n/I18nProvider";
 import { ApiRequestError, galleryApi } from "../services/galleryApi";
@@ -46,9 +46,11 @@ export const useLibraryData = (enabled: boolean) => {
   const [error, setError] = useState<string | null>(null);
   const [statusMessage, setStatusMessage] = useState("");
   const [validationIssues, setValidationIssues] = useState<LibraryValidationIssue[]>([]);
+  const hasLoadedLibrariesRef = useRef(false);
+  const hasLoadedEntriesRef = useRef(false);
 
-  const loadLibraries = async () => {
-    if (libraries.length > 0) {
+  const loadLibraries = useCallback(async () => {
+    if (hasLoadedLibrariesRef.current) {
       setIsRefreshing(true);
     } else {
       setIsLoading(true);
@@ -61,13 +63,14 @@ export const useLibraryData = (enabled: boolean) => {
     } catch (fetchError) {
       setError(fetchError instanceof Error ? fetchError.message : t("errorOpenLibrary"));
     } finally {
+      hasLoadedLibrariesRef.current = true;
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  };
+  }, [t]);
 
-  const loadEntryPage = async (name: string, nextSearch = searchTerm, nextPage = entryPage) => {
-    if (entries.length > 0) {
+  const loadEntryPage = useCallback(async (name: string, nextSearch: string, nextPage: number) => {
+    if (hasLoadedEntriesRef.current) {
       setIsRefreshing(true);
     } else {
       setIsLoading(true);
@@ -79,10 +82,11 @@ export const useLibraryData = (enabled: boolean) => {
       setEntryTotal(response.total ?? 0);
       setEntryPage(response.page ?? 1);
     } finally {
+      hasLoadedEntriesRef.current = true;
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  };
+  }, [entryLimit]);
 
   const refreshActiveLibrary = async () => {
     if (!activeLibraryName) {
@@ -343,7 +347,7 @@ export const useLibraryData = (enabled: boolean) => {
     }
 
     void loadLibraries();
-  }, [enabled, t]);
+  }, [enabled, loadLibraries]);
 
   useEffect(() => {
     if (!activeLibraryName || isEditing) {
@@ -352,7 +356,7 @@ export const useLibraryData = (enabled: boolean) => {
     void loadEntryPage(activeLibraryName, searchTerm, entryPage).catch((fetchError) => {
       setError(fetchError instanceof Error ? fetchError.message : t("errorOpenLibrary"));
     });
-  }, [activeLibraryName, searchTerm, entryPage, isEditing, t]);
+  }, [activeLibraryName, searchTerm, entryPage, isEditing, loadEntryPage, t]);
 
   return {
     libraries,

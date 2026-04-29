@@ -260,6 +260,7 @@
 .ue-chip-toggle {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   min-height: 34px;
   padding: 0 12px;
@@ -279,6 +280,11 @@
   background: var(--ue-accent);
   border-color: var(--ue-accent);
   color: #ffffff;
+}
+
+.ue-chip-toggle--icon {
+  width: 34px;
+  padding: 0;
 }
 
 .ue-gallery-state {
@@ -407,8 +413,12 @@
 }
 
 .ue-pagination-actions button {
-  min-height: 32px;
-  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
   border: 1px solid var(--ue-line-soft);
   border-radius: 999px;
   background: transparent;
@@ -450,14 +460,15 @@
   position: sticky;
   top: 0;
   z-index: 12;
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding: 12px 14px;
-  border-radius: var(--ue-r-lg);
-  background: rgba(255, 255, 255, 0.92);
-  box-shadow: var(--ue-shadow-3);
+  display: grid;
+  grid-template-columns: minmax(148px, 190px) minmax(0, 1fr);
+  align-items: stretch;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid rgba(228, 228, 231, 0.86);
+  border-radius: var(--ue-r-md);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 14px 38px rgba(24, 24, 27, 0.1);
   backdrop-filter: blur(14px);
 }
 
@@ -466,38 +477,152 @@
   margin-top: -4px;
 }
 
-.ue-bulkbar-info {
+.ue-bulkbar-status {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid rgba(59, 130, 246, 0.14);
+  border-radius: var(--ue-r-sm);
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.88), rgba(255, 255, 255, 0.88));
 }
 
-.ue-bulkbar-info strong {
+.ue-bulkbar-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: #1d4ed8;
+}
+
+.ue-bulkbar-count strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 700;
 }
 
-.ue-bulkbar-info span {
+.ue-bulkbar-status > span {
   color: var(--ue-ink-muted);
   font-size: 11px;
+  line-height: 1.4;
 }
 
-.ue-bulkbar-actions {
+.ue-bulkbar-status p {
+  margin: 0;
+  color: var(--ue-ink-muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.ue-bulkbar-main {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 9px;
+}
+
+.ue-bulkbar-quick-actions {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
+}
+
+.ue-bulkbar-quick-actions .ue-icon-action {
+  border-color: rgba(228, 228, 231, 0.9);
+  background: rgba(250, 250, 250, 0.86);
+  transition:
+    transform var(--ue-duration-fast) var(--ue-ease),
+    background-color var(--ue-duration-fast) var(--ue-ease),
+    border-color var(--ue-duration-fast) var(--ue-ease),
+    color var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-bulkbar-quick-actions .ue-icon-action:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(161, 161, 170, 0.5);
+  background: #ffffff;
+  box-shadow: var(--ue-shadow-1);
+}
+
+.ue-bulkbar-tools {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.9fr) minmax(180px, 0.9fr) minmax(320px, 1.4fr);
+  gap: 8px;
+  align-items: stretch;
+}
+
+.ue-bulk-tool {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--ue-line-soft);
+  border-radius: var(--ue-r-sm);
+  background: rgba(250, 250, 250, 0.78);
+}
+
+.ue-bulk-tool-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ue-ink-soft);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ue-bulk-tool-field {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  flex-wrap: wrap;
+}
+
+.ue-bulk-tool-field .ue-select-field {
+  min-height: 32px;
+  flex: 1 1 150px;
+  background: #ffffff;
+  border-color: var(--ue-line-soft);
+}
+
+.ue-bulk-tool-field .ue-primary-btn,
+.ue-bulk-tool-field .ue-secondary-btn {
+  min-height: 32px;
+  padding: 0 11px;
+}
+
+.ue-bulk-tool-field .ue-icon-action {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-color: var(--ue-line-soft);
+}
+
+.ue-secondary-btn--accent {
+  border-color: rgba(22, 163, 74, 0.18);
+  background: var(--ue-green-soft);
+  color: #15803d;
+}
+
+.ue-secondary-btn--accent:hover:not(:disabled) {
+  background: #dcfce7;
+  color: #166534;
 }
 
 .ue-bulkbar-note {
   display: flex;
-  min-width: min(360px, 100%);
+  max-width: 720px;
   flex-direction: column;
-  gap: 4px;
-  padding: 10px 12px;
-  border-radius: 14px;
-  background: rgba(244, 244, 245, 0.82);
+  gap: 3px;
+  padding: 8px 10px;
+  border-radius: var(--ue-r-sm);
+  background: rgba(244, 244, 245, 0.76);
 }
 
 .ue-bulkbar-note strong {
@@ -512,16 +637,18 @@
 }
 
 .ue-bulk-number-field {
-  min-width: 108px;
+  min-width: 98px;
+  flex: 0 0 auto;
 }
 
 .ue-bulk-number-field input {
-  width: 46px;
+  width: 44px;
   text-align: center;
 }
 
 .ue-bulk-rename-field {
-  min-width: min(320px, 100%);
+  min-width: min(260px, 100%);
+  flex: 1 1 230px;
 }
 
 .ue-date-filter-field {
@@ -1062,6 +1189,88 @@
   overflow-y: auto;
 }
 
+.ue-board-picker-modal,
+.ue-board-share-modal {
+  width: min(640px, 100%);
+}
+
+.ue-board-picker-list {
+  display: grid;
+  max-height: 320px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  overflow-y: auto;
+}
+
+.ue-board-picker-item {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 8px;
+  border: 1px solid var(--ue-line-soft);
+  border-radius: var(--ue-r-md);
+  background: var(--ue-surface);
+  color: var(--ue-ink-soft);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    border-color var(--ue-duration-fast) var(--ue-ease),
+    background-color var(--ue-duration-fast) var(--ue-ease),
+    color var(--ue-duration-fast) var(--ue-ease),
+    transform var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-board-picker-item:hover,
+.ue-board-picker-item.is-active {
+  border-color: rgba(24, 24, 27, 0.14);
+  background: #ffffff;
+  color: var(--ue-ink);
+  transform: translateY(-1px);
+}
+
+.ue-board-picker-item span:nth-child(2) {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.ue-board-picker-item em {
+  font-size: 12px;
+  font-style: normal;
+  color: var(--ue-ink-muted);
+}
+
+.ue-board-picker-item .ue-board-cover {
+  width: 40px;
+  height: 40px;
+}
+
+.ue-board-share-preview {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 340px;
+  overflow: hidden;
+  border: 1px solid var(--ue-line-soft);
+  border-radius: var(--ue-r-lg);
+  background:
+    linear-gradient(180deg, rgba(250, 250, 250, 0.94), rgba(255, 255, 255, 0.98)),
+    #ffffff;
+}
+
+.ue-board-share-preview canvas {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  border-radius: var(--ue-r-md);
+  box-shadow: var(--ue-shadow-2);
+}
+
 .ue-library-modal-actions {
   display: flex;
   align-items: center;
@@ -1075,6 +1284,24 @@
 }
 
 @media (max-width: 960px) {
+  .ue-bulkbar {
+    grid-template-columns: 1fr;
+  }
+
+  .ue-bulkbar-status {
+    flex-direction: row;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .ue-bulkbar-tools {
+    grid-template-columns: 1fr;
+  }
+
+  .ue-board-picker-list {
+    grid-template-columns: 1fr;
+  }
+
   .ue-library-overview-grid,
   .ue-library-guidance-grid,
   .ue-library-signal-grid,
@@ -1095,15 +1322,31 @@
 
 @media (max-width: 720px) {
   .ue-filter-bar,
-  .ue-pagination,
-  .ue-bulkbar {
+  .ue-pagination {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .ue-pagination-actions,
-  .ue-bulkbar-actions {
+  .ue-pagination-actions {
     justify-content: flex-start;
+  }
+
+  .ue-bulkbar-status,
+  .ue-bulkbar-quick-actions,
+  .ue-bulk-tool-field {
+    align-items: stretch;
+  }
+
+  .ue-bulkbar-status,
+  .ue-bulkbar-quick-actions {
+    flex-direction: column;
+  }
+
+  .ue-bulkbar-quick-actions .ue-secondary-btn,
+  .ue-bulk-tool-field .ue-primary-btn,
+  .ue-bulk-tool-field .ue-secondary-btn,
+  .ue-bulk-tool-field .ue-select-field {
+    width: 100%;
   }
 
   .ue-library-search-summary {

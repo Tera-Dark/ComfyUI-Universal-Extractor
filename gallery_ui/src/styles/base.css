@@ -245,10 +245,10 @@ textarea::placeholder {
   color: var(--ue-ink-soft);
 }
 
-.ue-topbar-icon-btn:hover,
-.ue-tool-btn:hover,
-.ue-secondary-btn:hover,
-.ue-icon-action:hover {
+.ue-topbar-icon-btn:hover:not(:disabled),
+.ue-tool-btn:hover:not(:disabled),
+.ue-secondary-btn:hover:not(:disabled),
+.ue-icon-action:hover:not(:disabled) {
   background: var(--ue-accent-soft);
   color: var(--ue-ink);
 }
@@ -292,13 +292,33 @@ textarea::placeholder {
   color: #ffffff;
 }
 
+.ue-icon-action--filled:hover:not(:disabled) {
+  background: var(--ue-accent-hover);
+  color: #ffffff;
+}
+
+.ue-icon-action--accent {
+  background: var(--ue-green-soft);
+  color: #15803d;
+}
+
+.ue-icon-action--accent:hover:not(:disabled) {
+  background: #dcfce7;
+  color: #166534;
+}
+
+.ue-icon-action--tiny {
+  width: 28px;
+  height: 28px;
+}
+
 .ue-danger-btn,
 .ue-icon-action--danger {
   color: var(--ue-red);
 }
 
-.ue-danger-btn:hover,
-.ue-icon-action--danger:hover {
+.ue-danger-btn:hover:not(:disabled),
+.ue-icon-action--danger:hover:not(:disabled) {
   background: var(--ue-red-soft);
 }
 

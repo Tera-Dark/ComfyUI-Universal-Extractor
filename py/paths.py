@@ -15,6 +15,14 @@ def get_output_dir() -> str:
     return folder_paths.get_output_directory()
 
 
+def get_input_dir() -> str:
+    getter = getattr(folder_paths, "get_input_directory", None)
+    if callable(getter):
+        return getter()
+    base_dir = get_comfy_base_dir()
+    return os.path.join(base_dir, "input") if base_dir else ""
+
+
 def get_comfy_base_dir() -> str:
     base_dir = getattr(folder_paths, "base_path", "")
     if base_dir:
