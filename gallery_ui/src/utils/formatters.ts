@@ -1,4 +1,4 @@
-export const PAGE_SIZE = 60;
+export const PAGE_SIZE = 48;
 
 export const formatFileSize = (size: number) => {
   if (size < 1024) return `${size} B`;

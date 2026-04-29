@@ -1,222 +1,289 @@
-# ComfyUI Universal Extractor
+<p align="center">
+  <img src="https://raw.githubusercontent.com/Tera-Dark/ComfyUI-Universal-Extractor/master/gallery_ui/public/favicon.svg" width="96" height="96" alt="Universal Extractor Logo" />
+</p>
 
-`ComfyUI Universal Extractor` is a custom node plus a full web workspace for managing prompt libraries and browsing generated images inside ComfyUI.
+<h1 align="center">ComfyUI Universal Extractor</h1>
 
-It is built for two common real-world workflows:
+<p align="center">
+  <strong>一站式 ComfyUI 图库管理 & 提示词资源库工具</strong>
+</p>
 
-1. Reusing large prompt libraries such as artist, style, character, and utility snippets.
-2. Reviewing generated images later, adding notes/categories/favorites, and searching those annotations back quickly.
+<p align="center">
+  <a href="https://github.com/Tera-Dark/ComfyUI-Universal-Extractor"><img src="https://img.shields.io/badge/version-1.1.1-blue?style=flat-square" alt="version" /></a>
+  <a href="https://github.com/Tera-Dark/ComfyUI-Universal-Extractor/blob/main/LICENSE.txt"><img src="https://img.shields.io/badge/license-MIT-green?style=flat-square" alt="license" /></a>
+  <img src="https://img.shields.io/badge/python-%3E%3D3.10-blue?style=flat-square" alt="python" />
+  <img src="https://img.shields.io/badge/comfyui-%3E%3D0.3.0-orange?style=flat-square" alt="comfyui" />
+</p>
 
-The project includes:
+---
 
-- A ComfyUI node: `Universal Extractor`
-- A built-in gallery UI at `/gallery/`
-- Library CRUD tools for `data/*.json`
-- Image metadata editing with searchable notes
-- Prompt helper tools such as artist string generation and format conversion
+## 📖 简介
 
-## What It Does
+**ComfyUI Universal Extractor** 是一个功能丰富的 ComfyUI 自定义节点插件，提供两大核心能力：
 
-### 1. Universal Extractor Node
+1. **Universal Extractor 节点** — 从 JSON 提示词库中随机/顺序抽取文本，快速构建动态提示词工作流
+2. **Universal Gallery 图库工作台** — 一个独立的全功能 Web 图库管理界面，用于浏览、组织、标注你的 AI 生成图片，以及管理提示词资源库
 
-The node reads a JSON library from `data/` and returns a prompt string.
+支持多语言界面（中文 / English），提供深色主题、极简白色主题的专业 UI 体验。
 
-Features:
+---
 
-- Switch between multiple JSON libraries directly from the node
-- Random or sequential extraction
-- Prefix / suffix / separator formatting
-- Works with simple string arrays and richer object-style entries
+## ✨ 功能特性
 
-Supported entry shapes include:
+### 🎯 Extractor 节点
 
-```json
-[
-  "greg rutkowski",
-  "wlop",
-  "alphonse mucha"
-]
-```
+在 ComfyUI 工作流中直接使用的自定义节点，用于从 JSON 文件中抽取提示词文本。
 
-and:
+| 参数                  | 说明                                  |
+| ------------------- | ----------------------------------- |
+| `file_name`         | 选择 `data/` 目录下的 JSON 提示词库文件         |
+| `extract_count`     | 抽取数量（1 ~ 100）                       |
+| `mode`              | 抽取模式：`random`（随机）或 `sequential`（顺序） |
+| `prefix` / `suffix` | 为每条抽取结果添加前缀/后缀                      |
+| `separator`         | 多条结果之间的分隔符                          |
+| `seed`              | 随机种子，确保可复现性                         |
 
-```json
-[
-  {
-    "name": "tapioka_(coconuts)",
-    "prompt": "tapioka_(coconuts)",
-    "other_names": ["tapioka"],
-    "tags": ["artist", "anime"],
-    "model": "SDXL"
-  }
-]
-```
+> 节点会自动识别 JSON 数组中的字符串、`{prompt: ...}`、`{name: ...}`、`{title: ...}` 等多种数据格式。
 
-### 2. Built-in Gallery
+---
 
-Open the gallery at:
+### 🖼️ Gallery 图库工作台
 
-- `http://127.0.0.1:8188/gallery/`
+通过 ComfyUI 顶部菜单栏的按钮打开，或直接访问 `http://<host>:<port>/gallery/`。
 
-or use the top menu button added inside ComfyUI.
+#### 📂 多图源管理
 
-Features:
+- **默认图源** — 自动挂载 ComfyUI 的 `output/` 和 `input/` 目录
+- **自定义图源** — 可添加任意本地文件夹作为图片来源
+- **图源诊断** — 实时检测各图源的可用性、读写权限、磁盘空间、路径重叠等
+- 支持递归扫描子目录，自动索引所有 `.png`、`.jpg`、`.jpeg`、`.webp` 格式图片
 
-- Browse output images with thumbnails and detail viewer
-- Open image metadata and embedded workflow info
-- Edit title, category, favorite, and notes
-- Save notes for later search
-- Search images by filename, title, category, and notes
-- Right-click image menu for common actions
-- Trash / restore workflow
+#### 🔍 图片浏览与检索
 
-### 3. Library Workspace
+- **缩略图瀑布流** — 自动生成 WebP 缩略图，支持后台预热加速首屏加载
+- **智能搜索** — 按文件名、标题、分类、笔记等字段全文检索
+- **多维筛选** — 按子文件夹、分类、画板、日期范围、收藏状态组合筛选
+- **排序** — 支持按创建时间、文件名、文件大小排序（升序/降序）
+- **分页加载** — SQLite 索引驱动的高性能分页查询
 
-The library workspace is designed for both beginners and heavy users.
+#### 🏷️ 图片标注与组织
 
-Features:
+- **收藏 / 置顶** — 快速标记重要图片
+- **分类标签** — 为图片添加自定义分类
+- **标题 & 笔记** — 为每张图片添加标题和详细笔记
+- **画板系统** — 创建主题画板，将图片归档到不同画板中
+- **批量操作** — 支持批量修改分类、收藏状态、添加到画板
 
-- Manage `data/*.json` directly in the browser
-- Search current library entries
-- Create, import, merge, replace, export, and delete libraries
-- Add single entries with starter templates
-- Edit large libraries as JSON when needed
-- Copy prompt text or full JSON from an entry
-- View lightweight library insights such as tag/model usage
+#### 📁 文件管理
 
-### 4. Workbench Tools
+- **重命名** — 单张或批量重命名图片（支持 `{n}`、`{name}`、`{page}` 模板变量）
+- **移动** — 在不同图源和子文件夹之间移动图片
+- **删除** — 安全删除至内置回收站，支持恢复或彻底删除
+- **文件夹管理** — 创建、删除、合并文件夹
+- **导入** — 通过拖拽或选择文件导入图片和资源库文件
 
-Includes helper tools for prompt assembly:
+#### 🔬 图片详情
 
-- Artist string generation
-- Searchable artist pool
-- Anima format conversion
-- Custom format conversion
+- **元数据解析** — 自动读取 PNG 内嵌的 ComfyUI 工作流和提示词信息
+- **Prompt 摘要** — 提取正向/负向提示词、采样器、步数、CFG、尺寸等关键参数
+- **工作流还原** — 一键将图片的工作流加载回 ComfyUI 编辑器
+- **图片导航** — 在筛选结果中使用键盘左右键快速切换图片
 
-Example Anima conversion:
+---
 
-- `inari_(ambercrown)` -> `@inari \(ambercrown\)`
-- `tapioka_(coconuts)` -> `@tapioka \(coconuts\)`
+### 📚 Library 资源库
 
-## Installation
+在 Gallery 工作台内切换到「Library」标签页即可使用。
 
-### Option 1: Clone into `custom_nodes`
+- **资源库管理** — 管理 `data/` 目录下的所有 JSON 提示词库文件
+- **条目浏览** — 分页浏览资源库内的条目，支持搜索过滤
+- **条目编辑** — 新增、编辑、删除单条资源库条目
+- **导入** — 上传 JSON 文件，支持新建、替换、合并三种导入模式
+- **导出** — 查看和复制原始 JSON 内容
+- **数据验证** — 导入和保存时自动校验数据格式
+
+---
+
+### 🎨 Workbench 画师工作台
+
+在 Gallery 工作台内切换到「Workbench」标签页即可使用。专为画师提示词库设计的高级工具。
+
+- **画师搜索** — 从画师资源库中搜索艺术家（支持别名匹配）
+- **帖子数筛选** — 按帖子数量大于/小于阈值过滤画师
+- **随机抽取** — 从匹配结果中随机选取指定数量的画师
+- **多种格式输出**：
+  - `standard` — 带权重的标准格式，如 `(artist:1.2)`
+  - `creative` — 嵌套括号格式，如 `((artist))`
+  - `nai` — NovelAI 权重格式，如 `1.2::artist ::`
+- **权重范围** — 可自定义权重的最小值和最大值
+- **自定义格式** — 支持 `{name}` 占位符的自定义格式模板
+- **一键复制** — 生成后直接复制到剪贴板
+
+---
+
+### ⚙️ Settings 设置
+
+- **图源配置** — 添加、编辑、启用/禁用图片来源
+- **路径检测** — 测试路径有效性和图片数量
+- **导入目标** — 指定图片导入的默认目标图源和子文件夹
+- **诊断面板** — 查看所有图源的详细健康状态
+
+---
+
+## 🚀 安装
+
+### 方式一：ComfyUI Manager（推荐）
+
+在 ComfyUI Manager 中搜索 **"Universal Extractor"** 并安装。
+
+### 方式二：手动安装
 
 ```bash
+# 进入 ComfyUI 的自定义节点目录
 cd ComfyUI/custom_nodes
+
+# 克隆仓库
 git clone https://github.com/Tera-Dark/ComfyUI-Universal-Extractor.git
+
+# 安装 Python 依赖
+pip install -r ComfyUI-Universal-Extractor/requirements.txt
 ```
 
-Restart ComfyUI after cloning.
-
-### Option 2: Download ZIP
-
-Download the repository ZIP, extract it into:
-
-```text
-ComfyUI/custom_nodes/ComfyUI-Universal-Extractor
-```
-
-Then restart ComfyUI.
-
-## Frontend Build
-
-This repository keeps the built frontend in `gallery_ui/dist`, so normal users can install and use it directly.
-
-If you modify the frontend source, rebuild with:
+### 方式三：通过 ComfyUI Registry
 
 ```bash
-cd gallery_ui
-npm install
-npm run build
+comfy node registry-install tera-universal-extractor
 ```
 
-## How To Use
+> **注意**：Gallery UI 的前端构建产物（`gallery_ui/dist/`）已包含在仓库中，无需额外执行 `npm run build`。
 
-### Use the Node
+---
 
-Find the node in:
+## 📁 目录结构
 
-```text
-Universal Tools -> Universal Extractor
+```
+ComfyUI-Universal-Extractor/
+├── __init__.py                  # ComfyUI 插件入口
+├── pyproject.toml               # 项目元数据 & ComfyUI Registry 配置
+├── requirements.txt             # Python 依赖（Pillow）
+│
+├── py/                          # Python 后端
+│   ├── plugin.py                # 插件加载器
+│   ├── constants.py             # 路径和全局常量
+│   ├── paths.py                 # 路径解析与文件工具
+│   ├── nodes/
+│   │   └── extractor_node.py    # Extractor 节点实现
+│   └── gallery/
+│       ├── routes.py            # REST API 路由定义
+│       ├── service.py           # 图库核心业务逻辑
+│       ├── state_store.py       # 图片状态 & 画板持久化
+│       └── metadata.py          # 图片元数据提取
+│
+├── web/comfyui/
+│   └── top_menu_extension.js    # ComfyUI 顶部菜单栏按钮注入
+│
+├── gallery_ui/                  # React 前端（Vite + TypeScript + Tailwind）
+│   ├── src/
+│   │   ├── App.tsx              # 主应用组件
+│   │   ├── components/
+│   │   │   ├── gallery/         # 图库工作区组件
+│   │   │   ├── library/         # 资源库工作区组件
+│   │   │   ├── workbench/       # 画师工作台组件
+│   │   │   ├── settings/        # 设置页面组件
+│   │   │   └── shared/          # 通用组件（导航、侧边栏、对话框等）
+│   │   ├── hooks/               # 自定义 React Hooks
+│   │   ├── services/            # API 请求封装
+│   │   ├── styles/              # CSS 样式文件
+│   │   ├── types/               # TypeScript 类型定义
+│   │   ├── i18n/                # 国际化（中文 / English）
+│   │   └── utils/               # 工具函数
+│   └── dist/                    # 前端构建产物（随仓库发布）
+│
+└── data/                        # 运行时数据目录
+    ├── *.json                   # 提示词库文件
+    ├── gallery_state.json       # 图片状态持久化
+    ├── gallery_sources.json     # 图源配置
+    ├── gallery_index.sqlite3    # 图片索引数据库
+    ├── thumb_cache/             # 缩略图缓存
+    └── trash/                   # 回收站
 ```
 
-Inputs:
+---
 
-- `file_name`: pick a JSON library from `data/`
-- `extract_count`: how many items to extract
-- `mode`: `random` or `sequential`
-- `prefix`: prepend text to each item
-- `suffix`: append text to each item
-- `separator`: join extracted items
-- `seed`: seed for reproducible results
+## 🛠️ 技术栈
 
-Output:
+| 层级             | 技术                                 |
+| -------------- | ---------------------------------- |
+| **ComfyUI 节点** | Python 3.10+, Pillow               |
+| **后端 API**     | aiohttp (ComfyUI PromptServer)     |
+| **数据存储**       | SQLite (WAL 模式), JSON 文件           |
+| **前端框架**       | React 19, TypeScript 6, Vite 8     |
+| **UI 样式**      | Tailwind CSS 4, Lucide React Icons |
+| **缩略图**        | Pillow WebP 生成, 后台线程池预热            |
+| **国际化**        | 自研 i18n（中文 / English）              |
 
-- `Prompt (STRING)`
+---
 
-### Use the Gallery
+## 🔌 API 端点概览
 
-The gallery is meant for post-generation organization:
+所有 API 挂载在 `/universal_gallery/api/` 路径下：
 
-- Open an image
-- Add title / category / notes
-- Save
-- Search later with the top search bar using note text or category text
+| 方法         | 端点                              | 说明                   |
+| ---------- | ------------------------------- | -------------------- |
+| `GET`      | `/api/context`                  | 获取图库上下文（图源、画板、分类等）   |
+| `GET`      | `/api/images`                   | 分页查询图片列表（支持搜索/筛选/排序） |
+| `GET`      | `/api/metadata`                 | 获取图片元数据与工作流信息        |
+| `GET`      | `/api/thumb`                    | 获取图片缩略图              |
+| `POST`     | `/api/thumb/prewarm`            | 批量预热缩略图              |
+| `POST`     | `/api/image-state`              | 更新图片状态（收藏、分类、笔记等）    |
+| `POST`     | `/api/import`                   | 导入图片或资源库文件           |
+| `POST`     | `/api/images/delete`            | 删除图片（移入回收站）          |
+| `POST`     | `/api/images/move`              | 移动图片到指定文件夹           |
+| `POST`     | `/api/images/rename`            | 重命名图片                |
+| `POST`     | `/api/images/batch-update`      | 批量更新图片状态             |
+| `POST`     | `/api/images/batch-rename`      | 批量重命名图片              |
+| `GET/POST` | `/api/boards`                   | 画板 CRUD 操作           |
+| `GET/POST` | `/api/libraries`                | 资源库列表与保存             |
+| `GET`      | `/api/library/entries`          | 分页浏览资源库条目            |
+| `POST`     | `/api/library/import`           | 导入资源库文件              |
+| `POST`     | `/api/library/generate-artists` | 生成画师提示词字符串           |
+| `GET/POST` | `/api/settings/gallery-sources` | 图源管理                 |
+| `GET`      | `/api/trash`                    | 回收站列表                |
+| `POST`     | `/api/trash/restore`            | 从回收站恢复               |
+| `POST`     | `/api/trash/purge`              | 彻底删除回收站项目            |
+| `POST`     | `/api/folders/create`           | 创建文件夹                |
+| `POST`     | `/api/folders/delete`           | 删除文件夹                |
+| `POST`     | `/api/folders/merge`            | 合并文件夹                |
 
-### Use the Library Workspace
+---
 
-Recommended beginner workflow:
+## 🌐 工作流集成
 
-1. Create or open a library
-2. Start with a template entry
-3. Fill `name`, `prompt`, aliases, tags, and model notes
-4. Test the result in the workbench
-5. Refine entries over time instead of trying to perfect everything at once
+Gallery 支持将图片的工作流信息发送回 ComfyUI 编辑器：
 
-## Repository Structure
+- **BroadcastChannel** — 同源跨标签页实时通信
+- **localStorage** — 跨窗口工作流传递
+- **postMessage** — 父子窗口消息传递
 
-```text
-.
-├─ api/
-├─ data/                  # prompt libraries and runtime state
-├─ gallery_ui/            # React + Vite frontend
-├─ nodes/
-├─ py/
-│  ├─ gallery/            # gallery routes, metadata, services, state store
-│  └─ nodes/
-├─ web/comfyui/           # ComfyUI frontend integration
-├─ __init__.py
-└─ README.md
-```
+在图片详情页面点击「加载工作流」按钮，即可将该图片的完整工作流或 API Prompt 一键还原到 ComfyUI 画布中。
 
-## Notes About Data Files
+---
 
-The repository is set up so runtime-only files are not meant to be committed, such as:
+## 📋 系统要求
 
-- `data/gallery_state.json`
-- `data/thumb_cache/`
-- `data/trash/`
-- `data/trash_state.json`
-- local `output/`
+- **ComfyUI** ≥ 0.3.0
+- **Python** ≥ 3.10
+- **Pillow** ≥ 10.0.0（用于缩略图生成和元数据读取）
+- 现代浏览器（Chrome / Edge / Firefox / Safari）
 
-Only reusable example libraries should be kept in `data/`.
+---
 
-## Development Notes
+## 🙏 特别鸣谢
 
-- Backend: Python
-- Frontend: React + TypeScript + Vite
-- ComfyUI integration: custom routes + top menu injection
+- **韶韵** - 感谢提供宝贵的资金支持与使用反馈！
 
-If the gallery page does not update after frontend edits, rebuild `gallery_ui/dist` and restart ComfyUI.
+---
 
-## Current Focus
+## 📄 许可证
 
-This project is optimized around practical ComfyUI usage:
-
-- fast library reuse
-- searchable image review
-- lightweight annotation workflow
-- prompt helper tools for repeated runs
-
-If you use ComfyUI heavily and keep large personal JSON prompt collections, this plugin is designed to make that workflow much easier to maintain.
+[MIT License](LICENSE.txt) © 2026 Tera-Dark

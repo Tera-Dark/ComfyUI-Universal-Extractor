@@ -74,6 +74,13 @@ const clampPan = (value: number, scale: number, viewportSize: number) => {
   return clamp(value, -limit, limit);
 };
 
+const isEditableTarget = (target: EventTarget | null) => {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+};
+
 export const ImageDetailModal = ({
   image,
   onClose,
@@ -111,6 +118,50 @@ export const ImageDetailModal = ({
   const mediaRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const previousOverflowRef = useRef<string>("");
+  const prevImagePathRef = useRef(image.relative_path);
+  const [imageOpacity, setImageOpacity] = useState(1);
+  const [displayedSrc, setDisplayedSrc] = useState(image.original_url || image.url);
+  const [displayedBg, setDisplayedBg] = useState(image.thumb_url || image.original_url || image.url);
+  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    setDraftTitle(image.title || "");
+    setDraftCategory(image.category || "");
+    setDraftNotes(image.notes || "");
+    setDraftPinned(image.pinned || image.favorite || false);
+    setDraftFilename(image.filename || "");
+    setZoomScale(MIN_ZOOM);
+    setPan({ x: 0, y: 0 });
+    setIsExpandedView(false);
+    setIsDragging(false);
+    dragStateRef.current = null;
+  }, [image.relative_path, image.title, image.category, image.notes, image.pinned, image.favorite, image.filename]);
+
+  // Crossfade transition when navigating to a different image
+  useEffect(() => {
+    if (image.relative_path === prevImagePathRef.current) {
+      return;
+    }
+    prevImagePathRef.current = image.relative_path;
+
+    // Step 1: fade out
+    setImageOpacity(0);
+
+    // Step 2: after fade-out completes, swap src and fade in
+    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    fadeTimerRef.current = setTimeout(() => {
+      setDisplayedSrc(image.original_url || image.url);
+      setDisplayedBg(image.thumb_url || image.original_url || image.url);
+      // Force a reflow before fading in
+      requestAnimationFrame(() => {
+        setImageOpacity(1);
+      });
+    }, 180);
+
+    return () => {
+      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+    };
+  }, [image.relative_path, image.original_url, image.url, image.thumb_url]);
 
   useEffect(() => {
     let cancelled = false;
@@ -168,7 +219,6 @@ export const ImageDetailModal = ({
       (metadata?.metadata && typeof metadata.metadata === "object" && "prompt" in metadata.metadata),
   );
 
-  const backgroundImage = image.thumb_url || image.original_url || image.url;
   const currentIndex = navigation?.currentIndex ?? 0;
   const totalItems = navigation?.items.length ?? 1;
   const isZoomed = zoomScale > MIN_ZOOM + 0.01;
@@ -367,6 +417,16 @@ export const ImageDetailModal = ({
         event.preventDefault();
         void handleRequestClose();
       }
+
+      if (!isEditableTarget(event.target) && event.key === "ArrowLeft" && navigation && currentIndex > 0) {
+        event.preventDefault();
+        onNavigate(currentIndex - 1);
+      }
+
+      if (!isEditableTarget(event.target) && event.key === "ArrowRight" && navigation && currentIndex < totalItems - 1) {
+        event.preventDefault();
+        onNavigate(currentIndex + 1);
+      }
     };
 
     window.addEventListener("keydown", handleKeyDown);
@@ -376,7 +436,7 @@ export const ImageDetailModal = ({
   return (
     <div className="ue-modal-backdrop ue-modal-backdrop--lightbox" onClick={() => void handleRequestClose()}>
       <div className="ue-lightbox-shell" onClick={(event) => event.stopPropagation()}>
-        <div className="ue-lightbox-backdrop" style={{ backgroundImage: `url(${backgroundImage})` }} />
+        <div className="ue-lightbox-backdrop" style={{ backgroundImage: `url(${displayedBg})`, transition: 'opacity 0.28s ease', opacity: imageOpacity }} />
 
         <button
           className="ue-lightbox-close"
@@ -400,10 +460,14 @@ export const ImageDetailModal = ({
           >
             <div className="ue-lightbox-gesture-hint">{t("modalGestureHint")}</div>
             <img
-              src={image.original_url || image.url}
+              src={displayedSrc}
               alt={image.title || image.filename}
               draggable={false}
-              style={{ transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoomScale})` }}
+              style={{ 
+                transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoomScale})`,
+                opacity: imageOpacity,
+                transition: 'opacity 0.22s ease, transform 160ms cubic-bezier(0.2, 0, 0, 1)',
+              }}
             />
           </div>
 

@@ -28,6 +28,7 @@ interface TreeNode {
 
 interface WorkspaceSidebarProps {
   collapsed: boolean;
+  onToggle: () => void;
   activeTab: WorkspaceTab;
   galleryContext: GalleryContext | null;
   folderViewMode: "tree" | "list";
@@ -156,6 +157,7 @@ const TreeBranch = ({
 
 export const WorkspaceSidebar = ({
   collapsed,
+  onToggle,
   activeTab,
   galleryContext,
   folderViewMode,
@@ -222,6 +224,14 @@ export const WorkspaceSidebar = ({
 
   return (
     <aside className={`ue-sidebar ${collapsed ? "is-collapsed" : ""}`}>
+      <button 
+        className="ue-sidebar-toggle-edge"
+        onClick={onToggle}
+        aria-label={collapsed ? t("sidebarExpand") : t("sidebarCollapse")}
+      >
+        <ChevronRight size={14} className="ue-sidebar-toggle-icon" />
+      </button>
+
       {activeTab === "gallery" ? (
         <div className="ue-sidebar-section ue-sidebar-section--grow">
           <div className="ue-sidebar-heading">

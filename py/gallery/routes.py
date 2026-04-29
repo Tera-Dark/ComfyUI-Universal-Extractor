@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from pathlib import Path
 
@@ -19,9 +20,11 @@ from .service import (
     delete_folder,
     delete_library,
     diagnose_gallery_sources,
+    enqueue_thumbnail_prewarm,
     get_import_target_for_filename,
     get_gallery_context,
     get_image_metadata,
+    get_thumbnail_prewarm_status,
     image_ref_for_full_path,
     get_library,
     get_library_entries_page,
@@ -30,6 +33,7 @@ from .service import (
     get_trash_item,
     import_library_data,
     list_images,
+    list_images_page,
     list_boards,
     list_gallery_sources,
     list_libraries,
@@ -128,8 +132,10 @@ async def api_list_images(request: web.Request) -> web.Response:
     sort_order = request.query.get("sort_order", "desc")
     try:
         page = _parse_int(request.query.get("page"), "page", 1, min_value=1)
-        limit = _parse_int(request.query.get("limit"), "limit", 60, min_value=1)
-        items = list_images(
+        limit = _parse_int(request.query.get("limit"), "limit", 60, min_value=1, max_value=120)
+        page_result = list_images_page(
+            page=page,
+            limit=limit,
             search=search,
             category=category,
             subfolder=subfolder,
@@ -144,10 +150,7 @@ async def api_list_images(request: web.Request) -> web.Response:
     except ValueError as error:
         return _bad_request(str(error))
 
-    total = len(items)
-    start = (page - 1) * limit
-    paged_items = items[start : start + limit]
-    return web.json_response({"images": paged_items, "total": total, "page": page, "limit": limit})
+    return web.json_response(page_result)
 
 
 async def api_image_metadata(request: web.Request) -> web.Response:
@@ -179,13 +182,38 @@ async def api_thumbnail(request: web.Request) -> web.StreamResponse:
         return _bad_request("relative_path required")
 
     try:
-        _, thumb_path = get_thumbnail_path(relative_path, size=size)
+        _, thumb_path = await asyncio.to_thread(get_thumbnail_path, relative_path, size)
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except (RuntimeError, ValueError) as error:
         return web.json_response({"error": str(error)}, status=400)
 
-    return web.FileResponse(Path(thumb_path))
+    return web.FileResponse(
+        Path(thumb_path),
+        headers={"Cache-Control": "public, max-age=31536000, immutable"},
+    )
+
+
+async def api_prewarm_thumbnails(request: web.Request) -> web.Response:
+    try:
+        body = await request.json()
+    except Exception:
+        return _bad_request("json body required")
+    if not isinstance(body, dict):
+        return _bad_request("json body must be an object")
+    relative_paths = body.get("relative_paths", [])
+    if not isinstance(relative_paths, list):
+        return _bad_request("relative_paths must be a list")
+    try:
+        size = _parse_int(body.get("size"), "size", 480, min_value=64, max_value=1024)
+        limit = _parse_int(body.get("limit"), "limit", 80, min_value=1, max_value=200)
+        return web.json_response(enqueue_thumbnail_prewarm([str(path) for path in relative_paths], size=size, limit=limit))
+    except ValueError as error:
+        return _bad_request(str(error))
+
+
+async def api_thumbnail_prewarm_status(_request: web.Request) -> web.Response:
+    return web.json_response(get_thumbnail_prewarm_status())
 
 
 async def api_image_file(request: web.Request) -> web.StreamResponse:
@@ -756,6 +784,8 @@ def register_routes(app):
     _safe_add_route(app.router, "get", "/universal_gallery/api/images", api_list_images)
     _safe_add_route(app.router, "get", "/universal_gallery/api/metadata", api_image_metadata)
     _safe_add_route(app.router, "get", "/universal_gallery/api/thumb", api_thumbnail)
+    _safe_add_route(app.router, "post", "/universal_gallery/api/thumb/prewarm", api_prewarm_thumbnails)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/thumb/prewarm-status", api_thumbnail_prewarm_status)
     _safe_add_route(app.router, "get", "/universal_gallery/api/image-file", api_image_file)
     _safe_add_route(app.router, "get", "/universal_gallery/api/trash", api_list_trash)
     _safe_add_route(app.router, "get", "/universal_gallery/api/trash/file", api_trash_file)

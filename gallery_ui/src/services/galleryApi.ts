@@ -17,6 +17,7 @@ import type {
   LibraryInfo,
   LibraryResponse,
   MoveImagesResult,
+  ThumbnailPrewarmStatus,
   TrashItem,
 } from "../types/universal-gallery";
 
@@ -121,6 +122,25 @@ export const galleryApi = {
     return requestJson<ImageMetadata>(
       `/universal_gallery/api/metadata?relative_path=${encodeURIComponent(relativePath)}`,
     );
+  },
+
+  async prewarmThumbnails(relativePaths: string[], limit = 80) {
+    return requestJson<{
+      ok: boolean;
+      queued: string[];
+      skipped: string[];
+      status: ThumbnailPrewarmStatus;
+    }>("/universal_gallery/api/thumb/prewarm", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ relative_paths: relativePaths, limit }),
+    });
+  },
+
+  async getThumbnailPrewarmStatus() {
+    return requestJson<ThumbnailPrewarmStatus>("/universal_gallery/api/thumb/prewarm-status");
   },
 
   async updateImageState(relativePath: string, updates: Record<string, unknown>) {

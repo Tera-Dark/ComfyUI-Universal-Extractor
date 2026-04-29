@@ -60,12 +60,22 @@ def get_image_state(relative_path: str) -> dict:
     return normalize_image_state(state.setdefault("images", {}).get(relative_path, {}))
 
 
+def get_image_state_map(state: dict | None = None) -> dict[str, dict]:
+    state = ensure_gallery_state_shape(state)
+    images = state.setdefault("images", {})
+    return {relative_path: normalize_image_state(image_state) for relative_path, image_state in images.items()}
+
+
 def update_image_state(relative_path: str, updates: dict) -> tuple[dict, list[str]]:
     state = ensure_gallery_state_shape()
     images = state.setdefault("images", {})
     current = normalize_image_state(images.get(relative_path, {}))
-    next_boards = normalize_board_ids(updates.get("boards", current["boards"]))
+    has_board_update = "boards" in updates
+    has_pin_update = "pinned" in updates or "favorite" in updates
     pinned = bool(updates.get("pinned", updates.get("favorite", current["pinned"])))
+    next_boards = normalize_board_ids(updates.get("boards", current["boards"]))
+    if has_pin_update and not pinned and not has_board_update:
+        next_boards = []
     if next_boards:
         pinned = True
     current.update(

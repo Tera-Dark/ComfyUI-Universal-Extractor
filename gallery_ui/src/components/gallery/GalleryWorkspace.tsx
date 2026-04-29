@@ -19,6 +19,7 @@ import {
   RotateCcw,
   Send,
   Share2,
+  SlidersHorizontal,
   Square,
   Tag,
   Trash2,
@@ -35,25 +36,52 @@ import { CategoryPickerModal } from "./CategoryPickerModal";
 
 const loadedImageUrls = new Set<string>();
 const prefetchedImageUrls = new Set<string>();
+const queuedImageUrls = new Set<string>();
+const imagePrefetchQueue: string[] = [];
+const MAX_IMAGE_PREFETCH_CONCURRENCY = 4;
+let activeImagePrefetches = 0;
 
 const getGalleryImageUrl = (image: ImageRecord) => image.thumb_url || image.url;
+const MASONRY_GAP = 14;
+const MASONRY_OVERSCAN = 900;
+
+const pumpImagePrefetchQueue = () => {
+  while (activeImagePrefetches < MAX_IMAGE_PREFETCH_CONCURRENCY && imagePrefetchQueue.length) {
+    const imageUrl = imagePrefetchQueue.shift();
+    if (!imageUrl) {
+      continue;
+    }
+
+    queuedImageUrls.delete(imageUrl);
+    activeImagePrefetches += 1;
+    const preloadImage = new Image();
+    preloadImage.decoding = "async";
+    const finish = (loaded: boolean) => {
+      if (loaded) {
+        loadedImageUrls.add(imageUrl);
+      } else {
+        prefetchedImageUrls.delete(imageUrl);
+      }
+      activeImagePrefetches = Math.max(0, activeImagePrefetches - 1);
+      pumpImagePrefetchQueue();
+    };
+
+    preloadImage.onload = () => finish(true);
+    preloadImage.onerror = () => finish(false);
+    preloadImage.src = imageUrl;
+  }
+};
 
 const prefetchGalleryImage = (image: ImageRecord) => {
   const imageUrl = getGalleryImageUrl(image);
-  if (!imageUrl || loadedImageUrls.has(imageUrl) || prefetchedImageUrls.has(imageUrl)) {
+  if (!imageUrl || loadedImageUrls.has(imageUrl) || prefetchedImageUrls.has(imageUrl) || queuedImageUrls.has(imageUrl)) {
     return;
   }
 
   prefetchedImageUrls.add(imageUrl);
-  const preloadImage = new Image();
-  preloadImage.decoding = "async";
-  preloadImage.onload = () => {
-    loadedImageUrls.add(imageUrl);
-  };
-  preloadImage.onerror = () => {
-    prefetchedImageUrls.delete(imageUrl);
-  };
-  preloadImage.src = imageUrl;
+  queuedImageUrls.add(imageUrl);
+  imagePrefetchQueue.push(imageUrl);
+  pumpImagePrefetchQueue();
 };
 
 const GalleryCardImage = ({
@@ -63,7 +91,7 @@ const GalleryCardImage = ({
 }: {
   image: ImageRecord;
   priority?: boolean;
-  onOpenDetail: (image: ImageRecord) => void;
+  onOpenDetail: (image: ImageRecord, event: React.MouseEvent<HTMLImageElement>) => void;
 }) => {
   const imageUrl = getGalleryImageUrl(image);
   const [loaded, setLoaded] = useState(() => loadedImageUrls.has(imageUrl));
@@ -86,7 +114,7 @@ const GalleryCardImage = ({
         decoding="async"
         onLoad={markLoaded}
         onError={markLoaded}
-        onClick={() => onOpenDetail(image)}
+        onClick={(event) => onOpenDetail(image, event)}
       />
     </div>
   );
@@ -160,6 +188,15 @@ interface SelectionBoxState {
   currentY: number;
 }
 
+interface MasonryItem {
+  image: ImageRecord;
+  index: number;
+  top: number;
+  left: number;
+  width: number;
+  height: number;
+}
+
 export const GalleryWorkspace = ({
   images,
   context,
@@ -224,13 +261,19 @@ export const GalleryWorkspace = ({
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [contextMenu, setContextMenu] = useState<ImageContextMenuState | null>(null);
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
+  const [showFiltersMenu, setShowFiltersMenu] = useState(false);
   const [selectionMode, setSelectionMode] = useState(false);
   const [selectionBox, setSelectionBox] = useState<SelectionBoxState | null>(null);
   const [showBackToTop, setShowBackToTop] = useState(false);
+  const [gridWidth, setGridWidth] = useState(0);
+  const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
+  const [gridTop, setGridTop] = useState(0);
+  const [measuredCardHeights, setMeasuredCardHeights] = useState<Record<string, number>>({});
   const dragDepthRef = useRef(0);
   const gridRef = useRef<HTMLDivElement | null>(null);
   const cardRefs = useRef<Record<string, HTMLElement | null>>({});
   const isDraggingSelectionRef = useRef(false);
+  const lastSelectedPathRef = useRef<string>("");
   const scrollContainerRef = useRef<HTMLElement | null>(null);
 
   const visibleImagePaths = useMemo(() => images.map((image) => image.relative_path), [images]);
@@ -241,6 +284,7 @@ export const GalleryWorkspace = ({
   );
   const selectedCount = pageSelectedPaths.length;
   const hasSelection = selectedCount > 0;
+  const activeFilterCount = [dateFrom, dateTo, favoritesOnly].filter(Boolean).length;
   const selectedBoard = useMemo(
     () => boards.find((board) => board.id === selectedBoardId) ?? null,
     [boards, selectedBoardId],
@@ -309,6 +353,20 @@ export const GalleryWorkspace = ({
   }, [showColumnsMenu]);
 
   useEffect(() => {
+    if (!showFiltersMenu) {
+      return;
+    }
+
+    const closeMenu = () => setShowFiltersMenu(false);
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("resize", closeMenu);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("resize", closeMenu);
+    };
+  }, [showFiltersMenu]);
+
+  useEffect(() => {
     if (selectedImagePaths.length === pageSelectedPaths.length) {
       return;
     }
@@ -332,6 +390,10 @@ export const GalleryWorkspace = ({
 
     const handleScroll = () => {
       setShowBackToTop(scrollContainer.scrollTop > 320);
+      const rootRect = scrollContainer.getBoundingClientRect();
+      const gridRect = gridRef.current?.getBoundingClientRect();
+      setViewportHeight(scrollContainer.clientHeight);
+      setGridTop(gridRect ? gridRect.top - rootRect.top : 0);
     };
 
     handleScroll();
@@ -348,12 +410,86 @@ export const GalleryWorkspace = ({
   }, [gridColumns, viewportWidth]);
 
   useEffect(() => {
+    const gridElement = gridRef.current;
+    if (!gridElement || typeof ResizeObserver === "undefined") {
+      setGridWidth(gridElement?.clientWidth ?? 0);
+      return;
+    }
+
+    const updateMetrics = () => {
+      const scrollContainer = gridElement.closest(".ue-main-shell") as HTMLElement | null;
+      const rootRect = scrollContainer?.getBoundingClientRect();
+      const gridRect = gridElement.getBoundingClientRect();
+      setGridWidth(gridRect.width);
+      setViewportHeight(scrollContainer?.clientHeight ?? window.innerHeight);
+      setGridTop(rootRect ? gridRect.top - rootRect.top : gridRect.top);
+    };
+    const observer = new ResizeObserver(updateMetrics);
+    observer.observe(gridElement);
+    updateMetrics();
+    return () => observer.disconnect();
+  }, [images.length, effectiveColumns]);
+
+  const masonryLayout = useMemo(() => {
+    const columnCount = Math.max(1, effectiveColumns);
+    const width = gridWidth > 0 ? gridWidth : Math.max(320, viewportWidth - 32);
+    const columnWidth = Math.max(160, (width - MASONRY_GAP * (columnCount - 1)) / columnCount);
+    const columnHeights = Array.from({ length: columnCount }, () => 0);
+    const items: MasonryItem[] = images.map((image, index) => {
+      let columnIndex = 0;
+      for (let nextIndex = 1; nextIndex < columnHeights.length; nextIndex += 1) {
+        if (columnHeights[nextIndex] < columnHeights[columnIndex]) {
+          columnIndex = nextIndex;
+        }
+      }
+      const height = measuredCardHeights[image.relative_path] ?? Math.round(columnWidth * 1.36 + 54);
+      const top = columnHeights[columnIndex];
+      const left = columnIndex * (columnWidth + MASONRY_GAP);
+      columnHeights[columnIndex] += height + MASONRY_GAP;
+      return { image, index, top, left, width: columnWidth, height };
+    });
+    return {
+      items,
+      totalHeight: Math.max(0, ...columnHeights) - MASONRY_GAP,
+    };
+  }, [effectiveColumns, gridWidth, images, measuredCardHeights, viewportWidth]);
+
+  const visibleMasonryItems = useMemo(
+    () =>
+      masonryLayout.items.filter((item) => {
+        const itemTop = gridTop + item.top;
+        return itemTop + item.height >= -MASONRY_OVERSCAN && itemTop <= viewportHeight + MASONRY_OVERSCAN;
+      }),
+    [gridTop, masonryLayout.items, viewportHeight],
+  );
+
+  const measureCard = (relativePath: string, element: HTMLElement | null) => {
+    cardRefs.current[relativePath] = element;
+    if (!element) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      const height = Math.ceil(element.getBoundingClientRect().height);
+      if (!height) {
+        return;
+      }
+      setMeasuredCardHeights((current) => {
+        if (Math.abs((current[relativePath] ?? 0) - height) <= 1) {
+          return current;
+        }
+        return { ...current, [relativePath]: height };
+      });
+    });
+  };
+
+  useEffect(() => {
     if (!images.length || isTrashView || typeof IntersectionObserver === "undefined") {
       return;
     }
 
     const indexByPath = new Map(images.map((image, index) => [image.relative_path, index]));
-    const prefetchSpan = Math.max(effectiveColumns * 3, 8);
+    const prefetchSpan = Math.max(effectiveColumns * 2, 6);
     const root = gridRef.current?.closest(".ue-main-shell") as HTMLElement | null;
     const observer = new IntersectionObserver(
       (entries) => {
@@ -375,7 +511,7 @@ export const GalleryWorkspace = ({
           observer.unobserve(entry.target);
         });
       },
-      { root, rootMargin: "900px 0px", threshold: 0.01 },
+      { root, rootMargin: "520px 0px", threshold: 0.01 },
     );
 
     images.forEach((image) => {
@@ -424,21 +560,70 @@ export const GalleryWorkspace = ({
     }
   };
 
-  const toggleSelection = (relativePath: string) => {
+  const setSelection = (relativePaths: string[]) => {
+    const visiblePathSet = new Set(visibleImagePaths);
+    const dedupedPaths = relativePaths.filter(
+      (path, index, paths) => visiblePathSet.has(path) && paths.indexOf(path) === index,
+    );
+    onSelectionChange(dedupedPaths);
+  };
+
+  const toggleSelection = (relativePath: string, preserveAnchor = false) => {
     if (pageSelectedPaths.includes(relativePath)) {
-      onSelectionChange(pageSelectedPaths.filter((path) => path !== relativePath));
+      setSelection(pageSelectedPaths.filter((path) => path !== relativePath));
+      if (!preserveAnchor) {
+        lastSelectedPathRef.current = relativePath;
+      }
       return;
     }
 
-    onSelectionChange([...pageSelectedPaths, relativePath]);
+    setSelection([...pageSelectedPaths, relativePath]);
+    if (!preserveAnchor) {
+      lastSelectedPathRef.current = relativePath;
+    }
+  };
+
+  const selectRangeTo = (relativePath: string) => {
+    const anchorPath = lastSelectedPathRef.current || pageSelectedPaths[pageSelectedPaths.length - 1] || relativePath;
+    const anchorIndex = visibleImagePaths.indexOf(anchorPath);
+    const targetIndex = visibleImagePaths.indexOf(relativePath);
+    if (anchorIndex < 0 || targetIndex < 0) {
+      toggleSelection(relativePath);
+      return;
+    }
+
+    const startIndex = Math.min(anchorIndex, targetIndex);
+    const endIndex = Math.max(anchorIndex, targetIndex);
+    const rangePaths = visibleImagePaths.slice(startIndex, endIndex + 1);
+    setSelection([...pageSelectedPaths, ...rangePaths]);
+    lastSelectedPathRef.current = anchorPath;
+  };
+
+  const handleImageSelectionClick = (
+    relativePath: string,
+    event?: Pick<React.MouseEvent, "shiftKey" | "ctrlKey" | "metaKey">,
+  ) => {
+    if (event?.shiftKey) {
+      selectRangeTo(relativePath);
+      return;
+    }
+
+    if (event?.ctrlKey || event?.metaKey) {
+      toggleSelection(relativePath);
+      return;
+    }
+
+    toggleSelection(relativePath);
   };
 
   const selectAllVisible = () => {
-    onSelectionChange(visibleImagePaths);
+    setSelection(visibleImagePaths);
+    lastSelectedPathRef.current = visibleImagePaths[0] || "";
   };
 
   const clearSelection = () => {
     onSelectionChange([]);
+    lastSelectedPathRef.current = "";
   };
 
   const handleBatchDelete = async () => {
@@ -557,7 +742,7 @@ export const GalleryWorkspace = ({
       })
       .map((image) => image.relative_path);
 
-    onSelectionChange(intersectedPaths);
+    setSelection(intersectedPaths);
   };
 
   const handleSelectionPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
@@ -769,46 +954,86 @@ export const GalleryWorkspace = ({
               </button>
             </div>
 
-            <label className="ue-select-field ue-select-field--input ue-date-filter-field">
-              <span>{t("galleryDateFrom")}</span>
-              <input
-                type="date"
-                value={dateFrom}
-                max={dateTo || undefined}
-                onChange={(event) => {
-                  onDateFromChange(event.target.value);
-                  onPageChange(1);
-                }}
-              />
-            </label>
-
-            <label className="ue-select-field ue-select-field--input ue-date-filter-field">
-              <span>{t("galleryDateTo")}</span>
-              <input
-                type="date"
-                value={dateTo}
-                min={dateFrom || undefined}
-                onChange={(event) => {
-                  onDateToChange(event.target.value);
-                  onPageChange(1);
-                }}
-              />
-            </label>
-
-            {dateFrom || dateTo ? (
+            <div className="ue-filter-popover">
               <button
-                className="ue-icon-action"
-                onClick={() => {
-                  onDateFromChange("");
-                  onDateToChange("");
-                  onPageChange(1);
+                className={`ue-filter-trigger ${showFiltersMenu ? "is-open" : ""} ${activeFilterCount ? "active" : ""}`}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  setShowFiltersMenu((current) => !current);
                 }}
-                aria-label={t("galleryDateClear")}
-                title={t("galleryDateClear")}
+                type="button"
+                aria-label={t("galleryFilters")}
+                title={t("galleryFilters")}
               >
-                <CalendarX size={14} />
+                <SlidersHorizontal size={14} />
+                <span>{t("galleryFilters")}</span>
+                {activeFilterCount ? <strong>{activeFilterCount}</strong> : null}
               </button>
-            ) : null}
+              {showFiltersMenu ? (
+                <div className="ue-filter-menu" onClick={(event) => event.stopPropagation()}>
+                  <div className="ue-filter-menu-head">
+                    <div>
+                      <span>{t("galleryFilters")}</span>
+                      <strong>{t("galleryFilterResult", { count: total })}</strong>
+                    </div>
+                    {activeFilterCount ? (
+                      <button
+                        className="ue-icon-action"
+                        onClick={() => {
+                          onDateFromChange("");
+                          onDateToChange("");
+                          onFavoritesOnlyChange(false);
+                          onPageChange(1);
+                        }}
+                        aria-label={t("galleryDateClear")}
+                        title={t("galleryDateClear")}
+                      >
+                        <CalendarX size={14} />
+                      </button>
+                    ) : null}
+                  </div>
+                  <div className="ue-filter-menu-grid">
+                    <label className="ue-select-field ue-select-field--input ue-date-filter-field">
+                      <span>{t("galleryDateFrom")}</span>
+                      <input
+                        type="date"
+                        value={dateFrom}
+                        max={dateTo || undefined}
+                        onChange={(event) => {
+                          onDateFromChange(event.target.value);
+                          onPageChange(1);
+                        }}
+                      />
+                    </label>
+
+                    <label className="ue-select-field ue-select-field--input ue-date-filter-field">
+                      <span>{t("galleryDateTo")}</span>
+                      <input
+                        type="date"
+                        value={dateTo}
+                        min={dateFrom || undefined}
+                        onChange={(event) => {
+                          onDateToChange(event.target.value);
+                          onPageChange(1);
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <button
+                    className={`ue-filter-option ${favoritesOnly ? "active" : ""}`}
+                    onClick={() => {
+                      onFavoritesOnlyChange(!favoritesOnly);
+                      onPageChange(1);
+                    }}
+                    type="button"
+                  >
+                    <Pin size={14} fill={favoritesOnly ? "currentColor" : "none"} />
+                    <span>{t("galleryPinnedOnly")}</span>
+                    <Check size={14} />
+                  </button>
+                </div>
+              ) : null}
+            </div>
 
             <div className="ue-select-field ue-select-field--menu">
               <span>{t("galleryColumns")}</span>
@@ -842,14 +1067,6 @@ export const GalleryWorkspace = ({
               ) : null}
             </div>
 
-            <button
-              className={`ue-chip-toggle ue-chip-toggle--icon ${favoritesOnly ? "active" : ""}`}
-              onClick={() => onFavoritesOnlyChange(!favoritesOnly)}
-              aria-label={t("galleryPinnedOnly")}
-              title={t("galleryPinnedOnly")}
-            >
-              <Pin size={13} />
-            </button>
             {selectedBoard ? (
               <>
                 <button
@@ -1156,32 +1373,33 @@ export const GalleryWorkspace = ({
         ) : (
           <div
             ref={gridRef}
-            className="ue-gallery-grid"
-            style={{ gridTemplateColumns: `repeat(${effectiveColumns}, minmax(0, 1fr))` }}
+            className="ue-gallery-grid ue-gallery-grid--virtual"
+            style={{ height: `${masonryLayout.totalHeight}px` }}
             onPointerDown={handleSelectionPointerDown}
             onPointerMove={handleSelectionPointerMove}
             onPointerUp={handleSelectionPointerEnd}
             onPointerCancel={handleSelectionPointerEnd}
           >
-            {images.map((image, index) => {
+            {visibleMasonryItems.map(({ image, index, top, left, width }) => {
               const selected = pageSelectedPaths.includes(image.relative_path);
 
               return (
                 <article
                   key={image.relative_path}
                   className={`ue-gallery-card ${selected ? "is-selected" : ""}`}
+                  style={{ top: `${top}px`, left: `${left}px`, width: `${width}px` }}
                   onContextMenu={(event) => handleOpenContextMenu(event, image)}
                   ref={(element) => {
-                    cardRefs.current[image.relative_path] = element;
+                    measureCard(image.relative_path, element);
                   }}
                 >
                   <div className="ue-gallery-media">
                     <GalleryCardImage
                       image={image}
                       priority={index < effectiveColumns * 2}
-                      onOpenDetail={(nextImage) => {
+                      onOpenDetail={(nextImage, event) => {
                         if (selectionMode) {
-                          toggleSelection(nextImage.relative_path);
+                          handleImageSelectionClick(nextImage.relative_path, event);
                           return;
                         }
                         if (isDraggingSelectionRef.current) {
@@ -1207,7 +1425,7 @@ export const GalleryWorkspace = ({
                         className={`ue-select-btn ${selected ? "active" : ""}`}
                         onClick={(event) => {
                           event.stopPropagation();
-                          toggleSelection(image.relative_path);
+                          handleImageSelectionClick(image.relative_path, event);
                         }}
                         aria-label={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
                         title={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
@@ -1219,7 +1437,11 @@ export const GalleryWorkspace = ({
                         className="ue-board-btn"
                         onClick={(event) => {
                           event.stopPropagation();
-                          setBoardPickerPaths([image.relative_path]);
+                          if (selected && pageSelectedPaths.length > 1) {
+                            setBoardPickerPaths(pageSelectedPaths);
+                          } else {
+                            setBoardPickerPaths([image.relative_path]);
+                          }
                         }}
                         aria-label={t("bulkAddToBoard")}
                         title={t("bulkAddToBoard")}
@@ -1242,9 +1464,9 @@ export const GalleryWorkspace = ({
 
                     <button
                       className="ue-gallery-open ue-gallery-open--icon"
-                      onClick={() => {
+                      onClick={(event) => {
                         if (selectionMode) {
-                          toggleSelection(image.relative_path);
+                          handleImageSelectionClick(image.relative_path, event);
                           return;
                         }
                         if (isDraggingSelectionRef.current) {
@@ -1261,9 +1483,9 @@ export const GalleryWorkspace = ({
 
                   <button
                     className="ue-gallery-body"
-                    onClick={() => {
+                    onClick={(event) => {
                       if (selectionMode) {
-                        toggleSelection(image.relative_path);
+                        handleImageSelectionClick(image.relative_path, event);
                         return;
                       }
                       if (isDraggingSelectionRef.current) {

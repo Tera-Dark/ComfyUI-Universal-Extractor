@@ -132,6 +132,15 @@ export interface ImageListResponse {
   limit: number;
 }
 
+export interface ThumbnailPrewarmStatus {
+  pending: number;
+  queued: number;
+  completed: number;
+  failed: number;
+  last_error: string;
+  updated_at: number;
+}
+
 export interface LibraryResponse {
   name: string;
   data: LibraryEntry[];

@@ -123,6 +123,9 @@ export const useGalleryData = () => {
         setImages(imageResponse.images ?? []);
         setTrashItems([]);
         setTotal(imageResponse.total ?? 0);
+        void galleryApi
+          .prewarmThumbnails((imageResponse.images ?? []).map((image) => image.relative_path), PAGE_SIZE)
+          .catch(() => undefined);
       } catch (fetchError) {
         if (!isCancelled) {
           setError(fetchError instanceof Error ? fetchError.message : t("galleryLoading"));

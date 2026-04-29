@@ -1,4 +1,5 @@
 const zhCN = {
+  galleryFilters: "筛选",
   appTitle: "Universal Extractor",
   appSubtitle: "ComfyUI 图库与词库工作区",
   navGallery: "图库",

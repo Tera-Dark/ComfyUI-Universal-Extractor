@@ -31,6 +31,7 @@ gallery_ui/node_modules/
 # Runtime data
 output/
 data/gallery_state.json
+data/gallery_index.sqlite3*
 data/thumb_cache/
 data/trash/
 data/trash_state.json

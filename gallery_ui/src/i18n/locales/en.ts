@@ -60,6 +60,7 @@ const en = {
   galleryStatsPage: "Current page",
   galleryFilterLabel: "Current result",
   galleryFilterResult: "{count} images",
+  galleryFilters: "Filters",
   galleryFavoriteOnly: "Pins only",
   galleryPinnedOnly: "Pins only",
   galleryAllCategories: "All categories",

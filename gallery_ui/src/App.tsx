@@ -45,7 +45,7 @@ function App() {
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("gallery");
   const [librarySearchTerm, setLibrarySearchTerm] = useState("");
   const [folderViewMode, setFolderViewMode] = useState<"tree" | "list">("tree");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => typeof window !== "undefined" ? window.innerWidth <= 960 : false);
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [boardDialogOpen, setBoardDialogOpen] = useState(false);
 
@@ -394,9 +394,19 @@ function App() {
         onSidebarToggle={() => setSidebarCollapsed((current) => !current)}
       />
 
+      {/* Sidebar Overlay for Mobile */}
+      {!sidebarCollapsed && (
+        <div 
+          className="ue-sidebar-overlay"
+          onClick={() => setSidebarCollapsed(true)}
+          aria-hidden="true"
+        />
+      )}
+      
       <div className={`ue-body-shell ${sidebarCollapsed ? "is-sidebar-collapsed" : ""}`}>
         <WorkspaceSidebar
           collapsed={sidebarCollapsed}
+          onToggle={() => setSidebarCollapsed((current) => !current)}
           activeTab={activeTab}
           galleryContext={gallery.context}
           folderViewMode={folderViewMode}
@@ -606,7 +616,6 @@ function App() {
 
       {gallery.selectedImage ? (
         <ImageDetailModal
-          key={gallery.selectedImage.relative_path}
           image={gallery.selectedImage}
           onClose={() => gallery.setSelectedImage(null)}
           onSaveState={handleUpdateImageState}

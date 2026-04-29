@@ -3,12 +3,14 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sqlite3
 import shutil
 import subprocess
 import time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from threading import Lock
+from threading import BoundedSemaphore, Lock
 from typing import Any
 
 from ..constants import (
@@ -41,11 +43,14 @@ from .state_store import (
     collect_categories,
     create_board,
     delete_board,
+    default_image_state,
     extract_image_states,
     extract_image_states_by_prefix,
+    get_image_state_map,
     get_image_state,
     get_raw_boards,
     move_image_states,
+    normalize_board_ids,
     remove_image_states,
     remove_image_states_by_prefix,
     rename_image_state,
@@ -67,6 +72,7 @@ THUMB_SIZE = 480
 IMAGE_REF_SEPARATOR = "::"
 DEFAULT_OUTPUT_SOURCE_ID = "default_output"
 DEFAULT_INPUT_SOURCE_ID = "default_input"
+GALLERY_INDEX_DB_FILE = os.path.join(DATA_DIR, "gallery_index.sqlite3")
 IMAGE_INDEX_CACHE: dict[str, Any] = {
     "signature": None,
     "output_dir": None,
@@ -74,10 +80,24 @@ IMAGE_INDEX_CACHE: dict[str, Any] = {
     "images": [],
     "subfolders": [],
     "sources": [],
+    "dirty": False,
 }
 IMAGE_INDEX_LOCK = Lock()
 LIBRARY_CACHE: dict[str, dict[str, Any]] = {}
 LIBRARY_CACHE_LOCK = Lock()
+THUMB_GENERATION_SEMAPHORE = BoundedSemaphore(2)
+THUMB_LOCKS: dict[str, Lock] = {}
+THUMB_LOCKS_GUARD = Lock()
+THUMB_PREWARM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ue-thumb")
+THUMB_PREWARM_PENDING: set[str] = set()
+THUMB_PREWARM_LOCK = Lock()
+THUMB_PREWARM_STATS: dict[str, Any] = {
+    "queued": 0,
+    "completed": 0,
+    "failed": 0,
+    "last_error": "",
+    "updated_at": 0.0,
+}
 
 
 def _sanitize_source_id(value: str) -> str:
@@ -249,6 +269,7 @@ def _source_signature(sources: list[dict[str, Any]]) -> str:
             "id": source.get("id"),
             "path": _real_abs(source.get("path", "")) if source.get("path") else "",
             "enabled": bool(source.get("enabled")),
+            "exists": bool(source.get("exists")),
             "recursive": bool(source.get("recursive", True)),
         }
         for source in sources
@@ -770,6 +791,254 @@ def build_thumb_url(relative_path: str) -> str:
     return f"/universal_gallery/api/thumb?{params}"
 
 
+def _connect_gallery_index_db() -> sqlite3.Connection:
+    ensure_data_dir()
+    connection = sqlite3.connect(GALLERY_INDEX_DB_FILE)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA journal_mode=WAL")
+    connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gallery_images (
+            relative_path TEXT PRIMARY KEY,
+            source_id TEXT NOT NULL,
+            source_relative_path TEXT NOT NULL,
+            filename TEXT NOT NULL,
+            relative_dir TEXT NOT NULL,
+            subfolder TEXT NOT NULL,
+            display_subfolder TEXT NOT NULL,
+            size INTEGER NOT NULL,
+            created_at INTEGER NOT NULL,
+            modified_at INTEGER NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            category TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            pinned INTEGER NOT NULL DEFAULT 0,
+            boards_text TEXT NOT NULL DEFAULT '',
+            scanned_at REAL NOT NULL
+        )
+        """
+    )
+    columns = {row["name"] for row in connection.execute("PRAGMA table_info(gallery_images)").fetchall()}
+    for column_name, column_definition in {
+        "title": "TEXT NOT NULL DEFAULT ''",
+        "category": "TEXT NOT NULL DEFAULT ''",
+        "notes": "TEXT NOT NULL DEFAULT ''",
+        "pinned": "INTEGER NOT NULL DEFAULT 0",
+        "boards_text": "TEXT NOT NULL DEFAULT ''",
+    }.items():
+        if column_name not in columns:
+            connection.execute(f"ALTER TABLE gallery_images ADD COLUMN {column_name} {column_definition}")
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gallery_index_meta (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_source ON gallery_images(source_id)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_created ON gallery_images(created_at DESC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_dir ON gallery_images(relative_dir)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_category ON gallery_images(category)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_pinned ON gallery_images(pinned)")
+    return connection
+
+
+def _index_meta_get(connection: sqlite3.Connection, key: str) -> str:
+    row = connection.execute("SELECT value FROM gallery_index_meta WHERE key = ?", (key,)).fetchone()
+    return str(row["value"]) if row else ""
+
+
+def _index_meta_set(connection: sqlite3.Connection, key: str, value: str):
+    connection.execute(
+        "INSERT INTO gallery_index_meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        (key, value),
+    )
+
+
+def _collect_index_subfolders(source_id: str, relative_dir: str, subfolders: set[str]):
+    if not relative_dir:
+        return
+    parts = [part for part in relative_dir.split("/") if part]
+    for index in range(len(parts)):
+        folder_path = "/".join(parts[: index + 1])
+        if source_id == DEFAULT_OUTPUT_SOURCE_ID:
+            subfolders.add(folder_path)
+        else:
+            subfolders.add(f"{source_id}{IMAGE_REF_SEPARATOR}{folder_path}")
+
+
+def _image_row_to_payload(row: sqlite3.Row, source: dict[str, Any]) -> dict[str, Any]:
+    relative_path = str(row["relative_path"])
+    original_url, resolved_subfolder = build_view_url(relative_path)
+    relative_dir = str(row["relative_dir"])
+    return {
+        "filename": str(row["filename"]),
+        "relative_path": relative_path,
+        "source_id": source["id"],
+        "source_name": source["name"],
+        "source_kind": source["kind"],
+        "source_path": source["path"],
+        "source_relative_path": str(row["source_relative_path"]),
+        "relative_dir": relative_dir,
+        "subfolder": str(row["subfolder"]) if relative_dir or source["id"] != DEFAULT_OUTPUT_SOURCE_ID else resolved_subfolder,
+        "display_subfolder": str(row["display_subfolder"]),
+        "url": original_url,
+        "original_url": original_url,
+        "thumb_url": build_thumb_url(relative_path),
+        "size": int(row["size"]),
+        "created_at": int(row["created_at"]),
+    }
+
+
+def _boards_to_search_text(boards: list[str]) -> str:
+    return "\n".join(["", *normalize_board_ids(boards), ""])
+
+
+def _image_row_state(row: sqlite3.Row) -> dict[str, Any]:
+    boards = [board_id for board_id in str(row["boards_text"] or "").split("\n") if board_id]
+    pinned = bool(int(row["pinned"] or 0))
+    return {
+        "favorite": pinned,
+        "pinned": pinned,
+        "boards": boards,
+        "category": str(row["category"] or ""),
+        "title": str(row["title"] or ""),
+        "notes": str(row["notes"] or ""),
+        "updated_at": 0,
+    }
+
+
+def _sync_image_state_to_index_db(connection: sqlite3.Connection, state_map: dict[str, dict[str, Any]] | None = None):
+    state_map = state_map if state_map is not None else get_image_state_map()
+    connection.execute("CREATE TEMP TABLE IF NOT EXISTS temp_gallery_state_paths(relative_path TEXT PRIMARY KEY)")
+    connection.execute("DELETE FROM temp_gallery_state_paths")
+    if state_map:
+        connection.executemany(
+            "INSERT OR IGNORE INTO temp_gallery_state_paths(relative_path) VALUES(?)",
+            [(relative_path,) for relative_path in state_map],
+        )
+    rows = [
+        (
+            str(image_state.get("title", "")),
+            str(image_state.get("category", "")),
+            str(image_state.get("notes", "")),
+            1 if image_state.get("pinned", image_state.get("favorite", False)) else 0,
+            _boards_to_search_text(image_state.get("boards", [])),
+            relative_path,
+        )
+        for relative_path, image_state in state_map.items()
+    ]
+    if rows:
+        connection.executemany(
+            """
+            UPDATE gallery_images
+            SET title = ?, category = ?, notes = ?, pinned = ?, boards_text = ?
+            WHERE relative_path = ?
+            """,
+            rows,
+        )
+    connection.execute(
+        """
+        UPDATE gallery_images
+        SET title = '', category = '', notes = '', pinned = 0, boards_text = ''
+        WHERE relative_path NOT IN (SELECT relative_path FROM temp_gallery_state_paths)
+        """,
+    )
+
+
+def _load_image_index_from_db(sources: list[dict[str, Any]], signature: str) -> dict[str, Any] | None:
+    if not os.path.exists(GALLERY_INDEX_DB_FILE):
+        return None
+
+    source_by_id = {source["id"]: source for source in sources}
+    with _connect_gallery_index_db() as connection:
+        if _index_meta_get(connection, "source_signature") != signature:
+            return None
+        rows = connection.execute(
+            """
+            SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
+                   subfolder, display_subfolder, size, created_at, modified_at
+            FROM gallery_images
+            ORDER BY created_at DESC
+            """
+        ).fetchall()
+
+    images: list[dict[str, Any]] = []
+    subfolders: set[str] = set()
+    source_counts: dict[str, int] = {source["id"]: 0 for source in sources}
+    for row in rows:
+        source = source_by_id.get(str(row["source_id"]))
+        if not source or not source.get("enabled", True) or not source.get("exists"):
+            continue
+        relative_dir = str(row["relative_dir"])
+        _collect_index_subfolders(source["id"], relative_dir, subfolders)
+        source_counts[source["id"]] = source_counts.get(source["id"], 0) + 1
+        images.append(_image_row_to_payload(row, source))
+
+    indexed_sources = [{**source, "image_count": source_counts.get(source["id"], 0)} for source in sources]
+    return {
+        "signature": signature,
+        "output_dir": get_output_dir(),
+        "images": images,
+        "subfolders": sorted(subfolders, key=lambda value: value.lower()),
+        "sources": indexed_sources,
+        "built_at": time.time(),
+    }
+
+
+def _image_index_db_has_signature(signature: str) -> bool:
+    if not os.path.exists(GALLERY_INDEX_DB_FILE):
+        return False
+    with _connect_gallery_index_db() as connection:
+        return _index_meta_get(connection, "source_signature") == signature
+
+
+def _save_image_index_to_db(index: dict[str, Any]):
+    image_states = get_image_state_map()
+    with _connect_gallery_index_db() as connection:
+        connection.execute("DELETE FROM gallery_images")
+        scanned_at = time.time()
+        rows = []
+        for image in index.get("images", []):
+            image_state = image_states.get(image["relative_path"], default_image_state())
+            rows.append(
+                (
+                    image["relative_path"],
+                    image["source_id"],
+                    image["source_relative_path"],
+                    image["filename"],
+                    image["relative_dir"],
+                    image["subfolder"],
+                    image["display_subfolder"],
+                    int(image["size"]),
+                    int(image["created_at"]),
+                    int(image.get("modified_at", image["created_at"])),
+                    str(image_state.get("title", "")),
+                    str(image_state.get("category", "")),
+                    str(image_state.get("notes", "")),
+                    1 if image_state.get("pinned", image_state.get("favorite", False)) else 0,
+                    _boards_to_search_text(image_state.get("boards", [])),
+                    scanned_at,
+                )
+            )
+        connection.executemany(
+            """
+            INSERT INTO gallery_images(
+                relative_path, source_id, source_relative_path, filename, relative_dir,
+                subfolder, display_subfolder, size, created_at, modified_at,
+                title, category, notes, pinned, boards_text, scanned_at
+            )
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            rows,
+        )
+        _index_meta_set(connection, "source_signature", str(index.get("signature") or ""))
+        _index_meta_set(connection, "built_at", str(index.get("built_at") or scanned_at))
+        connection.commit()
+
+
 def invalidate_image_index_cache():
     with IMAGE_INDEX_LOCK:
         IMAGE_INDEX_CACHE["images"] = []
@@ -778,6 +1047,7 @@ def invalidate_image_index_cache():
         IMAGE_INDEX_CACHE["built_at"] = 0.0
         IMAGE_INDEX_CACHE["output_dir"] = None
         IMAGE_INDEX_CACHE["signature"] = None
+        IMAGE_INDEX_CACHE["dirty"] = True
 
 
 def _build_image_index(sources: list[dict[str, Any]]) -> dict[str, Any]:
@@ -823,13 +1093,7 @@ def _build_image_index(sources: list[dict[str, Any]]) -> dict[str, Any]:
                 if source["id"] != DEFAULT_OUTPUT_SOURCE_ID:
                     subfolder_ref = f'{source["id"]}{IMAGE_REF_SEPARATOR}{relative_dir}' if relative_dir else source["id"]
                 if relative_dir:
-                    parts = [part for part in relative_dir.split("/") if part]
-                    for index in range(len(parts)):
-                        folder_path = "/".join(parts[: index + 1])
-                        if source["id"] == DEFAULT_OUTPUT_SOURCE_ID:
-                            subfolders.add(folder_path)
-                        else:
-                            subfolders.add(f'{source["id"]}{IMAGE_REF_SEPARATOR}{folder_path}')
+                    _collect_index_subfolders(source["id"], relative_dir, subfolders)
 
                 original_url, resolved_subfolder = build_view_url(image_ref)
                 source_counts[source["id"]] = source_counts.get(source["id"], 0) + 1
@@ -850,12 +1114,13 @@ def _build_image_index(sources: list[dict[str, Any]]) -> dict[str, Any]:
                         "thumb_url": build_thumb_url(image_ref),
                         "size": stat.st_size,
                         "created_at": int(stat.st_ctime),
+                        "modified_at": int(stat.st_mtime),
                     }
                 )
 
     images.sort(key=lambda item: item["created_at"], reverse=True)
     indexed_sources = [{**source, "image_count": source_counts.get(source["id"], 0)} for source in sources]
-    return {
+    index = {
         "signature": _source_signature(sources),
         "output_dir": get_output_dir(),
         "images": images,
@@ -863,6 +1128,8 @@ def _build_image_index(sources: list[dict[str, Any]]) -> dict[str, Any]:
         "sources": indexed_sources,
         "built_at": time.time(),
     }
+    _save_image_index_to_db(index)
+    return index
 
 
 def build_move_target_options(image_index: dict[str, Any]) -> list[dict[str, str]]:
@@ -905,12 +1172,15 @@ def get_image_index(force_refresh: bool = False) -> dict[str, Any]:
     with IMAGE_INDEX_LOCK:
         should_rebuild = (
             force_refresh
+            or IMAGE_INDEX_CACHE.get("dirty")
             or IMAGE_INDEX_CACHE["signature"] != signature
-            or not IMAGE_INDEX_CACHE["images"]
+            or not IMAGE_INDEX_CACHE["built_at"]
         )
 
         if should_rebuild:
-            IMAGE_INDEX_CACHE.update(_build_image_index(sources))
+            cached_index = None if force_refresh or IMAGE_INDEX_CACHE.get("dirty") else _load_image_index_from_db(sources, signature)
+            IMAGE_INDEX_CACHE.update(cached_index if cached_index is not None else _build_image_index(sources))
+            IMAGE_INDEX_CACHE["dirty"] = False
 
         return {
             "signature": IMAGE_INDEX_CACHE["signature"],
@@ -957,10 +1227,11 @@ def list_images(
         date_to_ts = int((datetime.strptime(date_to.strip(), "%Y-%m-%d") + timedelta(days=1)).timestamp())
 
     indexed_images = get_image_index(force_refresh=force_refresh)["images"]
+    image_states = get_image_state_map()
     images: list[dict[str, Any]] = []
 
     for indexed_image in indexed_images:
-        image_state = get_image_state(indexed_image["relative_path"])
+        image_state = image_states.get(indexed_image["relative_path"], default_image_state())
         haystack = " ".join(
             [
                 indexed_image["filename"],
@@ -1005,6 +1276,113 @@ def list_images(
     return images
 
 
+def list_images_page(
+    page: int = 1,
+    limit: int = 60,
+    search: str = "",
+    category: str = "",
+    subfolder: str = "",
+    board_id: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    favorites_only: bool = False,
+    sort_by: str = "created_at",
+    sort_order: str = "desc",
+    force_refresh: bool = False,
+) -> dict[str, Any]:
+    sources = list_gallery_sources()
+    signature = _source_signature(sources)
+    with IMAGE_INDEX_LOCK:
+        if force_refresh or IMAGE_INDEX_CACHE.get("dirty") or not _image_index_db_has_signature(signature):
+            IMAGE_INDEX_CACHE.update(_build_image_index(sources))
+            IMAGE_INDEX_CACHE["dirty"] = False
+    source_by_id = {source["id"]: source for source in sources}
+    normalized_search = search.strip().lower()
+    normalized_category = category.strip().lower()
+    normalized_subfolder = normalize_relative_path(subfolder).lower()
+    filter_source_id = ""
+    filter_relative_dir = normalized_subfolder
+    if IMAGE_REF_SEPARATOR in normalized_subfolder:
+        filter_source_id, filter_relative_dir = normalized_subfolder.split(IMAGE_REF_SEPARATOR, 1)
+    normalized_board_id = str(board_id or "").strip()
+    date_from_ts = None
+    date_to_ts = None
+
+    if date_from.strip():
+        date_from_ts = int(datetime.strptime(date_from.strip(), "%Y-%m-%d").timestamp())
+    if date_to.strip():
+        date_to_ts = int((datetime.strptime(date_to.strip(), "%Y-%m-%d") + timedelta(days=1)).timestamp())
+
+    where_clauses = ["1 = 1"]
+    params: list[Any] = []
+
+    if normalized_search:
+        where_clauses.append(
+            "lower(filename || ' ' || relative_path || ' ' || title || ' ' || category || ' ' || notes) LIKE ?"
+        )
+        params.append(f"%{normalized_search}%")
+    if normalized_category:
+        where_clauses.append("lower(category) = ?")
+        params.append(normalized_category)
+    if normalized_subfolder:
+        if filter_source_id:
+            where_clauses.append("source_id = ?")
+            params.append(filter_source_id)
+        if filter_relative_dir:
+            where_clauses.append("(relative_dir = ? OR relative_dir LIKE ?)")
+            params.extend([filter_relative_dir, f"{filter_relative_dir}/%"])
+    if normalized_board_id:
+        where_clauses.append("boards_text LIKE ?")
+        params.append(f"%\n{normalized_board_id}\n%")
+    if date_from_ts is not None:
+        where_clauses.append("created_at >= ?")
+        params.append(date_from_ts)
+    if date_to_ts is not None:
+        where_clauses.append("created_at < ?")
+        params.append(date_to_ts)
+    if favorites_only:
+        where_clauses.append("pinned = 1")
+
+    sort_field = {
+        "filename": "filename COLLATE NOCASE",
+        "size": "size",
+        "created_at": "created_at",
+    }.get(sort_by, "created_at")
+    sort_direction = "ASC" if sort_order.lower() == "asc" else "DESC"
+    safe_page = max(1, int(page or 1))
+    safe_limit = max(1, min(200, int(limit or 60)))
+    offset = (safe_page - 1) * safe_limit
+    where_sql = " AND ".join(where_clauses)
+
+    with _connect_gallery_index_db() as connection:
+        _sync_image_state_to_index_db(connection)
+        total = int(
+            connection.execute(f"SELECT COUNT(*) AS total FROM gallery_images WHERE {where_sql}", params).fetchone()["total"]
+        )
+        rows = connection.execute(
+            f"""
+            SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
+                   subfolder, display_subfolder, size, created_at, modified_at,
+                   title, category, notes, pinned, boards_text
+            FROM gallery_images
+            WHERE {where_sql}
+            ORDER BY {sort_field} {sort_direction}
+            LIMIT ? OFFSET ?
+            """,
+            [*params, safe_limit, offset],
+        ).fetchall()
+        connection.commit()
+
+    images: list[dict[str, Any]] = []
+    for row in rows:
+        source = source_by_id.get(str(row["source_id"]))
+        if not source:
+            continue
+        images.append({**_image_row_to_payload(row, source), **_image_row_state(row)})
+
+    return {"images": images, "total": total, "page": safe_page, "limit": safe_limit}
+
+
 def _board_cover_payload(relative_path: str) -> dict[str, str] | None:
     if not relative_path:
         return None
@@ -1025,12 +1403,13 @@ def _board_cover_payload(relative_path: str) -> dict[str, str] | None:
 def list_boards(force_refresh: bool = False) -> list[dict[str, Any]]:
     boards = get_raw_boards()
     indexed_images = get_image_index(force_refresh=force_refresh)["images"]
+    image_states = get_image_state_map()
     board_counts: dict[str, int] = {board_id: 0 for board_id in boards}
     first_cover_by_board: dict[str, str] = {}
 
     for indexed_image in indexed_images:
         relative_path = indexed_image["relative_path"]
-        image_state = get_image_state(relative_path)
+        image_state = image_states.get(relative_path, default_image_state())
         for board_id in image_state.get("boards", []):
             if board_id not in boards:
                 continue
@@ -1093,11 +1472,8 @@ def get_gallery_context(force_refresh: bool = False) -> dict:
     import_dir = os.path.join(output_dir, IMPORT_IMAGE_SUBFOLDER) if output_dir else ""
     image_index = get_image_index(force_refresh=force_refresh)
     subfolders = image_index["subfolders"]
-    pinned_count = sum(
-        1
-        for indexed_image in image_index["images"]
-        if get_image_state(indexed_image["relative_path"]).get("pinned", False)
-    )
+    image_states = get_image_state_map()
+    pinned_count = sum(1 for indexed_image in image_index["images"] if image_states.get(indexed_image["relative_path"], {}).get("pinned", False))
 
     return {
         "base_dir": base_dir,
@@ -1139,6 +1515,15 @@ def ensure_thumb_cache_dir():
     os.makedirs(THUMB_CACHE_DIR, exist_ok=True)
 
 
+def _get_thumb_generation_lock(cache_key: str) -> Lock:
+    with THUMB_LOCKS_GUARD:
+        thumb_lock = THUMB_LOCKS.get(cache_key)
+        if thumb_lock is None:
+            thumb_lock = Lock()
+            THUMB_LOCKS[cache_key] = thumb_lock
+        return thumb_lock
+
+
 def get_thumbnail_path(relative_path: str, size: int = THUMB_SIZE) -> tuple[str, str]:
     source_id, source_relative_path = parse_image_ref(relative_path)
     normalized = make_image_ref(source_id, source_relative_path)
@@ -1154,12 +1539,89 @@ def get_thumbnail_path(relative_path: str, size: int = THUMB_SIZE) -> tuple[str,
     if not os.path.exists(thumb_path):
         if not HAS_PIL:
             raise RuntimeError("Pillow is required for thumbnail generation")
-        with Image.open(full_path) as image:
-            image = image.convert("RGB")
-            image.thumbnail((size, size))
-            image.save(thumb_path, format="WEBP", quality=82, method=4)
+        thumb_lock = _get_thumb_generation_lock(cache_key)
+        with thumb_lock:
+            if not os.path.exists(thumb_path):
+                with THUMB_GENERATION_SEMAPHORE:
+                    if not os.path.exists(thumb_path):
+                        temp_path = f"{thumb_path}.{uuid.uuid4().hex}.tmp"
+                        try:
+                            with Image.open(full_path) as image:
+                                image = image.convert("RGB")
+                                image.thumbnail((size, size))
+                                image.save(temp_path, format="WEBP", quality=80, method=2)
+                            os.replace(temp_path, thumb_path)
+                        finally:
+                            if os.path.exists(temp_path):
+                                try:
+                                    os.remove(temp_path)
+                                except OSError:
+                                    pass
+        with THUMB_LOCKS_GUARD:
+            if THUMB_LOCKS.get(cache_key) is thumb_lock:
+                THUMB_LOCKS.pop(cache_key, None)
 
     return full_path, thumb_path
+
+
+def _thumbnail_prewarm_key(relative_path: str, size: int) -> str:
+    source_id, source_relative_path = parse_image_ref(relative_path)
+    return f"{make_image_ref(source_id, source_relative_path)}|{int(size)}"
+
+
+def _run_thumbnail_prewarm(relative_path: str, size: int, queue_key: str):
+    try:
+        get_thumbnail_path(relative_path, size=size)
+    except Exception as error:
+        with THUMB_PREWARM_LOCK:
+            THUMB_PREWARM_STATS["failed"] = int(THUMB_PREWARM_STATS.get("failed", 0)) + 1
+            THUMB_PREWARM_STATS["last_error"] = str(error)
+            THUMB_PREWARM_STATS["updated_at"] = time.time()
+    else:
+        with THUMB_PREWARM_LOCK:
+            THUMB_PREWARM_STATS["completed"] = int(THUMB_PREWARM_STATS.get("completed", 0)) + 1
+            THUMB_PREWARM_STATS["updated_at"] = time.time()
+    finally:
+        with THUMB_PREWARM_LOCK:
+            THUMB_PREWARM_PENDING.discard(queue_key)
+
+
+def enqueue_thumbnail_prewarm(relative_paths: list[str], size: int = THUMB_SIZE, limit: int = 80) -> dict[str, Any]:
+    queued: list[str] = []
+    skipped: list[str] = []
+    for relative_path in relative_paths[:limit]:
+        try:
+            source_id, source_relative_path = parse_image_ref(relative_path)
+            normalized = make_image_ref(source_id, source_relative_path)
+            queue_key = _thumbnail_prewarm_key(normalized, size)
+        except ValueError:
+            skipped.append(relative_path)
+            continue
+
+        with THUMB_PREWARM_LOCK:
+            if queue_key in THUMB_PREWARM_PENDING:
+                skipped.append(normalized)
+                continue
+            THUMB_PREWARM_PENDING.add(queue_key)
+            THUMB_PREWARM_STATS["queued"] = int(THUMB_PREWARM_STATS.get("queued", 0)) + 1
+            THUMB_PREWARM_STATS["updated_at"] = time.time()
+
+        queued.append(normalized)
+        THUMB_PREWARM_EXECUTOR.submit(_run_thumbnail_prewarm, normalized, size, queue_key)
+
+    return {"ok": True, "queued": queued, "skipped": skipped, "status": get_thumbnail_prewarm_status()}
+
+
+def get_thumbnail_prewarm_status() -> dict[str, Any]:
+    with THUMB_PREWARM_LOCK:
+        return {
+            "pending": len(THUMB_PREWARM_PENDING),
+            "queued": int(THUMB_PREWARM_STATS.get("queued", 0)),
+            "completed": int(THUMB_PREWARM_STATS.get("completed", 0)),
+            "failed": int(THUMB_PREWARM_STATS.get("failed", 0)),
+            "last_error": str(THUMB_PREWARM_STATS.get("last_error", "")),
+            "updated_at": float(THUMB_PREWARM_STATS.get("updated_at", 0.0)),
+        }
 
 
 def save_library(name: str, data):
