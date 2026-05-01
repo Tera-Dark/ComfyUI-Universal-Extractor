@@ -42,7 +42,7 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
           request.resolve(false);
           setRequest(null);
         }}>
-          <div className="ue-confirm-modal" onClick={(event) => event.stopPropagation()}>
+          <div className="ue-confirm-modal ue-dialog-modal" onClick={(event) => event.stopPropagation()}>
             <button
               className="ue-modal-close ue-modal-close--light"
               onClick={() => {
@@ -57,11 +57,11 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
             <div className={`ue-confirm-icon ue-confirm-icon--${request.tone || "info"}`}>
               {request.tone === "danger" || request.tone === "warning" ? <AlertTriangle size={18} /> : <Info size={18} />}
             </div>
-            <div className="ue-pane-copy">
+            <div className="ue-pane-copy ue-dialog-heading">
               <h2>{request.title}</h2>
               <p>{request.message}</p>
             </div>
-            <div className="ue-library-modal-actions">
+            <div className="ue-library-modal-actions ue-dialog-actions">
               <button
                 className="ue-secondary-btn"
                 onClick={() => {

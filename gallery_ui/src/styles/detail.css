@@ -57,6 +57,51 @@
   transform: scale(1.04);
 }
 
+.ue-lightbox-side-nav {
+  position: absolute;
+  top: 50%;
+  z-index: 4;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 56px;
+  height: 96px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  background: rgba(34, 29, 31, 0.48);
+  color: rgba(255, 255, 255, 0.9);
+  cursor: pointer;
+  transform: translateY(-50%);
+  backdrop-filter: blur(16px);
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.18);
+  transition:
+    background-color var(--ue-duration-fast) var(--ue-ease),
+    border-color var(--ue-duration-fast) var(--ue-ease),
+    color var(--ue-duration-fast) var(--ue-ease),
+    opacity var(--ue-duration-fast) var(--ue-ease),
+    transform var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-lightbox-side-nav--prev {
+  left: clamp(96px, 24vw, 31%);
+}
+
+.ue-lightbox-side-nav--next {
+  right: clamp(96px, 24vw, 31%);
+}
+
+.ue-lightbox-side-nav:hover:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.2);
+  background: rgba(34, 29, 31, 0.72);
+  color: #ffffff;
+  transform: translateY(-50%) scale(1.03);
+}
+
+.ue-lightbox-side-nav:disabled {
+  opacity: 0.22;
+  cursor: default;
+}
+
 .ue-lightbox-stage {
   position: relative;
   z-index: 1;
@@ -444,7 +489,8 @@
 }
 
 .ue-toolbar-btn[data-tooltip]::after,
-.ue-lightbox-close[data-tooltip]::after {
+.ue-lightbox-close[data-tooltip]::after,
+.ue-lightbox-side-nav[data-tooltip]::after {
   content: attr(data-tooltip);
   position: absolute;
   left: 50%;
@@ -469,12 +515,22 @@
 .ue-toolbar-btn[data-tooltip]:hover::after,
 .ue-toolbar-btn[data-tooltip]:focus-visible::after,
 .ue-lightbox-close[data-tooltip]:hover::after,
-.ue-lightbox-close[data-tooltip]:focus-visible::after {
+.ue-lightbox-close[data-tooltip]:focus-visible::after,
+.ue-lightbox-side-nav[data-tooltip]:hover::after,
+.ue-lightbox-side-nav[data-tooltip]:focus-visible::after {
   opacity: 1;
   transform: translate(-50%, 0);
 }
 
 @media (max-width: 1180px) {
+  .ue-lightbox-side-nav--prev {
+    left: 28px;
+  }
+
+  .ue-lightbox-side-nav--next {
+    right: 28px;
+  }
+
   .ue-lightbox-stage.has-inspector {
     grid-template-columns: 1fr;
   }
@@ -489,6 +545,19 @@
 }
 
 @media (max-width: 720px) {
+  .ue-lightbox-side-nav {
+    width: 42px;
+    height: 64px;
+  }
+
+  .ue-lightbox-side-nav--prev {
+    left: 12px;
+  }
+
+  .ue-lightbox-side-nav--next {
+    right: 12px;
+  }
+
   .ue-lightbox-close {
     top: 22px;
     left: 22px;

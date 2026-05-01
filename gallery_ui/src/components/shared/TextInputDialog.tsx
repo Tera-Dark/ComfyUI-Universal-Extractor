@@ -46,7 +46,7 @@ export const TextInputDialog = ({
   return (
     <div className="ue-modal-backdrop" onClick={onClose}>
       <form
-        className="ue-library-modal"
+        className="ue-library-modal ue-dialog-modal ue-text-input-modal"
         onClick={(event) => event.stopPropagation()}
         onSubmit={async (event) => {
           event.preventDefault();
@@ -67,13 +67,12 @@ export const TextInputDialog = ({
           <X size={18} />
         </button>
 
-        <div className="ue-pane-copy">
-          <p className="ue-pane-kicker">{label}</p>
+        <div className="ue-pane-copy ue-dialog-heading">
           <h2>{title}</h2>
           <p>{text}</p>
         </div>
 
-        <label className="ue-import-text-field">
+        <label className="ue-import-text-field ue-dialog-field">
           <span>{label}</span>
           <input
             autoFocus
@@ -83,18 +82,20 @@ export const TextInputDialog = ({
           />
         </label>
 
-        <div className="ue-library-modal-actions">
-          <button className="ue-icon-action" onClick={onClose} aria-label={t("libraryCancel")} title={t("libraryCancel")} type="button">
+        <div className="ue-library-modal-actions ue-dialog-actions">
+          <button className="ue-secondary-btn" onClick={onClose} type="button">
             <X size={14} />
+            <span>{t("libraryCancel")}</span>
           </button>
           <button
-            className="ue-icon-action ue-icon-action--filled"
+            className="ue-primary-btn"
             disabled={!trimmedValue || isSubmitting}
             aria-label={confirmLabel}
             title={confirmLabel}
             type="submit"
           >
             <Check size={14} />
+            <span>{confirmLabel}</span>
           </button>
         </div>
       </form>

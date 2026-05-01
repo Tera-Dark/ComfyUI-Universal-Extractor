@@ -1,6 +1,7 @@
 import { startTransition, useMemo, useState } from "react";
 
 import { GalleryWorkspace } from "./components/gallery/GalleryWorkspace";
+import { GalleryInspectorPanel } from "./components/gallery/GalleryInspectorPanel";
 import { ImageDetailModal } from "./components/gallery/ImageDetailModal";
 import { LibraryWorkspace } from "./components/library/LibraryWorkspace";
 import { TopNavigation } from "./components/shared/TopNavigation";
@@ -14,7 +15,7 @@ import { useLibraryData } from "./hooks/useLibraryData";
 import { galleryApi } from "./services/galleryApi";
 import { useConfirm } from "./components/shared/ConfirmDialog";
 import { useToast } from "./components/shared/ToastViewport";
-import type { LibraryInfo, WorkspaceTab } from "./types/universal-gallery";
+import type { ImageRecord, LibraryInfo, WorkspaceTab } from "./types/universal-gallery";
 import "./App.css";
 
 const PENDING_WORKFLOW_KEY = "universal-extractor:pending-workflow";
@@ -23,11 +24,12 @@ const COMFY_WINDOW_NAME = "comfyui-main";
 const WORKFLOW_MESSAGE_TYPE = "universal-extractor:workflow-message";
 const MAX_STORAGE_WORKFLOW_BYTES = 1_500_000;
 
-type FolderDialogMode = "create" | "merge";
+type FolderDialogMode = "create" | "merge" | "rename";
 
 interface FolderDialogState {
   mode: FolderDialogMode;
   initialValue: string;
+  sourcePath?: string;
 }
 
 const matchesLibrarySearch = (library: LibraryInfo, searchTerm: string) => {
@@ -229,12 +231,20 @@ function App() {
         await gallery.createFolder(path);
         gallery.refresh();
         pushToast(t("folderCreateSuccess"), "success");
-      } else {
+      } else if (folderDialog.mode === "merge") {
         await gallery.mergeFolder(gallery.selectedSubfolder, path);
         pushToast(t("folderMergeSuccess"), "success");
+      } else if (folderDialog.sourcePath) {
+        await gallery.renameFolder(folderDialog.sourcePath, path);
+        pushToast(t("folderRenameSuccess"), "success");
       }
     } catch (error) {
-      const fallback = folderDialog.mode === "create" ? t("folderCreateError") : t("folderMergeError");
+      const fallback =
+        folderDialog.mode === "create"
+          ? t("folderCreateError")
+          : folderDialog.mode === "merge"
+            ? t("folderMergeError")
+            : t("folderRenameError");
       pushToast(error instanceof Error ? error.message : fallback, "error");
       throw error;
     }
@@ -268,6 +278,13 @@ function App() {
       return;
     }
     setFolderDialog({ mode: "merge", initialValue: "" });
+  };
+
+  const handleRenameFolder = (path: string) => {
+    if (!path) {
+      return;
+    }
+    setFolderDialog({ mode: "rename", initialValue: path, sourcePath: path });
   };
 
   const handleWorkbenchLibrarySelect = async (name: string) => {
@@ -382,6 +399,29 @@ function App() {
     }
   };
 
+  const selectedGalleryImages = useMemo(() => {
+    const selectedPathSet = new Set(gallery.selectedImagePaths);
+    return gallery.images.filter((image) => selectedPathSet.has(image.relative_path));
+  }, [gallery.images, gallery.selectedImagePaths]);
+
+  const selectedGalleryBoard = useMemo(
+    () => gallery.boards.find((board) => board.id === gallery.selectedBoardId) ?? null,
+    [gallery.boards, gallery.selectedBoardId],
+  );
+
+  const galleryInspectorOpen =
+    activeTab === "gallery" &&
+    !gallery.isTrashView &&
+    selectedGalleryImages.length > 0;
+
+  const handleOpenGalleryDetail = (image: ImageRecord) => {
+    gallery.setSelectedImage(image);
+    gallery.setDetailNavigation({
+      items: gallery.images,
+      currentIndex: gallery.images.findIndex((item) => item.relative_path === image.relative_path),
+    });
+  };
+
   return (
     <div className="ue-app-shell">
       <TopNavigation
@@ -403,7 +443,7 @@ function App() {
         />
       )}
       
-      <div className={`ue-body-shell ${sidebarCollapsed ? "is-sidebar-collapsed" : ""}`}>
+      <div className={`ue-body-shell ${sidebarCollapsed ? "is-sidebar-collapsed" : ""} ${galleryInspectorOpen ? "has-inspector" : ""}`}>
         <WorkspaceSidebar
           collapsed={sidebarCollapsed}
           onToggle={() => setSidebarCollapsed((current) => !current)}
@@ -441,6 +481,7 @@ function App() {
           onCreateFolder={handleCreateFolder}
           onDeleteFolder={handleDeleteFolder}
           onMergeFolder={handleMergeFolder}
+          onRenameFolder={handleRenameFolder}
           libraries={filteredLibraries}
           activeLibraryName={library.activeLibraryName}
           onLibrarySelect={handleLibrarySelect}
@@ -464,6 +505,8 @@ function App() {
               dateFrom={gallery.dateFrom}
               dateTo={gallery.dateTo}
               favoritesOnly={gallery.favoritesOnly}
+              selectedColorFamily={gallery.selectedColorFamily}
+              colorIndexStatus={gallery.colorIndexStatus}
               sortBy={gallery.sortBy}
               sortOrder={gallery.sortOrder}
               gridColumns={gallery.gridColumns}
@@ -474,47 +517,34 @@ function App() {
               isLoading={gallery.isLoading}
               isRefreshing={gallery.isRefreshing}
               error={gallery.error}
-              targetFolderOptions={gallery.targetFolderOptions}
               boards={gallery.boards}
-              onOpenDetail={(image) => {
-                gallery.setSelectedImage(image);
-                gallery.setDetailNavigation({
-                  items: gallery.images,
-                  currentIndex: gallery.images.findIndex((item) => item.relative_path === image.relative_path),
-                });
-              }}
+              onOpenDetail={handleOpenGalleryDetail}
               onPageChange={gallery.setPage}
               onCategoryChange={gallery.setSelectedCategory}
               onBoardChange={gallery.setSelectedBoardId}
               onDateFromChange={gallery.setDateFrom}
               onDateToChange={gallery.setDateTo}
               onFavoritesOnlyChange={gallery.setFavoritesOnly}
+              onColorFamilyChange={gallery.setSelectedColorFamily}
               onSortByChange={gallery.setSortBy}
               onSortOrderChange={gallery.setSortOrder}
               onGridColumnsChange={gallery.setGridColumns}
               onOpenWorkflow={handleOpenImageWorkflow}
               onSelectionChange={gallery.setSelectedImagePaths}
               onUpdateImageState={handleUpdateImageState}
-              onBatchUpdateImages={gallery.batchUpdateImages}
               onCreateBoard={gallery.createBoard}
               onUpdateBoardPins={gallery.updateBoardPins}
               onDeleteBoard={gallery.deleteBoard}
-              onMoveImages={gallery.moveImages}
-              onBatchRenameImages={async (relativePaths, template, startNumber, padding, currentPage) => {
-                try {
-                  const result = await gallery.batchRenameImages(relativePaths, template, startNumber, padding, currentPage);
-                  pushToast(t("bulkRenameSuccess", { count: result.renamed.length }), "success");
-                  return result;
-                } catch (error) {
-                  pushToast(error instanceof Error ? error.message : t("bulkRenameError"), "error");
-                  throw error;
-                }
-              }}
               onDeleteImages={gallery.deleteImages}
               onImportFiles={handleImportFiles}
               onRestoreTrashItem={async (id) => {
                 await gallery.restoreTrashItem(id);
                 pushToast(t("trashRestore"), "success");
+              }}
+              onRestoreTrashItems={async (ids) => {
+                for (const id of ids) {
+                  await gallery.restoreTrashItem(id);
+                }
               }}
               onPurgeTrashItem={async (id) => {
                 const approved = await confirm({
@@ -527,6 +557,11 @@ function App() {
                 if (!approved) return;
                 await gallery.purgeTrashItem(id);
                 pushToast(t("trashDeleteForever"), "success");
+              }}
+              onPurgeTrashItems={async (ids) => {
+                for (const id of ids) {
+                  await gallery.purgeTrashItem(id);
+                }
               }}
             />
           ) : activeTab === "library" ? (
@@ -612,6 +647,37 @@ function App() {
             />
           )}
         </main>
+
+        {galleryInspectorOpen ? (
+          <GalleryInspectorPanel
+            selectedImages={selectedGalleryImages}
+            selectedPaths={selectedGalleryImages.map((image) => image.relative_path)}
+            selectedSubfolder={gallery.selectedSubfolder}
+            selectedBoard={selectedGalleryBoard}
+            boards={gallery.boards}
+            page={gallery.page}
+            targetFolderOptions={gallery.targetFolderOptions}
+            onClose={() => gallery.setSelectedImagePaths([])}
+            onOpenDetail={handleOpenGalleryDetail}
+            onOpenWorkflow={handleOpenImageWorkflow}
+            onUpdateImageState={handleUpdateImageState}
+            onBatchUpdateImages={gallery.batchUpdateImages}
+            onCreateBoard={gallery.createBoard}
+            onUpdateBoardPins={gallery.updateBoardPins}
+            onMoveImages={gallery.moveImages}
+            onBatchRenameImages={async (relativePaths, template, startNumber, padding, currentPage) => {
+              try {
+                const result = await gallery.batchRenameImages(relativePaths, template, startNumber, padding, currentPage);
+                pushToast(t("bulkRenameSuccess", { count: result.renamed.length }), "success");
+                return result;
+              } catch (error) {
+                pushToast(error instanceof Error ? error.message : t("bulkRenameError"), "error");
+                throw error;
+              }
+            }}
+            onDeleteImages={gallery.deleteImages}
+          />
+        ) : null}
       </div>
 
       {gallery.selectedImage ? (
@@ -638,12 +704,36 @@ function App() {
 
       <TextInputDialog
         open={folderDialog !== null}
-        title={folderDialog?.mode === "merge" ? t("folderMergeTitle") : t("folderCreateTitle")}
-        text={folderDialog?.mode === "merge" ? t("folderMergeText") : t("folderCreateText")}
-        label={folderDialog?.mode === "merge" ? t("folderMergePrompt") : t("folderCreatePrompt")}
+        title={
+          folderDialog?.mode === "merge"
+            ? t("folderMergeTitle")
+            : folderDialog?.mode === "rename"
+              ? t("folderRenameTitle")
+              : t("folderCreateTitle")
+        }
+        text={
+          folderDialog?.mode === "merge"
+            ? t("folderMergeText")
+            : folderDialog?.mode === "rename"
+              ? t("folderRenameText")
+              : t("folderCreateText")
+        }
+        label={
+          folderDialog?.mode === "merge"
+            ? t("folderMergePrompt")
+            : folderDialog?.mode === "rename"
+              ? t("folderRenamePrompt")
+              : t("folderCreatePrompt")
+        }
         placeholder={t("folderPathPlaceholder")}
         initialValue={folderDialog?.initialValue ?? ""}
-        confirmLabel={folderDialog?.mode === "merge" ? t("sidebarMergeFolder") : t("commonCreate")}
+        confirmLabel={
+          folderDialog?.mode === "merge"
+            ? t("sidebarMergeFolder")
+            : folderDialog?.mode === "rename"
+              ? t("folderRename")
+              : t("commonCreate")
+        }
         onClose={() => setFolderDialog(null)}
         onSubmit={handleSubmitFolderDialog}
       />

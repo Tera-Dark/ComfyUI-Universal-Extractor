@@ -10,6 +10,7 @@ import type {
   ImageListResponse,
   ImageMetadata,
   ImportResult,
+  ColorIndexStatus,
   LibraryEntriesPageResponse,
   LibraryImportMode,
   LibraryMutationResult,
@@ -80,6 +81,7 @@ export const galleryApi = {
     dateFrom = "",
     dateTo = "",
     favoritesOnly = false,
+    colorFamily = "",
     sortBy = "created_at",
     sortOrder = "desc",
     forceRefresh = false,
@@ -108,6 +110,9 @@ export const galleryApi = {
     }
     if (favoritesOnly) {
       params.set("pinned", "true");
+    }
+    if (colorFamily.trim()) {
+      params.set("color_family", colorFamily.trim());
     }
     params.set("sort_by", sortBy);
     params.set("sort_order", sortOrder);
@@ -141,6 +146,10 @@ export const galleryApi = {
 
   async getThumbnailPrewarmStatus() {
     return requestJson<ThumbnailPrewarmStatus>("/universal_gallery/api/thumb/prewarm-status");
+  },
+
+  async getColorIndexStatus() {
+    return requestJson<ColorIndexStatus>("/universal_gallery/api/color-index/status");
   },
 
   async updateImageState(relativePath: string, updates: Record<string, unknown>) {
@@ -422,6 +431,16 @@ export const galleryApi = {
 
   async mergeFolder(sourcePath: string, targetPath: string) {
     return requestJson<FolderMutationResult>("/universal_gallery/api/folders/merge", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ source_path: sourcePath, target_path: targetPath }),
+    });
+  },
+
+  async renameFolder(sourcePath: string, targetPath: string) {
+    return requestJson<FolderMutationResult>("/universal_gallery/api/folders/rename", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

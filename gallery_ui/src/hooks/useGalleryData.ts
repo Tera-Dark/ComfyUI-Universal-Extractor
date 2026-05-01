@@ -2,7 +2,7 @@ import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState
 
 import { useI18n } from "../i18n/I18nProvider";
 import { galleryApi } from "../services/galleryApi";
-import type { BoardSummary, DetailNavigationState, GalleryContext, ImageRecord, MoveTargetOption, TrashItem } from "../types/universal-gallery";
+import type { BoardSummary, ColorIndexStatus, DetailNavigationState, GalleryContext, ImageRecord, MoveTargetOption, TrashItem } from "../types/universal-gallery";
 import { PAGE_SIZE } from "../utils/formatters";
 
 const TRASH_SUBFOLDER_KEY = "__trash__";
@@ -11,6 +11,7 @@ export const useGalleryData = () => {
   const { t } = useI18n();
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [context, setContext] = useState<GalleryContext | null>(null);
+  const [colorIndexStatus, setColorIndexStatus] = useState<ColorIndexStatus | null>(null);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
@@ -20,6 +21,7 @@ export const useGalleryData = () => {
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [selectedColorFamily, setSelectedColorFamily] = useState("");
   const [sortBy, setSortBy] = useState("created_at");
   const [sortOrder, setSortOrder] = useState("desc");
   const [gridColumns, setGridColumns] = useState(() => {
@@ -60,6 +62,7 @@ export const useGalleryData = () => {
           return;
         }
         setContext(contextResponse);
+        setColorIndexStatus(contextResponse.color_index_status ?? null);
       } catch (fetchError) {
         if (!isCancelled) {
           setError(fetchError instanceof Error ? fetchError.message : t("galleryLoading"));
@@ -111,6 +114,7 @@ export const useGalleryData = () => {
           dateFrom,
           dateTo,
           favoritesOnly,
+          selectedColorFamily,
           sortBy,
           sortOrder,
           shouldForceRefresh,
@@ -123,6 +127,7 @@ export const useGalleryData = () => {
         setImages(imageResponse.images ?? []);
         setTrashItems([]);
         setTotal(imageResponse.total ?? 0);
+        setColorIndexStatus(imageResponse.color_index_status ?? null);
         void galleryApi
           .prewarmThumbnails((imageResponse.images ?? []).map((image) => image.relative_path), PAGE_SIZE)
           .catch(() => undefined);
@@ -144,7 +149,21 @@ export const useGalleryData = () => {
     return () => {
       isCancelled = true;
     };
-  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, sortBy, sortOrder, refreshKey, t, isTrashView]);
+  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, t, isTrashView]);
+
+  useEffect(() => {
+    if (!colorIndexStatus || colorIndexStatus.complete || isTrashView) {
+      return;
+    }
+
+    const interval = window.setInterval(() => {
+      void galleryApi
+        .getColorIndexStatus()
+        .then(setColorIndexStatus)
+        .catch(() => undefined);
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [colorIndexStatus, isTrashView]);
 
   const refresh = () => setRefreshKey((value) => value + 1);
 
@@ -262,6 +281,12 @@ export const useGalleryData = () => {
       ...current,
       subfolders: response.subfolders ?? current.subfolders,
     }));
+    if (response.path) {
+      setSelectedSubfolder(response.path);
+      setSelectedBoardId("");
+      setFavoritesOnly(false);
+      setPage(1);
+    }
     return response;
   };
 
@@ -288,6 +313,21 @@ export const useGalleryData = () => {
     }));
     if (selectedSubfolder === sourcePath || selectedSubfolder.startsWith(`${sourcePath}/`)) {
       setSelectedSubfolder(targetPath);
+    }
+    refresh();
+    return response;
+  };
+
+  const renameFolder = async (sourcePath: string, targetPath: string) => {
+    const response = await galleryApi.renameFolder(sourcePath, targetPath);
+    applyContextPatch((current) => ({
+      ...current,
+      subfolders: response.subfolders ?? current.subfolders,
+      categories: response.categories ?? current.categories,
+    }));
+    if (selectedSubfolder === sourcePath || selectedSubfolder.startsWith(`${sourcePath}/`)) {
+      const suffix = selectedSubfolder.slice(sourcePath.length);
+      setSelectedSubfolder(`${targetPath}${suffix}`);
     }
     refresh();
     return response;
@@ -373,6 +413,7 @@ export const useGalleryData = () => {
   return {
     images,
     context,
+    colorIndexStatus,
     total,
     page,
     setPage,
@@ -390,7 +431,9 @@ export const useGalleryData = () => {
     dateTo,
     setDateTo,
     favoritesOnly,
+    selectedColorFamily,
     setFavoritesOnly,
+    setSelectedColorFamily,
     sortBy,
     setSortBy,
     sortOrder,
@@ -422,6 +465,7 @@ export const useGalleryData = () => {
     createFolder,
     deleteFolder,
     mergeFolder,
+    renameFolder,
     createBoard,
     updateBoard,
     deleteBoard,
