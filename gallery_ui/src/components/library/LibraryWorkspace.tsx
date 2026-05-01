@@ -1,14 +1,17 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   BookOpen,
   Boxes,
   ChevronLeft,
   ChevronRight,
+  CornerDownRight,
   Copy,
   Download,
   FileJson,
   FilePlus2,
   FileUp,
+  LayoutGrid,
+  List,
   PencilLine,
   RefreshCw,
   Save,
@@ -72,6 +75,22 @@ interface EntryTemplate {
   entry: LibraryEntry;
 }
 
+type ContentViewMode = "grid" | "list";
+
+interface LibraryContextMenuState {
+  entry: LibraryEntry;
+  index: number;
+  x: number;
+  y: number;
+}
+
+const LIBRARY_VIEW_MODE_STORAGE_KEY = "universal-extractor:library-view-mode";
+
+const getStoredViewMode = (key: string, fallback: ContentViewMode): ContentViewMode => {
+  const stored = window.localStorage.getItem(key);
+  return stored === "grid" || stored === "list" ? stored : fallback;
+};
+
 const joinLabelArray = (value: string[] | string | undefined) => {
   if (Array.isArray(value)) {
     return value.filter(Boolean);
@@ -124,6 +143,10 @@ export const LibraryWorkspace = ({
   const [dragActive, setDragActive] = useState(false);
   const [editingEntryIndex, setEditingEntryIndex] = useState<number | null>(null);
   const [editingEntry, setEditingEntry] = useState<LibraryEntry | null>(null);
+  const [libraryViewMode, setLibraryViewMode] = useState<ContentViewMode>(() =>
+    getStoredViewMode(LIBRARY_VIEW_MODE_STORAGE_KEY, "list"),
+  );
+  const [contextMenu, setContextMenu] = useState<LibraryContextMenuState | null>(null);
   const lineNumberRef = useRef<HTMLPreElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const dragDepthRef = useRef(0);
@@ -132,6 +155,34 @@ export const LibraryWorkspace = ({
     const count = Math.max(editorValue.split("\n").length, 1);
     return Array.from({ length: count }, (_, index) => index + 1).join("\n");
   }, [editorValue]);
+
+  useEffect(() => {
+    window.localStorage.setItem(LIBRARY_VIEW_MODE_STORAGE_KEY, libraryViewMode);
+  }, [libraryViewMode]);
+
+  useEffect(() => {
+    if (!contextMenu) {
+      return;
+    }
+    const closeMenu = () => setContextMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setContextMenu(null);
+      }
+    };
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("contextmenu", closeMenu);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("contextmenu", closeMenu);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [contextMenu]);
 
   const entryTemplates = useMemo<EntryTemplate[]>(
     () => [
@@ -251,6 +302,8 @@ export const LibraryWorkspace = ({
     return "";
   };
 
+  const getPromptCopyValue = (entry: LibraryEntry) => String(entry.prompt || entry.name || entry.title || "").trim();
+
   const copyText = async (value: string, successMessage: string) => {
     try {
       await navigator.clipboard.writeText(value);
@@ -290,6 +343,19 @@ export const LibraryWorkspace = ({
     setEditingEntry(entry);
   };
 
+  const handleEntryContextMenu = (event: MouseEvent, entry: LibraryEntry, index: number) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const menuWidth = 220;
+    const menuHeight = 240;
+    setContextMenu({
+      entry,
+      index,
+      x: Math.min(event.clientX, window.innerWidth - menuWidth - 12),
+      y: Math.min(event.clientY, window.innerHeight - menuHeight - 12),
+    });
+  };
+
   const handleDeleteEntry = async (sourceIndex: number) => {
     const approved = await confirm({
       title: t("commonDelete"),
@@ -305,6 +371,18 @@ export const LibraryWorkspace = ({
     const ok = await onDeleteEntry(sourceIndex);
     if (ok) {
       pushToast(t("commonDelete"), "success");
+    }
+  };
+
+  const handlePageJump = (formData: FormData) => {
+    const requestedPage = Number(formData.get("page"));
+    if (!Number.isFinite(requestedPage)) {
+      return;
+    }
+
+    const nextPage = Math.min(Math.max(1, Math.trunc(requestedPage)), totalPages);
+    if (nextPage !== page) {
+      onPageChange(nextPage);
     }
   };
 
@@ -349,6 +427,28 @@ export const LibraryWorkspace = ({
           </div>
 
           <div className="ue-library-actions">
+            <div className="ue-segmented-control ue-segmented-control--compact ue-view-toggle" aria-label={t("viewMode")}>
+              <button
+                className={libraryViewMode === "grid" ? "active" : ""}
+                onClick={() => setLibraryViewMode("grid")}
+                type="button"
+                aria-label={t("viewGrid")}
+                title={t("viewGrid")}
+              >
+                <LayoutGrid size={13} />
+                <span>{t("viewGrid")}</span>
+              </button>
+              <button
+                className={libraryViewMode === "list" ? "active" : ""}
+                onClick={() => setLibraryViewMode("list")}
+                type="button"
+                aria-label={t("viewList")}
+                title={t("viewList")}
+              >
+                <List size={13} />
+                <span>{t("viewList")}</span>
+              </button>
+            </div>
             <input
               ref={fileInputRef}
               className="ue-hidden-input"
@@ -636,16 +736,20 @@ export const LibraryWorkspace = ({
             </div>
           </div>
         ) : activeLibraryName ? (
-          <div className="ue-library-listing">
+          <div className={`ue-library-listing ${libraryViewMode === "grid" ? "ue-library-listing--grid" : ""}`}>
             {entries.map((entry, index) => {
               const absoluteIndex = entry.source_index;
               const secondary = getSecondaryLabel(entry);
               const aliases = joinLabelArray(entry.other_names);
               const tags = joinLabelArray(entry.tags);
-              const promptCopyValue = String(entry.prompt || entry.name || entry.title || "").trim();
+              const promptCopyValue = getPromptCopyValue(entry);
 
               return (
-                <article key={`${activeLibraryName}-${entry.source_index}-${index}`} className="ue-library-row">
+                <article
+                  key={`${activeLibraryName}-${entry.source_index}-${index}`}
+                  className="ue-library-row"
+                  onContextMenu={(event) => handleEntryContextMenu(event, entry, absoluteIndex)}
+                >
                   <div className="ue-library-row-index">#{String(absoluteIndex + 1).padStart(2, "0")}</div>
                   <div className="ue-library-row-main">
                     <div className="ue-library-row-heading">
@@ -746,6 +850,29 @@ export const LibraryWorkspace = ({
                   >
                     <ChevronRight size={14} />
                   </button>
+                  <form
+                    key={page}
+                    className="ue-pagination-jump"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      handlePageJump(new FormData(event.currentTarget));
+                    }}
+                  >
+                    <label className="ue-select-field ue-pagination-jump-field">
+                      <span>{t("galleryJumpTo")}</span>
+                      <input
+                        name="page"
+                        type="number"
+                        min={1}
+                        max={totalPages}
+                        defaultValue={page}
+                        aria-label={t("galleryJumpTo")}
+                      />
+                    </label>
+                    <button type="submit" aria-label={t("galleryJump")} title={t("galleryJump")}>
+                      <CornerDownRight size={14} />
+                    </button>
+                  </form>
                 </div>
               </div>
             ) : null}
@@ -813,6 +940,55 @@ export const LibraryWorkspace = ({
             : undefined
         }
       />
+
+      {contextMenu ? (
+        <div
+          className="ue-context-menu"
+          style={{ top: contextMenu.y, left: contextMenu.x }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            className="ue-context-menu-item"
+            onClick={() => {
+              openEntryEditor(contextMenu.entry, contextMenu.index);
+              setContextMenu(null);
+            }}
+          >
+            <PencilLine size={14} />
+            <span>{t("libraryEdit")}</span>
+          </button>
+          <button
+            className="ue-context-menu-item"
+            onClick={() => {
+              void copyText(getPromptCopyValue(contextMenu.entry) || JSON.stringify(contextMenu.entry, null, 2), t("artistCopyResult"));
+              setContextMenu(null);
+            }}
+          >
+            <Copy size={14} />
+            <span>{t("libraryCopyPrompt")}</span>
+          </button>
+          <button
+            className="ue-context-menu-item"
+            onClick={() => {
+              void copyText(JSON.stringify(contextMenu.entry, null, 2), t("libraryCopyJsonSuccess"));
+              setContextMenu(null);
+            }}
+          >
+            <FileJson size={14} />
+            <span>{t("libraryCopyJson")}</span>
+          </button>
+          <button
+            className="ue-context-menu-item ue-context-menu-item--danger"
+            onClick={() => {
+              void handleDeleteEntry(contextMenu.index);
+              setContextMenu(null);
+            }}
+          >
+            <Trash2 size={14} />
+            <span>{t("commonDelete")}</span>
+          </button>
+        </div>
+      ) : null}
     </>
   );
 };

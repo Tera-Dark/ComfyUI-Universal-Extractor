@@ -36,7 +36,7 @@
   --ue-duration-base: 250ms;
   --ue-duration-slow: 400ms;
 
-  --ue-sidebar-width: 240px;
+  --ue-sidebar-width: clamp(236px, 18vw, 292px);
 }
 
 *,
@@ -130,13 +130,21 @@ textarea::placeholder {
   transition: grid-template-columns var(--ue-duration-base) var(--ue-ease);
 }
 
+.ue-body-shell.has-inspector {
+  grid-template-columns: var(--ue-sidebar-width) minmax(0, 1fr) clamp(360px, 22vw, 440px);
+}
+
 .ue-body-shell.is-sidebar-collapsed {
   grid-template-columns: 0 minmax(0, 1fr);
 }
 
+.ue-body-shell.is-sidebar-collapsed.has-inspector {
+  grid-template-columns: 0 minmax(0, 1fr) clamp(360px, 22vw, 440px);
+}
+
 .ue-main-shell {
   min-width: 0;
-  padding: 28px 32px 24px;
+  padding: clamp(18px, 2vw, 30px) clamp(18px, 2.6vw, 36px) 24px;
   overflow-y: auto;
 }
 
@@ -433,9 +441,12 @@ textarea::placeholder {
   width: min(460px, 100%);
   flex-direction: column;
   gap: 18px;
-  padding: 28px 24px 24px;
-  border-radius: 24px;
-  background: #ffffff;
+  padding: 28px;
+  border: 1px solid rgba(24, 24, 27, 0.08);
+  border-radius: 22px;
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.94), rgba(255, 255, 255, 0.98) 34%),
+    #ffffff;
   box-shadow: var(--ue-shadow-3);
   animation: ue-scale-in var(--ue-duration-fast) var(--ue-ease) both;
 }
@@ -472,6 +483,17 @@ textarea::placeholder {
   background: #b91c1c;
 }
 
+.ue-secondary-btn--danger {
+  border-color: rgba(220, 38, 38, 0.14);
+  background: rgba(254, 242, 242, 0.82);
+  color: var(--ue-red);
+}
+
+.ue-secondary-btn--danger:hover:not(:disabled) {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -485,7 +507,9 @@ textarea::placeholder {
 
 @media (max-width: 960px) {
   .ue-body-shell,
-  .ue-body-shell.is-sidebar-collapsed {
+  .ue-body-shell.is-sidebar-collapsed,
+  .ue-body-shell.has-inspector,
+  .ue-body-shell.is-sidebar-collapsed.has-inspector {
     grid-template-columns: 1fr;
   }
 
@@ -495,5 +519,12 @@ textarea::placeholder {
 
   .ue-pane-header {
     align-items: stretch;
+  }
+}
+
+@media (min-width: 1680px) {
+  .ue-main-shell {
+    padding-right: clamp(36px, 4vw, 72px);
+    padding-left: clamp(36px, 4vw, 72px);
   }
 }

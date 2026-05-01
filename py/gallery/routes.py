@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import os
 from pathlib import Path
+from urllib.parse import urlparse
 
 from aiohttp import web
 
@@ -23,6 +24,7 @@ from .service import (
     enqueue_thumbnail_prewarm,
     get_import_target_for_filename,
     get_gallery_context,
+    get_color_index_status,
     get_image_metadata,
     get_thumbnail_prewarm_status,
     image_ref_for_full_path,
@@ -50,6 +52,7 @@ from .service import (
     test_gallery_source_path,
     generate_artist_string,
     rename_image,
+    rename_folder,
     resolve_image_path,
     save_library,
     create_library_entry,
@@ -58,8 +61,58 @@ from .service import (
 )
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return max(1, int(os.environ.get(name, default)))
+    except (TypeError, ValueError):
+        return default
+
+
+MAX_IMPORT_FILE_BYTES = _env_int("UNIVERSAL_EXTRACTOR_MAX_IMPORT_FILE_BYTES", 100 * 1024 * 1024)
+MAX_IMPORT_TOTAL_BYTES = _env_int("UNIVERSAL_EXTRACTOR_MAX_IMPORT_TOTAL_BYTES", 500 * 1024 * 1024)
+MAX_IMPORT_FILE_COUNT = _env_int("UNIVERSAL_EXTRACTOR_MAX_IMPORT_FILE_COUNT", 100)
+MAX_LIBRARY_IMPORT_BYTES = _env_int("UNIVERSAL_EXTRACTOR_MAX_LIBRARY_IMPORT_BYTES", 25 * 1024 * 1024)
+
+
 def _bad_request(message: str) -> web.Response:
     return web.json_response({"error": message}, status=400)
+
+
+def _payload_too_large(message: str) -> web.Response:
+    return web.json_response({"error": message}, status=413)
+
+
+def _same_origin_url(value: str, request: web.Request) -> bool:
+    parsed = urlparse(value)
+    if not parsed.scheme or not parsed.netloc:
+        return False
+    return parsed.netloc.lower() == request.host.lower()
+
+
+def _is_same_origin_request(request: web.Request) -> bool:
+    sec_fetch_site = request.headers.get("Sec-Fetch-Site", "").strip().lower()
+    if sec_fetch_site and sec_fetch_site not in {"same-origin", "none"}:
+        return False
+
+    origin = request.headers.get("Origin", "").strip()
+    if origin and not _same_origin_url(origin, request):
+        return False
+
+    referer = request.headers.get("Referer", "").strip()
+    if referer and not _same_origin_url(referer, request):
+        return False
+
+    return True
+
+
+def _guarded(handler):
+    async def wrapped(request: web.Request):
+        if not _is_same_origin_request(request):
+            return web.json_response({"error": "same-origin request required"}, status=403)
+        return await handler(request)
+
+    wrapped.__name__ = getattr(handler, "__name__", "wrapped")
+    return wrapped
 
 
 def _parse_int(value, field: str, default: int, min_value: int | None = None, max_value: int | None = None) -> int:
@@ -89,7 +142,8 @@ def _parse_float(value, field: str, default: float) -> float:
 
 def _safe_add_route(router, method: str, path: str, handler):
     try:
-        getattr(router, f"add_{method.lower()}")(path, handler)
+        route_handler = _guarded(handler) if path.startswith("/universal_gallery/api/") else handler
+        getattr(router, f"add_{method.lower()}")(path, route_handler)
     except Exception as error:
         print(f"[Universal Extractor] Skipping duplicate/conflicting route {method.upper()} {path}: {error}")
 
@@ -104,7 +158,7 @@ def _safe_add_static(router, prefix: str, path: str):
 async def serve_gallery_index(_request: web.Request) -> web.StreamResponse:
     if not os.path.exists(GALLERY_INDEX_FILE):
         raise web.HTTPNotFound(text="Universal Gallery UI build not found. Run 'npm run build' in gallery_ui/.")
-    return web.FileResponse(GALLERY_INDEX_FILE)
+    return web.FileResponse(GALLERY_INDEX_FILE, headers={"Cache-Control": "no-store, max-age=0"})
 
 
 async def redirect_gallery_root(_request: web.Request) -> web.StreamResponse:
@@ -123,6 +177,7 @@ async def api_list_images(request: web.Request) -> web.Response:
     board_id = request.query.get("board_id", "")
     date_from = request.query.get("date_from", "")
     date_to = request.query.get("date_to", "")
+    color_family = request.query.get("color_family", "")
     favorites_only = (
         request.query.get("favorites", "").lower() in {"1", "true", "yes"}
         or request.query.get("pinned", "").lower() in {"1", "true", "yes"}
@@ -143,6 +198,7 @@ async def api_list_images(request: web.Request) -> web.Response:
             date_from=date_from,
             date_to=date_to,
             favorites_only=favorites_only,
+            color_family=color_family,
             sort_by=sort_by,
             sort_order=sort_order,
             force_refresh=force_refresh,
@@ -214,6 +270,10 @@ async def api_prewarm_thumbnails(request: web.Request) -> web.Response:
 
 async def api_thumbnail_prewarm_status(_request: web.Request) -> web.Response:
     return web.json_response(get_thumbnail_prewarm_status())
+
+
+async def api_color_index_status(_request: web.Request) -> web.Response:
+    return web.json_response(get_color_index_status())
 
 
 async def api_image_file(request: web.Request) -> web.StreamResponse:
@@ -308,28 +368,55 @@ async def api_update_image_state(request: web.Request) -> web.Response:
 
 
 async def api_import_files(request: web.Request) -> web.Response:
+    if request.content_length and request.content_length > MAX_IMPORT_TOTAL_BYTES:
+        return _payload_too_large("import payload too large")
+
     reader = await request.multipart()
     imported_images = []
     imported_libraries = []
     skipped = []
     target_source_id = ""
     target_subfolder = IMPORT_IMAGE_SUBFOLDER
+    file_count = 0
+    total_bytes = 0
 
     while True:
         part = await reader.next()
         if part is None:
             break
         if getattr(part, "filename", None):
+            file_count += 1
+            if file_count > MAX_IMPORT_FILE_COUNT:
+                return _payload_too_large("too many files in import request")
+
             kind, target_path, skipped_item = get_import_target_for_filename(part.filename, target_source_id, target_subfolder)
             if skipped_item:
+                while True:
+                    chunk = await part.read_chunk()
+                    if not chunk:
+                        break
+                    total_bytes += len(chunk)
+                    if total_bytes > MAX_IMPORT_TOTAL_BYTES:
+                        return _payload_too_large("import payload too large")
                 skipped.append(skipped_item)
                 continue
 
+            file_bytes = 0
             with open(target_path, "wb") as file:
                 while True:
                     chunk = await part.read_chunk()
                     if not chunk:
                         break
+                    chunk_size = len(chunk)
+                    file_bytes += chunk_size
+                    total_bytes += chunk_size
+                    if file_bytes > MAX_IMPORT_FILE_BYTES or total_bytes > MAX_IMPORT_TOTAL_BYTES:
+                        file.close()
+                        try:
+                            os.remove(target_path)
+                        except OSError:
+                            pass
+                        return _payload_too_large("import file too large")
                     file.write(chunk)
 
             if kind == "image":
@@ -607,6 +694,9 @@ async def api_save_library(request: web.Request) -> web.Response:
 
 
 async def api_import_library(request: web.Request) -> web.Response:
+    if request.content_length and request.content_length > MAX_LIBRARY_IMPORT_BYTES:
+        return _payload_too_large("library import payload too large")
+
     reader = await request.multipart()
     uploaded_name = ""
     uploaded_bytes = b""
@@ -621,7 +711,15 @@ async def api_import_library(request: web.Request) -> web.Response:
 
         if getattr(part, "filename", None):
             uploaded_name = str(part.filename)
-            uploaded_bytes = await part.read()
+            chunks = bytearray()
+            while True:
+                chunk = await part.read_chunk()
+                if not chunk:
+                    break
+                chunks.extend(chunk)
+                if len(chunks) > MAX_LIBRARY_IMPORT_BYTES:
+                    return _payload_too_large("library import file too large")
+            uploaded_bytes = bytes(chunks)
             continue
 
         field_value = (await part.text()).strip()
@@ -728,6 +826,20 @@ async def api_merge_folder(request: web.Request) -> web.Response:
         return web.json_response({"error": str(error)}, status=400)
 
 
+async def api_rename_folder(request: web.Request) -> web.Response:
+    body = await request.json()
+    source_path = str(body.get("source_path", "")).strip()
+    target_path = str(body.get("target_path", "")).strip()
+    try:
+        return web.json_response(rename_folder(source_path, target_path))
+    except FileNotFoundError as error:
+        return web.json_response({"error": str(error)}, status=404)
+    except FileExistsError as error:
+        return web.json_response({"error": str(error)}, status=409)
+    except ValueError as error:
+        return web.json_response({"error": str(error)}, status=400)
+
+
 async def api_delete_library(request: web.Request) -> web.Response:
     name = request.query.get("name", "")
     if not name:
@@ -786,6 +898,7 @@ def register_routes(app):
     _safe_add_route(app.router, "get", "/universal_gallery/api/thumb", api_thumbnail)
     _safe_add_route(app.router, "post", "/universal_gallery/api/thumb/prewarm", api_prewarm_thumbnails)
     _safe_add_route(app.router, "get", "/universal_gallery/api/thumb/prewarm-status", api_thumbnail_prewarm_status)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/color-index/status", api_color_index_status)
     _safe_add_route(app.router, "get", "/universal_gallery/api/image-file", api_image_file)
     _safe_add_route(app.router, "get", "/universal_gallery/api/trash", api_list_trash)
     _safe_add_route(app.router, "get", "/universal_gallery/api/trash/file", api_trash_file)
@@ -817,6 +930,7 @@ def register_routes(app):
     _safe_add_route(app.router, "post", "/universal_gallery/api/folders/create", api_create_folder)
     _safe_add_route(app.router, "post", "/universal_gallery/api/folders/delete", api_delete_folder)
     _safe_add_route(app.router, "post", "/universal_gallery/api/folders/merge", api_merge_folder)
+    _safe_add_route(app.router, "post", "/universal_gallery/api/folders/rename", api_rename_folder)
     _safe_add_route(app.router, "get", "/universal_gallery/api/settings/gallery-sources", api_list_gallery_sources)
     _safe_add_route(app.router, "post", "/universal_gallery/api/settings/gallery-sources", api_save_gallery_source)
     _safe_add_route(app.router, "patch", "/universal_gallery/api/settings/gallery-sources", api_save_gallery_source)

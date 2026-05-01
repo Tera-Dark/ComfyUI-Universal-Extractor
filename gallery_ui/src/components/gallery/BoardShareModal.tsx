@@ -70,7 +70,7 @@ export const BoardShareModal = ({ open, board, onClose }: BoardShareModalProps) 
     let cancelled = false;
     setIsLoading(true);
     void galleryApi
-      .listImages(1, SHARE_LIMIT, "", "", "", board.id, "", "", false, "created_at", "desc", false)
+      .listImages(1, SHARE_LIMIT, "", "", "", board.id, "", "", false, "", "created_at", "desc", false)
       .then((response) => {
         if (!cancelled) {
           setImages(response.images ?? []);

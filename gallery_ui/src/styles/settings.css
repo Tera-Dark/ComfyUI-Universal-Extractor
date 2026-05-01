@@ -2,7 +2,8 @@
   display: flex;
   flex-direction: column;
   gap: 18px;
-  padding: 24px;
+  padding: clamp(16px, 2vw, 24px);
+  min-width: 0;
 }
 
 .ue-settings-hero {
@@ -16,7 +17,7 @@
 
 .ue-settings-hero h1 {
   margin: 4px 0 8px;
-  font-size: 28px;
+  font-size: clamp(22px, 2.2vw, 28px);
   line-height: 1.15;
 }
 
@@ -51,7 +52,7 @@
 
 .ue-settings-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) minmax(0, 1fr);
+  grid-template-columns: minmax(260px, 340px) minmax(0, 1fr);
   gap: 18px;
   min-height: 0;
 }
@@ -360,12 +361,24 @@
 
 @media (max-width: 620px) {
   .ue-settings-workspace {
-    padding: 16px;
+    padding: 0;
   }
 
   .ue-settings-toggle-grid,
   .ue-settings-metrics {
     grid-template-columns: 1fr;
+  }
+
+  .ue-settings-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .ue-primary-action,
+  .ue-secondary-action,
+  .ue-danger-action {
+    justify-content: center;
+    width: 100%;
   }
 }
 

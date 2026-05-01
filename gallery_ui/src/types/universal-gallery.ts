@@ -54,6 +54,13 @@ export interface ImageRecord {
   source_kind?: string;
   source_path?: string;
   source_relative_path?: string;
+  dominant_color?: string;
+  color_family?: string;
+  color_families?: string[];
+  color_family_scores?: Record<string, number>;
+  palette?: string[];
+  color_saturation?: number;
+  color_luma?: number;
 }
 
 export interface PromptSummary {
@@ -130,6 +137,19 @@ export interface ImageListResponse {
   total: number;
   page: number;
   limit: number;
+  color_index_status?: ColorIndexStatus;
+}
+
+export interface ColorIndexStatus {
+  running: boolean;
+  queued: number;
+  total: number;
+  indexed: number;
+  missing: number;
+  complete: boolean;
+  version: string;
+  target_version?: string;
+  threshold: number;
 }
 
 export interface ThumbnailPrewarmStatus {
@@ -170,6 +190,7 @@ export interface GalleryContext {
   sources: GallerySource[];
   active_source_count: number;
   pinned_count: number;
+  color_index_status?: ColorIndexStatus;
   boards: BoardSummary[];
 }
 

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import colorsys
 import json
 import os
 import sqlite3
@@ -73,6 +74,8 @@ IMAGE_REF_SEPARATOR = "::"
 DEFAULT_OUTPUT_SOURCE_ID = "default_output"
 DEFAULT_INPUT_SOURCE_ID = "default_input"
 GALLERY_INDEX_DB_FILE = os.path.join(DATA_DIR, "gallery_index.sqlite3")
+COLOR_INDEX_VERSION = "3"
+COLOR_FAMILY_MIN_RATIO = 0.25
 IMAGE_INDEX_CACHE: dict[str, Any] = {
     "signature": None,
     "output_dir": None,
@@ -88,6 +91,16 @@ LIBRARY_CACHE_LOCK = Lock()
 THUMB_GENERATION_SEMAPHORE = BoundedSemaphore(2)
 THUMB_LOCKS: dict[str, Lock] = {}
 THUMB_LOCKS_GUARD = Lock()
+
+COLOR_PROFILE_DEFAULT = {
+    "dominant_color": "",
+    "color_family": "",
+    "color_families_text": "",
+    "color_family_scores_json": "{}",
+    "palette_json": "[]",
+    "color_saturation": 0.0,
+    "color_luma": 0.0,
+}
 THUMB_PREWARM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ue-thumb")
 THUMB_PREWARM_PENDING: set[str] = set()
 THUMB_PREWARM_LOCK = Lock()
@@ -98,6 +111,10 @@ THUMB_PREWARM_STATS: dict[str, Any] = {
     "last_error": "",
     "updated_at": 0.0,
 }
+COLOR_INDEX_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ue-color")
+COLOR_INDEX_BACKFILL_LOCK = Lock()
+COLOR_INDEX_BACKFILL_RUNNING = False
+COLOR_INDEX_QUEUED_PATHS: set[str] = set()
 
 
 def _sanitize_source_id(value: str) -> str:
@@ -121,6 +138,83 @@ def _ensure_within_directory(root_dir: str, full_path: str, label: str = "source
     if common != normalized_root:
         raise ValueError(f"path must stay within {label} directory")
     return normalized_path
+
+
+def _env_flag(name: str) -> bool:
+    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _path_is_within_any(path: str, roots: list[str]) -> bool:
+    normalized_path = _real_abs(path)
+    for root in roots:
+        if not root:
+            continue
+        try:
+            if os.path.commonpath([_real_abs(root), normalized_path]) == _real_abs(root):
+                return True
+        except ValueError:
+            continue
+    return False
+
+
+def _safe_source_roots() -> list[str]:
+    return [path for path in [get_comfy_base_dir(), get_output_dir(), get_input_dir()] if path]
+
+
+def _external_sources_allowed() -> bool:
+    return _env_flag("UNIVERSAL_EXTRACTOR_ALLOW_EXTERNAL_SOURCES")
+
+
+def _validate_source_path(source: dict[str, Any]) -> str:
+    path = source.get("path", "")
+    if not path:
+        raise ValueError("source path required")
+
+    full_path = _real_abs(path)
+    if not os.path.isdir(full_path):
+        raise FileNotFoundError("source directory not found")
+    if not os.access(full_path, os.R_OK):
+        raise ValueError("source directory is not readable")
+    if not _external_sources_allowed() and not _path_is_within_any(full_path, _safe_source_roots()):
+        raise ValueError(
+            "custom source path must stay within the ComfyUI directory; "
+            "set UNIVERSAL_EXTRACTOR_ALLOW_EXTERNAL_SOURCES=1 to allow external read-only sources"
+        )
+    return full_path
+
+
+def _harden_source(source: dict[str, Any]) -> dict[str, Any]:
+    hardened = {**source}
+    try:
+        full_path = _validate_source_path(hardened)
+    except (FileNotFoundError, ValueError) as error:
+        hardened["enabled"] = False
+        hardened["writable"] = False
+        hardened["import_target"] = False
+        hardened["exists"] = bool(hardened.get("path") and os.path.isdir(os.path.expanduser(str(hardened.get("path")))))
+        hardened["security_error"] = str(error)
+        return hardened
+
+    within_safe_root = _path_is_within_any(full_path, _safe_source_roots())
+    requested_writable = bool(hardened.get("writable"))
+    writable = requested_writable and within_safe_root and os.access(full_path, os.W_OK)
+    if requested_writable and not within_safe_root:
+        hardened["security_error"] = "external source directories are read-only"
+    if hardened.get("writable") and not writable:
+        hardened["security_error"] = hardened.get("security_error") or "source directory is not writable"
+    hardened["path"] = full_path
+    hardened["exists"] = True
+    hardened["writable"] = writable
+    if not writable:
+        hardened["import_target"] = False
+    return hardened
+
+
+def _ensure_supported_image_path(path: str):
+    if not path.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
+        raise ValueError("path must reference a supported image file")
+    if os.path.exists(path) and not os.path.isfile(path):
+        raise ValueError("path must reference a regular image file")
 
 
 def make_image_ref(source_id: str, relative_path: str) -> str:
@@ -217,7 +311,7 @@ def _normalize_source(raw: dict[str, Any], existing: dict[str, Any] | None = Non
     if not source["name"]:
         source["name"] = source_id
     source["exists"] = _source_exists(source["path"])
-    return source
+    return _harden_source(source)
 
 
 def _load_gallery_sources_file() -> list[dict[str, Any]]:
@@ -234,7 +328,7 @@ def _load_gallery_sources_file() -> list[dict[str, Any]]:
 
 def _write_gallery_sources_file(sources: list[dict[str, Any]]):
     stored_sources = [
-        {key: value for key, value in source.items() if key not in {"exists", "image_count"}}
+        {key: value for key, value in source.items() if key not in {"exists", "image_count", "security_error"}}
         for source in sources
     ]
     save_json(GALLERY_SOURCES_FILE, {"sources": stored_sources})
@@ -257,7 +351,7 @@ def list_gallery_sources() -> list[dict[str, Any]]:
     import_targets = [source for source in sources if source.get("enabled") and source.get("writable") and source.get("import_target")]
     if not import_targets:
         for source in sources:
-            if source["id"] == DEFAULT_OUTPUT_SOURCE_ID:
+            if source["id"] == DEFAULT_OUTPUT_SOURCE_ID and source.get("enabled") and source.get("writable"):
                 source["import_target"] = True
                 break
     return sources
@@ -292,6 +386,8 @@ def save_gallery_source(payload: dict[str, Any]) -> dict[str, Any]:
     source = _normalize_source({**payload, "id": incoming_id}, existing)
     if not source.get("path"):
         raise ValueError("source path required")
+    if source.get("security_error"):
+        raise ValueError(str(source["security_error"]))
 
     if existing:
         source["locked"] = bool(existing.get("locked", False))
@@ -300,10 +396,12 @@ def save_gallery_source(payload: dict[str, Any]) -> dict[str, Any]:
             source["kind"] = existing["kind"]
             source["path"] = existing["path"]
             source["name"] = existing["name"]
+            source = _normalize_source(source, existing)
         sources = [source if item["id"] == source["id"] else item for item in sources]
     else:
         source["kind"] = "custom"
         source["locked"] = False
+        source = _normalize_source(source)
         sources.append(source)
 
     if source.get("import_target"):
@@ -346,7 +444,16 @@ def test_gallery_source_path(path: str) -> dict[str, Any]:
                     image_count += 1
         except OSError:
             pass
-    return {"ok": exists, "path": full_path, "exists": exists, "writable": writable, "image_count": image_count}
+    within_safe_root = _path_is_within_any(full_path, _safe_source_roots()) if exists else False
+    allowed = exists and (_external_sources_allowed() or within_safe_root)
+    return {
+        "ok": bool(exists and allowed),
+        "path": full_path,
+        "exists": exists,
+        "writable": writable if allowed and within_safe_root else False,
+        "image_count": image_count if allowed else 0,
+        "security_error": "" if allowed else "source path is outside the allowed ComfyUI directory",
+    }
 
 
 def diagnose_gallery_sources() -> dict[str, Any]:
@@ -755,6 +862,8 @@ def resolve_source_subfolder_path(source_id: str, subfolder: str = "", *, requir
 
 def resolve_image_path(relative_path: str) -> tuple[str, str]:
     source_id, source_relative_path = parse_image_ref(relative_path)
+    if not source_relative_path.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
+        raise ValueError("relative_path must reference a supported image file")
     source = get_gallery_source(source_id)
     if not source.get("enabled", True):
         raise ValueError("gallery source is disabled")
@@ -762,6 +871,7 @@ def resolve_image_path(relative_path: str) -> tuple[str, str]:
     if not source_path or not os.path.isdir(os.path.expanduser(source_path)):
         raise FileNotFoundError("gallery source directory not found")
     full_path = _ensure_within_directory(source_path, os.path.join(source_path, source_relative_path), source["name"])
+    _ensure_supported_image_path(full_path)
     return source_path, full_path
 
 
@@ -791,6 +901,180 @@ def build_thumb_url(relative_path: str) -> str:
     return f"/universal_gallery/api/thumb?{params}"
 
 
+def _rgb_to_hex(red: int, green: int, blue: int) -> str:
+    return f"#{max(0, min(255, red)):02x}{max(0, min(255, green)):02x}{max(0, min(255, blue)):02x}"
+
+
+def _color_family_from_rgb(red: int, green: int, blue: int) -> str:
+    hue, saturation, value = colorsys.rgb_to_hsv(red / 255, green / 255, blue / 255)
+    hue_degrees = hue * 360
+    luma = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255
+
+    if value < 0.16:
+        return "black"
+    if value > 0.92 and saturation < 0.14:
+        return "white"
+    if saturation < 0.16:
+        return "gray"
+    if 18 <= hue_degrees < 48 and saturation > 0.26 and luma < 0.52:
+        return "brown"
+    if hue_degrees < 15 or hue_degrees >= 345:
+        return "red"
+    if hue_degrees < 42:
+        return "orange"
+    if hue_degrees < 68:
+        return "yellow"
+    if hue_degrees < 155:
+        return "green"
+    if hue_degrees < 190:
+        return "cyan"
+    if hue_degrees < 250:
+        return "blue"
+    if hue_degrees < 292:
+        return "purple"
+    if hue_degrees < 345:
+        return "pink"
+    return "gray"
+
+
+def _encode_color_families(families: list[str]) -> str:
+    unique_families: list[str] = []
+    for family in families:
+        if family and family not in unique_families:
+            unique_families.append(family)
+    return "\n" + "\n".join(unique_families) + "\n" if unique_families else ""
+
+
+def _thumb_cache_path_if_exists(relative_path: str, size: int = THUMB_SIZE) -> str:
+    source_id, source_relative_path = parse_image_ref(relative_path)
+    cache_key = hashlib.sha1(f"{source_id}:{source_relative_path}:{size}".encode("utf-8")).hexdigest()
+    thumb_path = os.path.join(THUMB_CACHE_DIR, f"{cache_key}.webp")
+    return thumb_path if os.path.exists(thumb_path) else ""
+
+
+def _extract_image_color_profile(full_path: str, relative_path: str = "") -> dict[str, Any]:
+    if not HAS_PIL:
+        return dict(COLOR_PROFILE_DEFAULT)
+
+    sample_path = _thumb_cache_path_if_exists(relative_path) if relative_path else ""
+    if not sample_path:
+        sample_path = full_path
+
+    try:
+        with Image.open(sample_path) as image:
+            image.thumbnail((96, 96))
+            rgba_image = image.convert("RGBA")
+            pixels = list(rgba_image.getdata())
+    except Exception:
+        if sample_path != full_path:
+            return _extract_image_color_profile(full_path, "")
+        return dict(COLOR_PROFILE_DEFAULT)
+
+    visible_pixels: list[tuple[int, int, int]] = [
+        (int(red), int(green), int(blue))
+        for red, green, blue, alpha in pixels
+        if int(alpha) >= 24
+    ]
+    if not visible_pixels:
+        return dict(COLOR_PROFILE_DEFAULT)
+
+    bucket_map: dict[tuple[int, int, int], list[int]] = {}
+    family_pixel_counts: dict[str, int] = {}
+    saturation_sum = 0.0
+    luma_sum = 0.0
+
+    for red, green, blue in visible_pixels:
+        _hue, saturation, value = colorsys.rgb_to_hsv(red / 255, green / 255, blue / 255)
+        luma = (0.2126 * red + 0.7152 * green + 0.0722 * blue) / 255
+        saturation_sum += saturation
+        luma_sum += luma
+        bucket = (red // 32, green // 32, blue // 32)
+        if bucket not in bucket_map:
+            bucket_map[bucket] = [0, 0, 0, 0]
+        bucket_map[bucket][0] += 1
+        bucket_map[bucket][1] += red
+        bucket_map[bucket][2] += green
+        bucket_map[bucket][3] += blue
+        family = _color_family_from_rgb(red, green, blue)
+        family_pixel_counts[family] = family_pixel_counts.get(family, 0) + 1
+
+    if not bucket_map:
+        return dict(COLOR_PROFILE_DEFAULT)
+
+    total_pixels = len(visible_pixels)
+
+    def bucket_score(bucket: list[int]) -> float:
+        count, red_sum, green_sum, blue_sum = bucket
+        red = round(red_sum / count)
+        green = round(green_sum / count)
+        blue = round(blue_sum / count)
+        _hue, saturation, value = colorsys.rgb_to_hsv(red / 255, green / 255, blue / 255)
+        family = _color_family_from_rgb(red, green, blue)
+        neutral_penalty = 0.26 if family in {"white", "gray"} else 0.72 if family == "black" else 1.0
+        highlight_bonus = 1.0 + min(0.85, saturation * 1.35)
+        value_penalty = 0.68 if value > 0.95 and saturation < 0.2 else 1.0
+        return count * neutral_penalty * highlight_bonus * value_penalty
+
+    ranked_buckets = sorted(bucket_map.values(), key=bucket_score, reverse=True)
+    dominant_count, dominant_red, dominant_green, dominant_blue = ranked_buckets[0]
+    dominant_rgb = (
+        round(dominant_red / dominant_count),
+        round(dominant_green / dominant_count),
+        round(dominant_blue / dominant_count),
+    )
+    palette = []
+    seen_colors: set[str] = set()
+    color_family_scores = {
+        family: round(count / total_pixels, 4)
+        for family, count in sorted(family_pixel_counts.items(), key=lambda item: item[1], reverse=True)
+    }
+    base_color_families = [
+        family
+        for family, score in color_family_scores.items()
+        if score >= COLOR_FAMILY_MIN_RATIO
+    ]
+    color_families = list(base_color_families)
+    warm_score = sum(color_family_scores.get(family, 0) for family in ["red", "orange", "yellow", "pink", "brown"])
+    cool_score = sum(color_family_scores.get(family, 0) for family in ["green", "cyan", "blue", "purple"])
+    if warm_score >= COLOR_FAMILY_MIN_RATIO:
+        color_families.append("warm")
+    if cool_score >= COLOR_FAMILY_MIN_RATIO:
+        color_families.append("cool")
+    if (saturation_sum / len(visible_pixels)) < 0.18:
+        color_families.append("low_saturation")
+    for count, red_sum, green_sum, blue_sum in ranked_buckets[:10]:
+        red = round(red_sum / count)
+        green = round(green_sum / count)
+        blue = round(blue_sum / count)
+        color = _rgb_to_hex(red, green, blue)
+        if color not in seen_colors:
+            palette.append(color)
+            seen_colors.add(color)
+        if len(palette) >= 6:
+            break
+
+    dominant_family = _color_family_from_rgb(*dominant_rgb)
+    primary_family = base_color_families[0] if base_color_families else dominant_family
+
+    return {
+        "dominant_color": _rgb_to_hex(*dominant_rgb),
+        "color_family": primary_family,
+        "color_families_text": _encode_color_families(color_families),
+        "color_family_scores_json": json.dumps(
+            {
+                **color_family_scores,
+                "warm": round(warm_score, 4),
+                "cool": round(cool_score, 4),
+                "low_saturation": round(1.0 if (saturation_sum / len(visible_pixels)) < 0.18 else 0.0, 4),
+            },
+            ensure_ascii=False,
+        ),
+        "palette_json": json.dumps(palette, ensure_ascii=False),
+        "color_saturation": round(saturation_sum / len(visible_pixels), 4),
+        "color_luma": round(luma_sum / len(visible_pixels), 4),
+    }
+
+
 def _connect_gallery_index_db() -> sqlite3.Connection:
     ensure_data_dir()
     connection = sqlite3.connect(GALLERY_INDEX_DB_FILE)
@@ -815,6 +1099,13 @@ def _connect_gallery_index_db() -> sqlite3.Connection:
             notes TEXT NOT NULL DEFAULT '',
             pinned INTEGER NOT NULL DEFAULT 0,
             boards_text TEXT NOT NULL DEFAULT '',
+            dominant_color TEXT NOT NULL DEFAULT '',
+            color_family TEXT NOT NULL DEFAULT '',
+            color_families_text TEXT NOT NULL DEFAULT '',
+            color_family_scores_json TEXT NOT NULL DEFAULT '{}',
+            palette_json TEXT NOT NULL DEFAULT '[]',
+            color_saturation REAL NOT NULL DEFAULT 0,
+            color_luma REAL NOT NULL DEFAULT 0,
             scanned_at REAL NOT NULL
         )
         """
@@ -826,6 +1117,13 @@ def _connect_gallery_index_db() -> sqlite3.Connection:
         "notes": "TEXT NOT NULL DEFAULT ''",
         "pinned": "INTEGER NOT NULL DEFAULT 0",
         "boards_text": "TEXT NOT NULL DEFAULT ''",
+        "dominant_color": "TEXT NOT NULL DEFAULT ''",
+        "color_family": "TEXT NOT NULL DEFAULT ''",
+        "color_families_text": "TEXT NOT NULL DEFAULT ''",
+        "color_family_scores_json": "TEXT NOT NULL DEFAULT '{}'",
+        "palette_json": "TEXT NOT NULL DEFAULT '[]'",
+        "color_saturation": "REAL NOT NULL DEFAULT 0",
+        "color_luma": "REAL NOT NULL DEFAULT 0",
     }.items():
         if column_name not in columns:
             connection.execute(f"ALTER TABLE gallery_images ADD COLUMN {column_name} {column_definition}")
@@ -842,6 +1140,7 @@ def _connect_gallery_index_db() -> sqlite3.Connection:
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_dir ON gallery_images(relative_dir)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_category ON gallery_images(category)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_pinned ON gallery_images(pinned)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_color_family ON gallery_images(color_family)")
     return connection
 
 
@@ -869,6 +1168,42 @@ def _collect_index_subfolders(source_id: str, relative_dir: str, subfolders: set
             subfolders.add(f"{source_id}{IMAGE_REF_SEPARATOR}{folder_path}")
 
 
+def _collect_directory_subfolders(sources: list[dict[str, Any]]) -> set[str]:
+    subfolders: set[str] = set()
+    for source in sources:
+        if not source.get("enabled", True) or not source.get("exists"):
+            continue
+
+        source_root = source.get("path", "")
+        if not source_root or not os.path.isdir(source_root):
+            continue
+
+        stack = [source_root]
+        while stack:
+            current_dir = stack.pop()
+            try:
+                with os.scandir(current_dir) as iterator:
+                    entries = list(iterator)
+            except (FileNotFoundError, PermissionError, OSError):
+                continue
+
+            for entry in entries:
+                if not entry.is_dir(follow_symlinks=False):
+                    continue
+
+                relative_dir = normalize_relative_path(os.path.relpath(entry.path, source_root))
+                if relative_dir:
+                    if source["id"] == DEFAULT_OUTPUT_SOURCE_ID:
+                        subfolders.add(relative_dir)
+                    else:
+                        subfolders.add(f'{source["id"]}{IMAGE_REF_SEPARATOR}{relative_dir}')
+
+                if source.get("recursive", True):
+                    stack.append(entry.path)
+
+    return subfolders
+
+
 def _image_row_to_payload(row: sqlite3.Row, source: dict[str, Any]) -> dict[str, Any]:
     relative_path = str(row["relative_path"])
     original_url, resolved_subfolder = build_view_url(relative_path)
@@ -889,7 +1224,171 @@ def _image_row_to_payload(row: sqlite3.Row, source: dict[str, Any]) -> dict[str,
         "thumb_url": build_thumb_url(relative_path),
         "size": int(row["size"]),
         "created_at": int(row["created_at"]),
+        "dominant_color": str(row["dominant_color"] or ""),
+        "color_family": str(row["color_family"] or ""),
+        "color_families": [
+            family for family in str(row["color_families_text"] or "").splitlines() if family
+        ],
+        "color_family_scores": json.loads(str(row["color_family_scores_json"] or "{}")),
+        "palette": json.loads(str(row["palette_json"] or "[]")),
+        "color_saturation": float(row["color_saturation"] or 0),
+        "color_luma": float(row["color_luma"] or 0),
     }
+
+
+def _color_index_is_current(connection: sqlite3.Connection) -> bool:
+    if _index_meta_get(connection, "color_index_version") != COLOR_INDEX_VERSION:
+        return False
+    missing_count = int(
+        connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM gallery_images
+            WHERE dominant_color = '' OR color_family_scores_json = '{}'
+            """
+        ).fetchone()["total"]
+    )
+    return missing_count == 0
+
+
+def _schedule_color_index_backfill(
+    sources: list[dict[str, Any]],
+    signature: str,
+    priority_paths: list[str] | None = None,
+):
+    global COLOR_INDEX_BACKFILL_RUNNING
+    if not HAS_PIL:
+        return
+
+    normalized_priority_paths = [
+        normalize_relative_path(path)
+        for path in (priority_paths or [])
+        if normalize_relative_path(path)
+    ]
+    with COLOR_INDEX_BACKFILL_LOCK:
+        COLOR_INDEX_QUEUED_PATHS.update(normalized_priority_paths)
+        if COLOR_INDEX_BACKFILL_RUNNING:
+            return
+        COLOR_INDEX_BACKFILL_RUNNING = True
+
+    source_snapshot = [
+        {
+            "id": str(source.get("id", "")),
+            "path": str(source.get("path", "")),
+            "enabled": bool(source.get("enabled", True)),
+            "exists": bool(source.get("exists", False)),
+        }
+        for source in sources
+    ]
+
+    def run_backfill():
+        global COLOR_INDEX_BACKFILL_RUNNING
+        try:
+            source_by_id = {
+                source["id"]: source
+                for source in source_snapshot
+                if source["id"] and source["enabled"] and source["exists"] and source["path"]
+            }
+            processed = 0
+            with _connect_gallery_index_db() as connection:
+                while True:
+                    if _index_meta_get(connection, "source_signature") != signature:
+                        return
+
+                    with COLOR_INDEX_BACKFILL_LOCK:
+                        priority_batch = list(COLOR_INDEX_QUEUED_PATHS)[:80]
+                        for path in priority_batch:
+                            COLOR_INDEX_QUEUED_PATHS.discard(path)
+
+                    rows = []
+                    if priority_batch:
+                        placeholders = ",".join("?" for _ in priority_batch)
+                        rows = connection.execute(
+                            f"""
+                            SELECT relative_path, source_id, source_relative_path
+                            FROM gallery_images
+                            WHERE relative_path IN ({placeholders})
+                              AND (dominant_color = '' OR color_family_scores_json = '{{}}')
+                            LIMIT 80
+                            """,
+                            priority_batch,
+                        ).fetchall()
+
+                    if not rows:
+                        rows = connection.execute(
+                            """
+                            SELECT relative_path, source_id, source_relative_path
+                            FROM gallery_images
+                            WHERE dominant_color = '' OR color_family_scores_json = '{}'
+                            LIMIT 80
+                            """
+                        ).fetchall()
+                    if not rows:
+                        _index_meta_set(connection, "color_index_version", COLOR_INDEX_VERSION)
+                        connection.commit()
+                        return
+
+                    updates = []
+                    for row in rows:
+                        source = source_by_id.get(str(row["source_id"]))
+                        if not source:
+                            continue
+                        full_path = os.path.join(source["path"], str(row["source_relative_path"]))
+                        if not os.path.isfile(full_path) or not full_path.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
+                            continue
+                        color_profile = _extract_image_color_profile(full_path, str(row["relative_path"]))
+                        updates.append(
+                            (
+                                color_profile["dominant_color"],
+                                color_profile["color_family"],
+                                color_profile["color_families_text"],
+                                color_profile["color_family_scores_json"],
+                                color_profile["palette_json"],
+                                color_profile["color_saturation"],
+                                color_profile["color_luma"],
+                                str(row["relative_path"]),
+                            )
+                        )
+
+                    if updates:
+                        connection.executemany(
+                            """
+                            UPDATE gallery_images
+                            SET dominant_color = ?,
+                                color_family = ?,
+                                color_families_text = ?,
+                                color_family_scores_json = ?,
+                                palette_json = ?,
+                                color_saturation = ?,
+                                color_luma = ?
+                            WHERE relative_path = ?
+                            """,
+                            updates,
+                        )
+                        processed += len(updates)
+                    else:
+                        skipped_paths = [str(row["relative_path"]) for row in rows]
+                        connection.executemany(
+                            """
+                            UPDATE gallery_images
+                            SET dominant_color = '#000000',
+                                color_family = 'black',
+                                color_families_text = '\nblack\n',
+                                color_family_scores_json = '{"black": 1.0}',
+                                palette_json = '["#000000"]'
+                            WHERE relative_path = ?
+                            """,
+                            [(path,) for path in skipped_paths],
+                        )
+                    connection.commit()
+
+                    if processed and processed % 800 == 0:
+                        invalidate_image_index_cache()
+        finally:
+            with COLOR_INDEX_BACKFILL_LOCK:
+                COLOR_INDEX_BACKFILL_RUNNING = False
+
+    COLOR_INDEX_EXECUTOR.submit(run_backfill)
 
 
 def _boards_to_search_text(boards: list[str]) -> str:
@@ -956,10 +1455,14 @@ def _load_image_index_from_db(sources: list[dict[str, Any]], signature: str) -> 
     with _connect_gallery_index_db() as connection:
         if _index_meta_get(connection, "source_signature") != signature:
             return None
+        if not _color_index_is_current(connection):
+            _schedule_color_index_backfill(sources, signature)
         rows = connection.execute(
             """
             SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
-                   subfolder, display_subfolder, size, created_at, modified_at
+                   subfolder, display_subfolder, size, created_at, modified_at,
+                   dominant_color, color_family, color_families_text,
+                   color_family_scores_json, palette_json, color_saturation, color_luma
             FROM gallery_images
             ORDER BY created_at DESC
             """
@@ -995,6 +1498,49 @@ def _image_index_db_has_signature(signature: str) -> bool:
         return _index_meta_get(connection, "source_signature") == signature
 
 
+def get_color_index_status() -> dict[str, Any]:
+    with COLOR_INDEX_BACKFILL_LOCK:
+        running = COLOR_INDEX_BACKFILL_RUNNING
+        queued = len(COLOR_INDEX_QUEUED_PATHS)
+
+    if not os.path.exists(GALLERY_INDEX_DB_FILE):
+        return {
+            "running": running,
+            "queued": queued,
+            "total": 0,
+            "indexed": 0,
+            "missing": 0,
+            "complete": False,
+            "version": COLOR_INDEX_VERSION,
+            "threshold": COLOR_FAMILY_MIN_RATIO,
+        }
+
+    with _connect_gallery_index_db() as connection:
+        total = int(connection.execute("SELECT COUNT(*) AS total FROM gallery_images").fetchone()["total"])
+        missing = int(
+            connection.execute(
+                """
+                SELECT COUNT(*) AS total
+                FROM gallery_images
+                WHERE dominant_color = '' OR color_family_scores_json = '{}'
+                """
+            ).fetchone()["total"]
+        )
+        current_version = _index_meta_get(connection, "color_index_version")
+
+    return {
+        "running": running,
+        "queued": queued,
+        "total": total,
+        "indexed": max(0, total - missing),
+        "missing": missing,
+        "complete": total > 0 and missing == 0 and current_version == COLOR_INDEX_VERSION,
+        "version": current_version or "",
+        "target_version": COLOR_INDEX_VERSION,
+        "threshold": COLOR_FAMILY_MIN_RATIO,
+    }
+
+
 def _save_image_index_to_db(index: dict[str, Any]):
     image_states = get_image_state_map()
     with _connect_gallery_index_db() as connection:
@@ -1020,6 +1566,13 @@ def _save_image_index_to_db(index: dict[str, Any]):
                     str(image_state.get("notes", "")),
                     1 if image_state.get("pinned", image_state.get("favorite", False)) else 0,
                     _boards_to_search_text(image_state.get("boards", [])),
+                    str(image.get("dominant_color", "")),
+                    str(image.get("color_family", "")),
+                    str(image.get("color_families_text", _encode_color_families([str(image.get("color_family", ""))]))),
+                    json.dumps(image.get("color_family_scores", {}), ensure_ascii=False),
+                    json.dumps(image.get("palette", []), ensure_ascii=False),
+                    float(image.get("color_saturation", 0) or 0),
+                    float(image.get("color_luma", 0) or 0),
                     scanned_at,
                 )
             )
@@ -1028,13 +1581,17 @@ def _save_image_index_to_db(index: dict[str, Any]):
             INSERT INTO gallery_images(
                 relative_path, source_id, source_relative_path, filename, relative_dir,
                 subfolder, display_subfolder, size, created_at, modified_at,
-                title, category, notes, pinned, boards_text, scanned_at
+                title, category, notes, pinned, boards_text,
+                dominant_color, color_family, color_families_text,
+                color_family_scores_json, palette_json, color_saturation, color_luma,
+                scanned_at
             )
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
         _index_meta_set(connection, "source_signature", str(index.get("signature") or ""))
+        _index_meta_set(connection, "color_index_version", COLOR_INDEX_VERSION if index.get("color_index_complete") else "")
         _index_meta_set(connection, "built_at", str(index.get("built_at") or scanned_at))
         connection.commit()
 
@@ -1050,9 +1607,9 @@ def invalidate_image_index_cache():
         IMAGE_INDEX_CACHE["dirty"] = True
 
 
-def _build_image_index(sources: list[dict[str, Any]]) -> dict[str, Any]:
+def _build_image_index(sources: list[dict[str, Any]], include_color_profiles: bool = False) -> dict[str, Any]:
     images: list[dict[str, Any]] = []
-    subfolders = set()
+    subfolders = _collect_directory_subfolders(sources)
     source_counts: dict[str, int] = {source["id"]: 0 for source in sources}
 
     for source in sources:
@@ -1096,6 +1653,7 @@ def _build_image_index(sources: list[dict[str, Any]]) -> dict[str, Any]:
                     _collect_index_subfolders(source["id"], relative_dir, subfolders)
 
                 original_url, resolved_subfolder = build_view_url(image_ref)
+                color_profile = _extract_image_color_profile(entry.path) if include_color_profiles else dict(COLOR_PROFILE_DEFAULT)
                 source_counts[source["id"]] = source_counts.get(source["id"], 0) + 1
                 images.append(
                     {
@@ -1115,6 +1673,13 @@ def _build_image_index(sources: list[dict[str, Any]]) -> dict[str, Any]:
                         "size": stat.st_size,
                         "created_at": int(stat.st_ctime),
                         "modified_at": int(stat.st_mtime),
+                        "dominant_color": color_profile["dominant_color"],
+                        "color_family": color_profile["color_family"],
+                        "color_families_text": color_profile["color_families_text"],
+                        "color_family_scores": json.loads(color_profile["color_family_scores_json"]),
+                        "palette": json.loads(color_profile["palette_json"]),
+                        "color_saturation": color_profile["color_saturation"],
+                        "color_luma": color_profile["color_luma"],
                     }
                 )
 
@@ -1127,8 +1692,11 @@ def _build_image_index(sources: list[dict[str, Any]]) -> dict[str, Any]:
         "subfolders": sorted(subfolders, key=lambda value: value.lower()),
         "sources": indexed_sources,
         "built_at": time.time(),
+        "color_index_complete": include_color_profiles,
     }
     _save_image_index_to_db(index)
+    if not include_color_profiles:
+        _schedule_color_index_backfill(sources, index["signature"])
     return index
 
 
@@ -1195,7 +1763,10 @@ def get_image_index(force_refresh: bool = False) -> dict[str, Any]:
 def collect_subfolders(output_dir: str, force_refresh: bool = False) -> list[str]:
     if not output_dir or not os.path.exists(output_dir):
         return []
-    return get_image_index(force_refresh=force_refresh)["subfolders"]
+    image_index = get_image_index(force_refresh=force_refresh)
+    subfolders = set(image_index["subfolders"])
+    subfolders.update(_collect_directory_subfolders(image_index.get("sources", list_gallery_sources())))
+    return sorted(subfolders, key=lambda value: value.lower())
 
 
 def list_images(
@@ -1286,6 +1857,7 @@ def list_images_page(
     date_from: str = "",
     date_to: str = "",
     favorites_only: bool = False,
+    color_family: str = "",
     sort_by: str = "created_at",
     sort_order: str = "desc",
     force_refresh: bool = False,
@@ -1299,6 +1871,7 @@ def list_images_page(
     source_by_id = {source["id"]: source for source in sources}
     normalized_search = search.strip().lower()
     normalized_category = category.strip().lower()
+    normalized_color_family = color_family.strip().lower()
     normalized_subfolder = normalize_relative_path(subfolder).lower()
     filter_source_id = ""
     filter_relative_dir = normalized_subfolder
@@ -1342,6 +1915,13 @@ def list_images_page(
         params.append(date_to_ts)
     if favorites_only:
         where_clauses.append("pinned = 1")
+    if normalized_color_family:
+        if normalized_color_family == "low_saturation":
+            where_clauses.append("(color_families_text LIKE ? OR (color_saturation > 0 AND color_saturation < 0.18))")
+            params.append("%\nlow_saturation\n%")
+        else:
+            where_clauses.append("(color_family = ? OR color_families_text LIKE ?)")
+            params.extend([normalized_color_family, f"%\n{normalized_color_family}\n%"])
 
     sort_field = {
         "filename": "filename COLLATE NOCASE",
@@ -1355,6 +1935,8 @@ def list_images_page(
     where_sql = " AND ".join(where_clauses)
 
     with _connect_gallery_index_db() as connection:
+        if not _color_index_is_current(connection):
+            _schedule_color_index_backfill(sources, signature)
         _sync_image_state_to_index_db(connection)
         total = int(
             connection.execute(f"SELECT COUNT(*) AS total FROM gallery_images WHERE {where_sql}", params).fetchone()["total"]
@@ -1363,7 +1945,9 @@ def list_images_page(
             f"""
             SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
                    subfolder, display_subfolder, size, created_at, modified_at,
-                   title, category, notes, pinned, boards_text
+                   title, category, notes, pinned, boards_text,
+                   dominant_color, color_family, color_families_text,
+                   color_family_scores_json, palette_json, color_saturation, color_luma
             FROM gallery_images
             WHERE {where_sql}
             ORDER BY {sort_field} {sort_direction}
@@ -1373,6 +1957,8 @@ def list_images_page(
         ).fetchall()
         connection.commit()
 
+    _schedule_color_index_backfill(sources, signature, [str(row["relative_path"]) for row in rows])
+
     images: list[dict[str, Any]] = []
     for row in rows:
         source = source_by_id.get(str(row["source_id"]))
@@ -1380,7 +1966,13 @@ def list_images_page(
             continue
         images.append({**_image_row_to_payload(row, source), **_image_row_state(row)})
 
-    return {"images": images, "total": total, "page": safe_page, "limit": safe_limit}
+    return {
+        "images": images,
+        "total": total,
+        "page": safe_page,
+        "limit": safe_limit,
+        "color_index_status": get_color_index_status(),
+    }
 
 
 def _board_cover_payload(relative_path: str) -> dict[str, str] | None:
@@ -1471,7 +2063,7 @@ def get_gallery_context(force_refresh: bool = False) -> dict:
     base_dir = get_comfy_base_dir()
     import_dir = os.path.join(output_dir, IMPORT_IMAGE_SUBFOLDER) if output_dir else ""
     image_index = get_image_index(force_refresh=force_refresh)
-    subfolders = image_index["subfolders"]
+    subfolders = collect_subfolders(output_dir, force_refresh=force_refresh)
     image_states = get_image_state_map()
     pinned_count = sum(1 for indexed_image in image_index["images"] if image_states.get(indexed_image["relative_path"], {}).get("pinned", False))
 
@@ -1483,10 +2075,11 @@ def get_gallery_context(force_refresh: bool = False) -> dict:
         "import_image_target_relative": build_relative_display(import_dir, base_dir) if import_dir else "",
         "categories": collect_categories(),
         "subfolders": subfolders,
-        "move_targets": build_move_target_options(image_index),
+        "move_targets": build_move_target_options({**image_index, "subfolders": subfolders}),
         "sources": image_index.get("sources", list_gallery_sources()),
         "active_source_count": sum(1 for source in image_index.get("sources", []) if source.get("enabled") and source.get("exists")),
         "pinned_count": pinned_count,
+        "color_index_status": get_color_index_status(),
         "boards": list_boards(force_refresh=force_refresh),
     }
 
@@ -2172,7 +2765,7 @@ def create_folder(subfolder: str) -> dict[str, Any]:
         raise ValueError("folder path required")
     os.makedirs(full_path, exist_ok=True)
     invalidate_image_index_cache()
-    return {"ok": True, "path": normalized_subfolder, "subfolders": collect_subfolders(_ensure_output_dir())}
+    return {"ok": True, "path": normalized_subfolder, "subfolders": collect_subfolders(_ensure_output_dir(), force_refresh=True)}
 
 
 def delete_folder(subfolder: str) -> dict[str, Any]:
@@ -2195,7 +2788,7 @@ def delete_folder(subfolder: str) -> dict[str, Any]:
     return {
         "ok": True,
         "path": normalized_subfolder,
-        "subfolders": collect_subfolders(_ensure_output_dir()),
+        "subfolders": collect_subfolders(_ensure_output_dir(), force_refresh=True),
         "categories": categories,
     }
 
@@ -2240,7 +2833,47 @@ def merge_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any]
         "source_path": source_relative,
         "target_path": target_relative,
         "moved": len(path_mapping),
-        "subfolders": collect_subfolders(_ensure_output_dir()),
+        "subfolders": collect_subfolders(_ensure_output_dir(), force_refresh=True),
+        "categories": categories,
+    }
+
+
+def rename_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any]:
+    source_relative, source_full_path = resolve_subfolder_path(source_subfolder)
+    target_relative, target_full_path = resolve_subfolder_path(target_subfolder)
+
+    if not source_relative or not target_relative:
+        raise ValueError("source and target folders required")
+    if source_relative == target_relative:
+        raise ValueError("source and target folder must be different")
+    if target_relative.startswith(f"{source_relative}/"):
+        raise ValueError("target folder cannot be inside source folder")
+    if not os.path.exists(source_full_path):
+        raise FileNotFoundError("source folder not found")
+    if os.path.exists(target_full_path):
+        raise FileExistsError("target folder already exists")
+
+    parent_dir = os.path.dirname(target_full_path)
+    os.makedirs(parent_dir, exist_ok=True)
+    output_dir = _ensure_output_dir()
+    path_mapping: dict[str, str] = {}
+
+    for root, _dirs, files in os.walk(source_full_path):
+        for filename in files:
+            source_file = os.path.join(root, filename)
+            source_rel_path = normalize_relative_path(os.path.relpath(source_file, output_dir))
+            relative_to_source = normalize_relative_path(os.path.relpath(source_file, source_full_path))
+            destination_rel_path = normalize_relative_path(os.path.join(target_relative, relative_to_source))
+            path_mapping[source_rel_path] = destination_rel_path
+
+    os.rename(source_full_path, target_full_path)
+    categories = move_image_states(path_mapping)
+    invalidate_image_index_cache()
+    return {
+        "ok": True,
+        "source_path": source_relative,
+        "target_path": target_relative,
+        "subfolders": collect_subfolders(_ensure_output_dir(), force_refresh=True),
         "categories": categories,
     }
 

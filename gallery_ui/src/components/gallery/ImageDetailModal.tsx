@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
@@ -335,13 +336,31 @@ export const ImageDetailModal = ({
     setIsDragging(false);
   };
 
-  const handleDoubleClick = (event: ReactPointerEvent<HTMLDivElement>) => {
+  const handleDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (!(target instanceof HTMLImageElement)) {
+      void handleRequestClose();
+      return;
+    }
+
+    event.stopPropagation();
     if (isZoomed) {
       resetViewport();
       return;
     }
 
     updateZoom(2, event.clientX, event.clientY);
+  };
+
+  const handleBackgroundDoubleClick = (event: ReactMouseEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (!target || isEditableTarget(target) || target.closest("button, a, .ue-lightbox-inspector, .ue-lightbox-toolbar")) {
+      return;
+    }
+    if (target instanceof HTMLImageElement) {
+      return;
+    }
+    void handleRequestClose();
   };
 
   const handleSave = async () => {
@@ -435,7 +454,11 @@ export const ImageDetailModal = ({
 
   return (
     <div className="ue-modal-backdrop ue-modal-backdrop--lightbox" onClick={() => void handleRequestClose()}>
-      <div className="ue-lightbox-shell" onClick={(event) => event.stopPropagation()}>
+      <div
+        className="ue-lightbox-shell"
+        onClick={(event) => event.stopPropagation()}
+        onDoubleClick={handleBackgroundDoubleClick}
+      >
         <div className="ue-lightbox-backdrop" style={{ backgroundImage: `url(${displayedBg})`, transition: 'opacity 0.28s ease', opacity: imageOpacity }} />
 
         <button
@@ -445,6 +468,26 @@ export const ImageDetailModal = ({
           {...getTooltipProps(t("modalClose"))}
         >
           <X size={20} />
+        </button>
+
+        <button
+          className="ue-lightbox-side-nav ue-lightbox-side-nav--prev"
+          disabled={!navigation || currentIndex <= 0}
+          onClick={() => onNavigate(Math.max(0, currentIndex - 1))}
+          aria-label={t("galleryPrevious")}
+          {...getTooltipProps(t("galleryPrevious"))}
+        >
+          <ChevronLeft size={28} />
+        </button>
+
+        <button
+          className="ue-lightbox-side-nav ue-lightbox-side-nav--next"
+          disabled={!navigation || currentIndex >= totalItems - 1}
+          onClick={() => onNavigate(Math.min(totalItems - 1, currentIndex + 1))}
+          aria-label={t("galleryNext")}
+          {...getTooltipProps(t("galleryNext"))}
+        >
+          <ChevronRight size={28} />
         </button>
 
         <div className={`ue-lightbox-stage ${showInspector ? "has-inspector" : ""}`}>

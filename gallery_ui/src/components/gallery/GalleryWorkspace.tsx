@@ -11,10 +11,10 @@ import {
   Eye,
   ExternalLink,
   Folder as FolderIcon,
-  FolderMinus,
   FolderPlus,
   Image as ImageIcon,
-  PencilLine,
+  LayoutGrid,
+  List,
   Pin,
   RotateCcw,
   Send,
@@ -28,7 +28,7 @@ import {
 import { useI18n } from "../../i18n/I18nProvider";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
-import type { BoardMutationResult, BoardSummary, GalleryContext, ImageRecord, MoveTargetOption, TrashItem } from "../../types/universal-gallery";
+import type { BoardMutationResult, BoardSummary, ColorIndexStatus, GalleryContext, ImageRecord, TrashItem } from "../../types/universal-gallery";
 import { formatCompactDate, formatFileSize } from "../../utils/formatters";
 import { BoardPickerModal } from "./BoardPickerModal";
 import { BoardShareModal } from "./BoardShareModal";
@@ -44,6 +44,43 @@ let activeImagePrefetches = 0;
 const getGalleryImageUrl = (image: ImageRecord) => image.thumb_url || image.url;
 const MASONRY_GAP = 14;
 const MASONRY_OVERSCAN = 900;
+const GALLERY_VIEW_MODE_STORAGE_KEY = "universal-extractor:gallery-view-mode";
+
+type ContentViewMode = "grid" | "list";
+
+const COLOR_FILTERS = [
+  { value: "red", color: "#dc2626" },
+  { value: "orange", color: "#f97316" },
+  { value: "yellow", color: "#eab308" },
+  { value: "green", color: "#16a34a" },
+  { value: "cyan", color: "#06b6d4" },
+  { value: "blue", color: "#2563eb" },
+  { value: "purple", color: "#7c3aed" },
+  { value: "pink", color: "#ec4899" },
+  { value: "brown", color: "#92400e" },
+  { value: "black", color: "#18181b" },
+  { value: "white", color: "#ffffff" },
+  { value: "gray", color: "#71717a" },
+  { value: "warm", color: "linear-gradient(135deg, #dc2626, #f97316, #eab308)" },
+  { value: "cool", color: "linear-gradient(135deg, #16a34a, #06b6d4, #2563eb)" },
+  { value: "low_saturation", color: "linear-gradient(135deg, #d4d4d8, #71717a)" },
+] as const;
+
+const SORT_OPTIONS = [
+  { value: "created_at", labelKey: "gallerySortNewest", hintKey: "gallerySortNewestHint" },
+  { value: "filename", labelKey: "gallerySortName", hintKey: "gallerySortNameHint" },
+  { value: "size", labelKey: "gallerySortSize", hintKey: "gallerySortSizeHint" },
+] as const;
+
+const SORT_ORDER_OPTIONS = [
+  { value: "desc", labelKey: "gallerySortDesc", hintKey: "gallerySortDescHint" },
+  { value: "asc", labelKey: "gallerySortAsc", hintKey: "gallerySortAscHint" },
+] as const;
+
+const getStoredViewMode = (key: string, fallback: ContentViewMode): ContentViewMode => {
+  const stored = window.localStorage.getItem(key);
+  return stored === "grid" || stored === "list" ? stored : fallback;
+};
 
 const pumpImagePrefetchQueue = () => {
   while (activeImagePrefetches < MAX_IMAGE_PREFETCH_CONCURRENCY && imagePrefetchQueue.length) {
@@ -132,6 +169,8 @@ interface GalleryWorkspaceProps {
   dateFrom: string;
   dateTo: string;
   favoritesOnly: boolean;
+  selectedColorFamily: string;
+  colorIndexStatus: ColorIndexStatus | null;
   sortBy: string;
   sortOrder: string;
   gridColumns: number;
@@ -142,7 +181,6 @@ interface GalleryWorkspaceProps {
   isLoading: boolean;
   isRefreshing: boolean;
   error: string | null;
-  targetFolderOptions: MoveTargetOption[];
   boards: BoardSummary[];
   onOpenDetail: (image: ImageRecord) => void;
   onPageChange: (page: number) => void;
@@ -151,32 +189,32 @@ interface GalleryWorkspaceProps {
   onDateFromChange: (value: string) => void;
   onDateToChange: (value: string) => void;
   onFavoritesOnlyChange: (value: boolean) => void;
+  onColorFamilyChange: (value: string) => void;
   onSortByChange: (value: string) => void;
   onSortOrderChange: (value: string) => void;
   onGridColumnsChange: (value: number) => void;
   onOpenWorkflow: (image: ImageRecord) => Promise<void>;
   onSelectionChange: (relativePaths: string[]) => void;
   onUpdateImageState: (relativePath: string, updates: Record<string, unknown>) => Promise<void>;
-  onBatchUpdateImages: (relativePaths: string[], updates: Record<string, unknown>) => Promise<unknown>;
   onCreateBoard: (name: string, description?: string) => Promise<BoardMutationResult>;
   onUpdateBoardPins: (boardId: string, relativePaths: string[], pinned?: boolean) => Promise<unknown>;
   onDeleteBoard: (boardId: string) => Promise<unknown>;
-  onMoveImages: (relativePaths: string[], targetSubfolder: string, targetSourceId?: string) => Promise<unknown>;
-  onBatchRenameImages: (
-    relativePaths: string[],
-    template: string,
-    startNumber: number,
-    padding: number,
-    currentPage: number,
-  ) => Promise<unknown>;
   onDeleteImages: (relativePaths: string[]) => Promise<unknown>;
   onImportFiles: (files: File[], targetSourceId?: string) => Promise<unknown>;
   onRestoreTrashItem: (id: string) => Promise<void>;
+  onRestoreTrashItems: (ids: string[]) => Promise<void>;
   onPurgeTrashItem: (id: string) => Promise<void>;
+  onPurgeTrashItems: (ids: string[]) => Promise<void>;
 }
 
 interface ImageContextMenuState {
   image: ImageRecord;
+  x: number;
+  y: number;
+}
+
+interface TrashContextMenuState {
+  item: TrashItem;
   x: number;
   y: number;
 }
@@ -209,6 +247,8 @@ export const GalleryWorkspace = ({
   dateFrom,
   dateTo,
   favoritesOnly,
+  selectedColorFamily,
+  colorIndexStatus,
   sortBy,
   sortOrder,
   gridColumns,
@@ -219,7 +259,6 @@ export const GalleryWorkspace = ({
   isLoading,
   isRefreshing,
   error,
-  targetFolderOptions,
   boards,
   onOpenDetail,
   onPageChange,
@@ -228,42 +267,41 @@ export const GalleryWorkspace = ({
   onDateFromChange,
   onDateToChange,
   onFavoritesOnlyChange,
+  onColorFamilyChange,
   onSortByChange,
   onSortOrderChange,
   onGridColumnsChange,
   onOpenWorkflow,
   onSelectionChange,
   onUpdateImageState,
-  onBatchUpdateImages,
   onCreateBoard,
   onUpdateBoardPins,
   onDeleteBoard,
-  onMoveImages,
-  onBatchRenameImages,
   onDeleteImages,
   onImportFiles,
   onRestoreTrashItem,
+  onRestoreTrashItems,
   onPurgeTrashItem,
+  onPurgeTrashItems,
 }: GalleryWorkspaceProps) => {
   const { t } = useI18n();
   const { confirm } = useConfirm();
   const { pushToast } = useToast();
   const [dragActive, setDragActive] = useState(false);
-  const [bulkCategory, setBulkCategory] = useState("");
-  const [bulkTargetSubfolder, setBulkTargetSubfolder] = useState("");
   const [importTargetSourceId, setImportTargetSourceId] = useState("");
   const [boardPickerPaths, setBoardPickerPaths] = useState<string[]>([]);
   const [shareBoardId, setShareBoardId] = useState("");
-  const [bulkRenameTemplate, setBulkRenameTemplate] = useState("set-{page}-{n}");
-  const [bulkRenameStart, setBulkRenameStart] = useState(1);
-  const [bulkRenamePadding, setBulkRenamePadding] = useState(2);
   const [showCategoryPicker, setShowCategoryPicker] = useState(false);
   const [viewportWidth, setViewportWidth] = useState(() => window.innerWidth);
   const [contextMenu, setContextMenu] = useState<ImageContextMenuState | null>(null);
+  const [trashContextMenu, setTrashContextMenu] = useState<TrashContextMenuState | null>(null);
   const [showColumnsMenu, setShowColumnsMenu] = useState(false);
   const [showFiltersMenu, setShowFiltersMenu] = useState(false);
-  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectionMode, setSelectionMode] = useState(true);
   const [selectionBox, setSelectionBox] = useState<SelectionBoxState | null>(null);
+  const [galleryViewMode, setGalleryViewMode] = useState<ContentViewMode>(() =>
+    getStoredViewMode(GALLERY_VIEW_MODE_STORAGE_KEY, "grid"),
+  );
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [gridWidth, setGridWidth] = useState(0);
   const [viewportHeight, setViewportHeight] = useState(() => window.innerHeight);
@@ -277,14 +315,25 @@ export const GalleryWorkspace = ({
   const scrollContainerRef = useRef<HTMLElement | null>(null);
 
   const visibleImagePaths = useMemo(() => images.map((image) => image.relative_path), [images]);
+  const visibleSelectionPaths = useMemo(
+    () => (isTrashView ? trashItems.map((item) => item.id) : visibleImagePaths),
+    [isTrashView, trashItems, visibleImagePaths],
+  );
   const selectedImagePathSet = useMemo(() => new Set(selectedImagePaths), [selectedImagePaths]);
   const pageSelectedPaths = useMemo(
-    () => images.filter((image) => selectedImagePathSet.has(image.relative_path)).map((image) => image.relative_path),
-    [images, selectedImagePathSet],
+    () => visibleSelectionPaths.filter((path) => selectedImagePathSet.has(path)),
+    [selectedImagePathSet, visibleSelectionPaths],
   );
   const selectedCount = pageSelectedPaths.length;
   const hasSelection = selectedCount > 0;
-  const activeFilterCount = [dateFrom, dateTo, favoritesOnly].filter(Boolean).length;
+  const selectionEnabled = selectionMode || isTrashView;
+  const selectedTrashItems = useMemo(
+    () => (isTrashView ? trashItems.filter((item) => selectedImagePathSet.has(item.id)) : []),
+    [isTrashView, selectedImagePathSet, trashItems],
+  );
+  const activeFilterCount = [selectedCategory, dateFrom, dateTo, favoritesOnly, selectedColorFamily].filter(Boolean).length;
+  const activeFilterControlCount =
+    activeFilterCount + (sortBy !== "created_at" || sortOrder !== "desc" ? 1 : 0);
   const selectedBoard = useMemo(
     () => boards.find((board) => board.id === selectedBoardId) ?? null,
     [boards, selectedBoardId],
@@ -312,14 +361,21 @@ export const GalleryWorkspace = ({
   }, []);
 
   useEffect(() => {
-    if (!contextMenu) {
+    window.localStorage.setItem(GALLERY_VIEW_MODE_STORAGE_KEY, galleryViewMode);
+  }, [galleryViewMode]);
+
+  useEffect(() => {
+    if (!contextMenu && !trashContextMenu) {
       return;
     }
 
-    const closeMenu = () => setContextMenu(null);
+    const closeMenu = () => {
+      setContextMenu(null);
+      setTrashContextMenu(null);
+    };
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
-        setContextMenu(null);
+        closeMenu();
       }
     };
 
@@ -336,7 +392,7 @@ export const GalleryWorkspace = ({
       window.removeEventListener("scroll", closeMenu, true);
       window.removeEventListener("keydown", handleKeyDown);
     };
-  }, [contextMenu]);
+  }, [contextMenu, trashContextMenu]);
 
   useEffect(() => {
     if (!showColumnsMenu) {
@@ -367,19 +423,22 @@ export const GalleryWorkspace = ({
   }, [showFiltersMenu]);
 
   useEffect(() => {
-    if (selectedImagePaths.length === pageSelectedPaths.length) {
+    if (
+      selectedImagePaths.length === pageSelectedPaths.length &&
+      selectedImagePaths.every((path) => pageSelectedPaths.includes(path))
+    ) {
       return;
     }
     onSelectionChange(pageSelectedPaths);
-  }, [onSelectionChange, pageSelectedPaths, selectedImagePaths.length]);
+  }, [onSelectionChange, pageSelectedPaths, selectedImagePaths]);
 
   useEffect(() => {
-    if (selectionMode) {
+    if (selectionEnabled) {
       return;
     }
     setSelectionBox(null);
     isDraggingSelectionRef.current = false;
-  }, [selectionMode]);
+  }, [selectionEnabled]);
 
   useEffect(() => {
     const scrollContainer = gridRef.current?.closest(".ue-main-shell") as HTMLElement | null;
@@ -399,15 +458,14 @@ export const GalleryWorkspace = ({
     handleScroll();
     scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
     return () => scrollContainer.removeEventListener("scroll", handleScroll);
-  }, [images.length]);
+  }, [images.length, isTrashView, trashItems.length]);
 
   const effectiveColumns = useMemo(() => {
-    if (viewportWidth <= 640) return 1;
-    if (viewportWidth <= 960) return Math.min(gridColumns, 2);
-    if (viewportWidth <= 1280) return Math.min(gridColumns, 3);
-    if (viewportWidth <= 1600) return Math.min(gridColumns, 4);
-    return gridColumns;
-  }, [gridColumns, viewportWidth]);
+    const availableWidth = gridWidth > 0 ? gridWidth : viewportWidth;
+    const minCardWidth = availableWidth <= 560 ? 220 : availableWidth <= 960 ? 190 : 180;
+    const maxColumnsForWidth = Math.max(1, Math.floor((availableWidth + MASONRY_GAP) / (minCardWidth + MASONRY_GAP)));
+    return Math.max(1, Math.min(gridColumns, maxColumnsForWidth));
+  }, [gridColumns, gridWidth, viewportWidth]);
 
   useEffect(() => {
     const gridElement = gridRef.current;
@@ -428,7 +486,7 @@ export const GalleryWorkspace = ({
     observer.observe(gridElement);
     updateMetrics();
     return () => observer.disconnect();
-  }, [images.length, effectiveColumns]);
+  }, [effectiveColumns, images.length, isTrashView, trashItems.length]);
 
   const masonryLayout = useMemo(() => {
     const columnCount = Math.max(1, effectiveColumns);
@@ -561,7 +619,7 @@ export const GalleryWorkspace = ({
   };
 
   const setSelection = (relativePaths: string[]) => {
-    const visiblePathSet = new Set(visibleImagePaths);
+    const visiblePathSet = new Set(visibleSelectionPaths);
     const dedupedPaths = relativePaths.filter(
       (path, index, paths) => visiblePathSet.has(path) && paths.indexOf(path) === index,
     );
@@ -585,8 +643,8 @@ export const GalleryWorkspace = ({
 
   const selectRangeTo = (relativePath: string) => {
     const anchorPath = lastSelectedPathRef.current || pageSelectedPaths[pageSelectedPaths.length - 1] || relativePath;
-    const anchorIndex = visibleImagePaths.indexOf(anchorPath);
-    const targetIndex = visibleImagePaths.indexOf(relativePath);
+    const anchorIndex = visibleSelectionPaths.indexOf(anchorPath);
+    const targetIndex = visibleSelectionPaths.indexOf(relativePath);
     if (anchorIndex < 0 || targetIndex < 0) {
       toggleSelection(relativePath);
       return;
@@ -594,7 +652,7 @@ export const GalleryWorkspace = ({
 
     const startIndex = Math.min(anchorIndex, targetIndex);
     const endIndex = Math.max(anchorIndex, targetIndex);
-    const rangePaths = visibleImagePaths.slice(startIndex, endIndex + 1);
+    const rangePaths = visibleSelectionPaths.slice(startIndex, endIndex + 1);
     setSelection([...pageSelectedPaths, ...rangePaths]);
     lastSelectedPathRef.current = anchorPath;
   };
@@ -617,14 +675,34 @@ export const GalleryWorkspace = ({
   };
 
   const selectAllVisible = () => {
-    setSelection(visibleImagePaths);
-    lastSelectedPathRef.current = visibleImagePaths[0] || "";
+    setSelection(visibleSelectionPaths);
+    lastSelectedPathRef.current = visibleSelectionPaths[0] || "";
   };
 
   const clearSelection = () => {
     onSelectionChange([]);
     lastSelectedPathRef.current = "";
   };
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, select, [contenteditable='true']")) {
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
+        event.preventDefault();
+        selectAllVisible();
+      }
+      if (event.key === "Escape" && selectedImagePaths.length) {
+        event.preventDefault();
+        clearSelection();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [selectedImagePaths.length, visibleSelectionPaths, pageSelectedPaths]);
 
   const handleBatchDelete = async () => {
     if (!hasSelection) {
@@ -677,36 +755,45 @@ export const GalleryWorkspace = ({
     pushToast(t("boardDeleteSuccess"), "success");
   };
 
-  const handleRemoveFromSelectedBoard = async () => {
-    if (!selectedBoard || !hasSelection) {
+  const handleRestoreSelectedTrash = async () => {
+    if (!selectedTrashItems.length) {
       return;
     }
-    await onUpdateBoardPins(selectedBoard.id, pageSelectedPaths, false);
+
+    const approved = await confirm({
+      title: t("trashRestoreSelected"),
+      message: t("trashRestoreSelectedConfirm", { count: selectedTrashItems.length }),
+      tone: "warning",
+      confirmLabel: t("trashRestore"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
+    await onRestoreTrashItems(selectedTrashItems.map((item) => item.id));
+    pushToast(t("trashRestoreSelectedSuccess", { count: selectedTrashItems.length }), "success");
     clearSelection();
   };
 
-  const handleBatchMove = async () => {
-    if (!hasSelection || !bulkTargetSubfolder) {
+  const handlePurgeSelectedTrash = async () => {
+    if (!selectedTrashItems.length) {
       return;
     }
 
-    const target = targetFolderOptions.find((option) => option.value === bulkTargetSubfolder);
-    await onMoveImages(pageSelectedPaths, bulkTargetSubfolder, target?.source_id);
-    clearSelection();
-  };
-
-  const handleBatchRename = async () => {
-    if (!hasSelection || !bulkRenameTemplate.trim()) {
+    const approved = await confirm({
+      title: t("trashDeleteSelectedForever"),
+      message: t("trashDeleteSelectedConfirm", { count: selectedTrashItems.length }),
+      tone: "danger",
+      confirmLabel: t("trashDeleteForever"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
       return;
     }
 
-    await onBatchRenameImages(
-      pageSelectedPaths,
-      bulkRenameTemplate.trim(),
-      bulkRenameStart,
-      bulkRenamePadding,
-      page,
-    );
+    await onPurgeTrashItems(selectedTrashItems.map((item) => item.id));
+    pushToast(t("trashDeleteSelectedSuccess", { count: selectedTrashItems.length }), "success");
     clearSelection();
   };
 
@@ -731,22 +818,26 @@ export const GalleryWorkspace = ({
     const top = Math.min(box.startY, box.currentY);
     const bottom = Math.max(box.startY, box.currentY);
 
-    const intersectedPaths = images
-      .filter((image) => {
-        const element = cardRefs.current[image.relative_path];
+    const selectionItems = isTrashView
+      ? trashItems.map((item) => ({ key: item.id }))
+      : images.map((image) => ({ key: image.relative_path }));
+
+    const intersectedPaths = selectionItems
+      .filter((item) => {
+        const element = cardRefs.current[item.key];
         if (!element) {
           return false;
         }
         const rect = element.getBoundingClientRect();
         return !(rect.right < left || rect.left > right || rect.bottom < top || rect.top > bottom);
       })
-      .map((image) => image.relative_path);
+      .map((item) => item.key);
 
     setSelection(intersectedPaths);
   };
 
   const handleSelectionPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!selectionMode || event.button !== 0) {
+    if (!selectionEnabled || event.button !== 0) {
       return;
     }
 
@@ -765,7 +856,7 @@ export const GalleryWorkspace = ({
   };
 
   const handleSelectionPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!selectionMode || !selectionBox) {
+    if (!selectionEnabled || !selectionBox) {
       return;
     }
 
@@ -856,7 +947,11 @@ export const GalleryWorkspace = ({
     event.stopPropagation();
 
     const menuWidth = 220;
-    const menuHeight = 260;
+    const menuHeight = 360;
+    if (!pageSelectedPaths.includes(image.relative_path)) {
+      setSelection([image.relative_path]);
+      lastSelectedPathRef.current = image.relative_path;
+    }
 
     setContextMenu({
       image,
@@ -865,9 +960,52 @@ export const GalleryWorkspace = ({
     });
   };
 
+  const handleTrashContextMenu = (event: React.MouseEvent, item: TrashItem) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    const menuWidth = 220;
+    const menuHeight = 220;
+    if (!pageSelectedPaths.includes(item.id)) {
+      setSelection([item.id]);
+      lastSelectedPathRef.current = item.id;
+    }
+
+    setTrashContextMenu({
+      item,
+      x: Math.min(event.clientX, window.innerWidth - menuWidth - 12),
+      y: Math.min(event.clientY, window.innerHeight - menuHeight - 12),
+    });
+  };
+
   const handleScrollToTop = () => {
     scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
   };
+
+  const viewModeToggle = (
+    <div className="ue-segmented-control ue-segmented-control--compact ue-view-toggle" aria-label={t("viewMode")}>
+      <button
+        className={galleryViewMode === "grid" ? "active" : ""}
+        onClick={() => setGalleryViewMode("grid")}
+        type="button"
+        aria-label={t("viewGrid")}
+        title={t("viewGrid")}
+      >
+        <LayoutGrid size={13} />
+        <span>{t("viewGrid")}</span>
+      </button>
+      <button
+        className={galleryViewMode === "list" ? "active" : ""}
+        onClick={() => setGalleryViewMode("list")}
+        type="button"
+        aria-label={t("viewList")}
+        title={t("viewList")}
+      >
+        <List size={13} />
+        <span>{t("viewList")}</span>
+      </button>
+    </div>
+  );
 
   return (
     <div
@@ -884,8 +1022,8 @@ export const GalleryWorkspace = ({
               {isTrashView ? t("trashTitle") : selectedBoard ? selectedBoard.name : selectedSubfolder || t("galleryOutputFolder")}
             </p>
             <div className="ue-filter-summary">
-              <strong>{total}</strong>
-              <span>{t("galleryFilterResult", { count: total })}</span>
+              <strong>{isTrashView ? trashItems.length : total}</strong>
+              <span>{t(isTrashView ? "trashItemCount" : "galleryFilterResult", { count: isTrashView ? trashItems.length : total })}</span>
               {favoritesOnly ? <em>{t("galleryPinnedOnly")}</em> : null}
               {selectedBoard ? <em>{t("sidebarBoards")}</em> : null}
               {isRefreshing ? <em>{t("commonLoading")}</em> : null}
@@ -894,69 +1032,9 @@ export const GalleryWorkspace = ({
 
           {!isTrashView ? (
           <div className="ue-filter-controls ue-filter-controls--gallery">
-            <div className="ue-pill-group">
-              <button
-                className={`ue-pill ${selectedCategory === "" ? "active" : ""}`}
-                onClick={() => onCategoryChange("")}
-              >
-                {t("galleryAllCategories")}
-              </button>
-              {topCategories.map((category) => (
-                <button
-                  key={category}
-                  className={`ue-pill ${selectedCategory === category ? "active" : ""}`}
-                  onClick={() => onCategoryChange(category)}
-                >
-                  {category}
-                </button>
-              ))}
-              {(context?.categories?.length ?? 0) > 8 ? (
-                <button className="ue-pill ue-pill--with-icon" onClick={() => setShowCategoryPicker(true)}>
-                  <span>{t("galleryMoreCategories")}</span>
-                  <ChevronDown size={13} />
-                </button>
-              ) : null}
-            </div>
-
-            <div className="ue-segmented-control">
-              <button
-                className={sortBy === "created_at" ? "active" : ""}
-                onClick={() => onSortByChange("created_at")}
-              >
-                {t("gallerySortNewest")}
-              </button>
-              <button
-                className={sortBy === "filename" ? "active" : ""}
-                onClick={() => onSortByChange("filename")}
-              >
-                {t("gallerySortName")}
-              </button>
-              <button
-                className={sortBy === "size" ? "active" : ""}
-                onClick={() => onSortByChange("size")}
-              >
-                {t("gallerySortSize")}
-              </button>
-            </div>
-
-            <div className="ue-segmented-control ue-segmented-control--compact">
-              <button
-                className={sortOrder === "desc" ? "active" : ""}
-                onClick={() => onSortOrderChange("desc")}
-              >
-                {t("gallerySortDesc")}
-              </button>
-              <button
-                className={sortOrder === "asc" ? "active" : ""}
-                onClick={() => onSortOrderChange("asc")}
-              >
-                {t("gallerySortAsc")}
-              </button>
-            </div>
-
             <div className="ue-filter-popover">
               <button
-                className={`ue-filter-trigger ${showFiltersMenu ? "is-open" : ""} ${activeFilterCount ? "active" : ""}`}
+                className={`ue-filter-trigger ${showFiltersMenu ? "is-open" : ""} ${activeFilterControlCount ? "active" : ""}`}
                 onClick={(event) => {
                   event.stopPropagation();
                   setShowFiltersMenu((current) => !current);
@@ -967,7 +1045,7 @@ export const GalleryWorkspace = ({
               >
                 <SlidersHorizontal size={14} />
                 <span>{t("galleryFilters")}</span>
-                {activeFilterCount ? <strong>{activeFilterCount}</strong> : null}
+                {activeFilterControlCount ? <strong>{activeFilterControlCount}</strong> : null}
               </button>
               {showFiltersMenu ? (
                 <div className="ue-filter-menu" onClick={(event) => event.stopPropagation()}>
@@ -976,13 +1054,17 @@ export const GalleryWorkspace = ({
                       <span>{t("galleryFilters")}</span>
                       <strong>{t("galleryFilterResult", { count: total })}</strong>
                     </div>
-                    {activeFilterCount ? (
+                    {activeFilterControlCount ? (
                       <button
                         className="ue-icon-action"
                         onClick={() => {
+                          onCategoryChange("");
                           onDateFromChange("");
                           onDateToChange("");
                           onFavoritesOnlyChange(false);
+                          onColorFamilyChange("");
+                          onSortByChange("created_at");
+                          onSortOrderChange("desc");
                           onPageChange(1);
                         }}
                         aria-label={t("galleryDateClear")}
@@ -992,6 +1074,129 @@ export const GalleryWorkspace = ({
                       </button>
                     ) : null}
                   </div>
+
+                  <section className="ue-filter-section">
+                    <div className="ue-filter-section-head">
+                      <span>{t("galleryCategory")}</span>
+                      {(context?.categories?.length ?? 0) > 8 ? (
+                        <button className="ue-filter-link" onClick={() => setShowCategoryPicker(true)} type="button">
+                          {t("galleryMoreCategories")}
+                        </button>
+                      ) : null}
+                    </div>
+                    <div className="ue-filter-chip-grid">
+                      <button
+                        className={`ue-filter-chip ${selectedCategory === "" ? "active" : ""}`}
+                        onClick={() => {
+                          onCategoryChange("");
+                          onPageChange(1);
+                        }}
+                        type="button"
+                      >
+                        {t("galleryAllCategories")}
+                      </button>
+                      {topCategories.map((category) => (
+                        <button
+                          key={category}
+                          className={`ue-filter-chip ${selectedCategory === category ? "active" : ""}`}
+                          onClick={() => {
+                            onCategoryChange(category);
+                            onPageChange(1);
+                          }}
+                          type="button"
+                        >
+                          {category}
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="ue-filter-section">
+                    <div className="ue-filter-section-head">
+                      <span>{t("gallerySort")}</span>
+                    </div>
+                    <div className="ue-sort-card-grid">
+                      {SORT_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          className={`ue-sort-card ${sortBy === option.value ? "active" : ""}`}
+                          onClick={() => {
+                            onSortByChange(option.value);
+                            onPageChange(1);
+                          }}
+                          type="button"
+                        >
+                          <span>
+                            <strong>{t(option.labelKey)}</strong>
+                            <em>{t(option.hintKey)}</em>
+                          </span>
+                          {sortBy === option.value ? <Check size={14} /> : null}
+                        </button>
+                      ))}
+                    </div>
+                    <div className="ue-sort-direction">
+                      {SORT_ORDER_OPTIONS.map((option) => (
+                        <button
+                          key={option.value}
+                          className={sortOrder === option.value ? "active" : ""}
+                          onClick={() => {
+                            onSortOrderChange(option.value);
+                            onPageChange(1);
+                          }}
+                          type="button"
+                        >
+                          <strong>{t(option.labelKey)}</strong>
+                          <span>{t(option.hintKey)}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="ue-filter-section">
+                    <div className="ue-filter-section-head">
+                      <span>{t("galleryColorFamily")}</span>
+                    </div>
+                    <div className="ue-color-palette-grid">
+                      <button
+                        className={`ue-color-palette ${selectedColorFamily === "" ? "active" : ""}`}
+                        onClick={() => {
+                          onColorFamilyChange("");
+                          onPageChange(1);
+                        }}
+                        type="button"
+                      >
+                        <span className="ue-color-palette-swatch ue-color-swatch--all" />
+                        <em>{t("galleryAllColors")}</em>
+                      </button>
+                      {COLOR_FILTERS.map((option) => (
+                        <button
+                          key={option.value}
+                          className={`ue-color-palette ${selectedColorFamily === option.value ? "active" : ""}`}
+                          onClick={() => {
+                            onColorFamilyChange(option.value);
+                            onPageChange(1);
+                          }}
+                          type="button"
+                        >
+                          <span className="ue-color-palette-swatch" style={{ background: option.color }} />
+                          <em>{t(`colorFamily_${option.value}`)}</em>
+                        </button>
+                      ))}
+                    </div>
+                    {colorIndexStatus && !colorIndexStatus.complete ? (
+                      <p className="ue-color-index-note">
+                        {t("galleryColorIndexing")} {colorIndexStatus.indexed}/{colorIndexStatus.total}
+                      </p>
+                    ) : null}
+                    <p className="ue-color-index-note">
+                      {t("galleryColorThreshold")}
+                    </p>
+                  </section>
+
+                  <section className="ue-filter-section">
+                    <div className="ue-filter-section-head">
+                      <span>{t("galleryDateRange")}</span>
+                    </div>
                   <div className="ue-filter-menu-grid">
                     <label className="ue-select-field ue-select-field--input ue-date-filter-field">
                       <span>{t("galleryDateFrom")}</span>
@@ -1019,6 +1224,8 @@ export const GalleryWorkspace = ({
                       />
                     </label>
                   </div>
+                  </section>
+
                   <button
                     className={`ue-filter-option ${favoritesOnly ? "active" : ""}`}
                     onClick={() => {
@@ -1035,6 +1242,9 @@ export const GalleryWorkspace = ({
               ) : null}
             </div>
 
+            {viewModeToggle}
+
+            {galleryViewMode === "grid" ? (
             <div className="ue-select-field ue-select-field--menu">
               <span>{t("galleryColumns")}</span>
               <button
@@ -1066,6 +1276,7 @@ export const GalleryWorkspace = ({
                 </div>
               ) : null}
             </div>
+            ) : null}
 
             {selectedBoard ? (
               <>
@@ -1114,200 +1325,15 @@ export const GalleryWorkspace = ({
               </label>
             ) : null}
           </div>
-          ) : null}
+          ) : (
+            <div className="ue-filter-controls ue-filter-controls--gallery">
+              {viewModeToggle}
+            </div>
+          )}
         </div>
 
         {importMessage ? <div className="ue-inline-success">{importMessage}</div> : null}
         {error ? <div className="ue-inline-error">{error}</div> : null}
-
-        {selectionMode ? (
-          <div className="ue-bulkbar ue-bulkbar--top">
-            <div className="ue-bulkbar-status">
-              <div className="ue-bulkbar-count">
-                <CheckSquare size={16} />
-                <strong>{t("bulkSelected", { count: selectedCount })}</strong>
-              </div>
-              <span>{selectedSubfolder || t("galleryOutputFolder")}</span>
-              <p>{t("bulkSelectionHint")}</p>
-            </div>
-
-            <div className="ue-bulkbar-main">
-              <div className="ue-bulkbar-quick-actions" aria-label={t("bulkActions")}>
-                <button
-                  className="ue-icon-action"
-                  onClick={selectAllVisible}
-                  aria-label={t("bulkSelectVisible")}
-                  title={t("bulkSelectVisible")}
-                >
-                  <CheckSquare size={14} />
-                </button>
-                <button
-                  className="ue-icon-action"
-                  onClick={clearSelection}
-                  aria-label={t("bulkClear")}
-                  title={t("bulkClear")}
-                >
-                  <Square size={14} />
-                </button>
-                <button
-                  className="ue-icon-action"
-                  onClick={() => void onBatchUpdateImages(pageSelectedPaths, { pinned: true })}
-                  aria-label={t("bulkPin")}
-                  title={t("bulkPin")}
-                  disabled={!hasSelection}
-                >
-                  <Pin size={14} />
-                </button>
-                <button
-                  className="ue-icon-action"
-                  onClick={() => void onBatchUpdateImages(pageSelectedPaths, { pinned: false })}
-                  aria-label={t("bulkUnpin")}
-                  title={t("bulkUnpin")}
-                  disabled={!hasSelection}
-                >
-                  <Pin size={14} />
-                </button>
-                <button
-                  className="ue-icon-action"
-                  onClick={() => setBoardPickerPaths(pageSelectedPaths)}
-                  aria-label={t("bulkAddToBoard")}
-                  title={t("bulkAddToBoard")}
-                  disabled={!hasSelection}
-                >
-                  <FolderPlus size={14} />
-                </button>
-                {selectedBoard ? (
-                  <button
-                    className="ue-icon-action"
-                    onClick={() => void handleRemoveFromSelectedBoard()}
-                    aria-label={t("bulkRemoveFromBoard")}
-                    title={t("bulkRemoveFromBoard")}
-                    disabled={!hasSelection}
-                  >
-                    <FolderMinus size={14} />
-                  </button>
-                ) : null}
-                <button
-                  className="ue-icon-action ue-icon-action--danger"
-                  onClick={() => void handleBatchDelete()}
-                  aria-label={t("bulkDelete")}
-                  title={t("bulkDelete")}
-                  disabled={!hasSelection}
-                >
-                  <Trash2 size={14} />
-                </button>
-              </div>
-
-              <div className="ue-bulkbar-tools">
-                <div className="ue-bulk-tool">
-                  <span className="ue-bulk-tool-title">
-                    <Tag size={13} />
-                    {t("bulkSetCategory")}
-                  </span>
-                  <div className="ue-bulk-tool-field">
-                    <label className="ue-select-field ue-select-field--input">
-                      <input
-                        value={bulkCategory}
-                        onChange={(event) => setBulkCategory(event.target.value)}
-                        placeholder={t("galleryCategoryPlaceholder")}
-                      />
-                    </label>
-                    <button
-                      className="ue-icon-action ue-icon-action--filled"
-                      onClick={() => void onBatchUpdateImages(pageSelectedPaths, { category: bulkCategory })}
-                      aria-label={t("bulkSetCategory")}
-                      title={t("bulkSetCategory")}
-                      disabled={!hasSelection || !bulkCategory.trim()}
-                    >
-                      <Check size={14} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="ue-bulk-tool">
-                  <span className="ue-bulk-tool-title">
-                    <ImageIcon size={13} />
-                    {t("bulkMoveTo")}
-                  </span>
-                  <div className="ue-bulk-tool-field">
-                    <label className="ue-select-field ue-select-field--input">
-                      <select
-                        value={bulkTargetSubfolder}
-                        onChange={(event) => setBulkTargetSubfolder(event.target.value)}
-                      >
-                        {targetFolderOptions
-                          .filter((option) => option.value !== selectedSubfolder)
-                          .map((option) => (
-                            <option key={option.value} value={option.value}>
-                              {option.label}
-                            </option>
-                          ))}
-                      </select>
-                    </label>
-                    <button
-                      className="ue-icon-action ue-icon-action--filled"
-                      onClick={() => void handleBatchMove()}
-                      aria-label={t("bulkMoveTo")}
-                      title={t("bulkMoveTo")}
-                      disabled={!hasSelection || !bulkTargetSubfolder}
-                    >
-                      <Check size={14} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className="ue-bulk-tool ue-bulk-tool--rename">
-                  <span className="ue-bulk-tool-title">
-                    <PencilLine size={13} />
-                    {t("bulkRenameApply")}
-                  </span>
-                  <div className="ue-bulk-tool-field">
-                    <label className="ue-select-field ue-select-field--input ue-bulk-rename-field">
-                      <input
-                        value={bulkRenameTemplate}
-                        onChange={(event) => setBulkRenameTemplate(event.target.value)}
-                        placeholder={t("bulkRenameTemplatePlaceholder")}
-                      />
-                    </label>
-                    <label className="ue-select-field ue-bulk-number-field">
-                      <span>{t("bulkRenameStart")}</span>
-                      <input
-                        type="number"
-                        min={0}
-                        value={bulkRenameStart}
-                        onChange={(event) => setBulkRenameStart(Number(event.target.value) || 0)}
-                      />
-                    </label>
-                    <label className="ue-select-field ue-bulk-number-field">
-                      <span>{t("bulkRenamePadding")}</span>
-                      <input
-                        type="number"
-                        min={1}
-                        max={8}
-                        value={bulkRenamePadding}
-                        onChange={(event) => setBulkRenamePadding(Number(event.target.value) || 1)}
-                      />
-                    </label>
-                    <button
-                      className="ue-icon-action ue-icon-action--accent"
-                      onClick={() => void handleBatchRename()}
-                      aria-label={t("bulkRenameApply")}
-                      title={t("bulkRenameRuleHint")}
-                      disabled={!hasSelection || !bulkRenameTemplate.trim()}
-                    >
-                      <PencilLine size={13} />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="ue-bulkbar-note">
-                <strong>{t("bulkRenameRuleTitle")}</strong>
-                <span>{t("bulkRenameRuleHint")}</span>
-              </div>
-            </div>
-          </div>
-        ) : null}
 
         {isLoading && images.length === 0 ? (
           <div className="ue-gallery-state">
@@ -1324,42 +1350,142 @@ export const GalleryWorkspace = ({
               </div>
             </div>
           ) : (
-            <div className="ue-trash-list">
-              {trashItems.map((item) => (
-                <article key={item.id} className="ue-trash-card">
-                  <div className="ue-trash-card-main">
-                    {item.kind === "image" && item.thumb_url ? (
-                      <img src={item.thumb_url} alt={item.name} />
-                    ) : (
-                      <div className="ue-trash-card-icon">
-                        {item.kind === "folder" ? <FolderIcon size={22} /> : <Trash2 size={22} />}
+            <div className="ue-trash-workspace">
+              <div className="ue-trash-toolbar">
+                <div className="ue-trash-toolbar-copy">
+                  <strong>{t("bulkSelected", { count: selectedCount })}</strong>
+                  <span>{t("trashSelectionHint")}</span>
+                </div>
+                <div className="ue-trash-toolbar-actions">
+                  <button className="ue-secondary-btn" onClick={selectAllVisible}>
+                    <CheckSquare size={14} />
+                    <span>{t("trashSelectAll")}</span>
+                  </button>
+                  <button className="ue-secondary-btn" onClick={clearSelection} disabled={!hasSelection}>
+                    <Square size={14} />
+                    <span>{t("trashClearSelection")}</span>
+                  </button>
+                  <button
+                    className="ue-secondary-btn ue-secondary-btn--accent"
+                    onClick={() => void handleRestoreSelectedTrash()}
+                    disabled={!selectedTrashItems.length}
+                  >
+                    <RotateCcw size={14} />
+                    <span>{t("trashRestoreSelected")}</span>
+                  </button>
+                  <button
+                    className="ue-secondary-btn ue-secondary-btn--danger"
+                    onClick={() => void handlePurgeSelectedTrash()}
+                    disabled={!selectedTrashItems.length}
+                  >
+                    <Trash2 size={14} />
+                    <span>{t("trashDeleteSelectedForever")}</span>
+                  </button>
+                </div>
+              </div>
+
+              <div
+                ref={gridRef}
+                className={`ue-trash-list ue-trash-list--selectable ${galleryViewMode === "grid" ? "ue-trash-list--grid" : ""}`}
+                onPointerDown={handleSelectionPointerDown}
+                onPointerMove={handleSelectionPointerMove}
+                onPointerUp={handleSelectionPointerEnd}
+                onPointerCancel={handleSelectionPointerEnd}
+              >
+                {trashItems.map((item) => {
+                  const selected = pageSelectedPaths.includes(item.id);
+                  const kindLabel =
+                    item.kind === "folder"
+                      ? t("trashKindFolder")
+                      : item.kind === "library"
+                        ? t("trashKindLibrary")
+                        : t("trashKindImage");
+
+                  return (
+                    <article
+                      key={item.id}
+                      ref={(element) => {
+                        cardRefs.current[item.id] = element;
+                      }}
+                      className={`ue-trash-card ${selected ? "is-selected" : ""}`}
+                      onContextMenu={(event) => handleTrashContextMenu(event, item)}
+                      onClick={(event) => {
+                        if (isDraggingSelectionRef.current) {
+                          return;
+                        }
+                        handleImageSelectionClick(item.id, event);
+                      }}
+                    >
+                      <button
+                        className={`ue-trash-card-check ${selected ? "active" : ""}`}
+                        onClick={(event) => {
+                          event.stopPropagation();
+                          handleImageSelectionClick(item.id, event);
+                        }}
+                        aria-label={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
+                        title={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
+                      >
+                        {selected ? <CheckSquare size={14} /> : <Square size={14} />}
+                      </button>
+                      <div className="ue-trash-card-main">
+                        {item.kind === "image" && item.thumb_url ? (
+                          <img src={item.thumb_url} alt={item.name} />
+                        ) : (
+                          <div className="ue-trash-card-icon">
+                            {item.kind === "folder" ? <FolderIcon size={22} /> : <Trash2 size={22} />}
+                          </div>
+                        )}
+                        <div className="ue-trash-card-copy">
+                          <div className="ue-trash-card-title-row">
+                            <h4>{item.name}</h4>
+                            <span>{kindLabel}</span>
+                          </div>
+                          <p title={item.original_path}>{item.original_path}</p>
+                          <div className="ue-trash-card-meta">
+                            <span>{formatCompactDate(item.deleted_at)}</span>
+                            {item.image_count ? <span>{t("trashImageCount", { count: item.image_count })}</span> : null}
+                          </div>
+                        </div>
                       </div>
-                    )}
-                    <div>
-                      <h4>{item.name}</h4>
-                      <p>{item.original_path}</p>
-                    </div>
-                  </div>
-                  <div className="ue-trash-card-actions">
-                    <button
-                      className="ue-icon-action"
-                      onClick={() => void onRestoreTrashItem(item.id)}
-                      aria-label={t("trashRestore")}
-                      title={t("trashRestore")}
-                    >
-                      <RotateCcw size={14} />
-                    </button>
-                    <button
-                      className="ue-icon-action ue-icon-action--danger"
-                      onClick={() => void onPurgeTrashItem(item.id)}
-                      aria-label={t("trashDeleteForever")}
-                      title={t("trashDeleteForever")}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
-                </article>
-              ))}
+                      <div className="ue-trash-card-actions">
+                        <button
+                          className="ue-icon-action"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onRestoreTrashItem(item.id);
+                          }}
+                          aria-label={t("trashRestore")}
+                          title={t("trashRestore")}
+                        >
+                          <RotateCcw size={14} />
+                        </button>
+                        <button
+                          className="ue-icon-action ue-icon-action--danger"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onPurgeTrashItem(item.id);
+                          }}
+                          aria-label={t("trashDeleteForever")}
+                          title={t("trashDeleteForever")}
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })}
+                {selectionEnabled && selectionBox ? (
+                  <div
+                    className="ue-selection-box"
+                    style={{
+                      left: Math.min(selectionBox.startX, selectionBox.currentX),
+                      top: Math.min(selectionBox.startY, selectionBox.currentY),
+                      width: Math.abs(selectionBox.currentX - selectionBox.startX),
+                      height: Math.abs(selectionBox.currentY - selectionBox.startY),
+                    }}
+                  />
+                ) : null}
+              </div>
             </div>
           )
         ) : images.length === 0 ? (
@@ -1369,6 +1495,140 @@ export const GalleryWorkspace = ({
               <h3>{t("galleryEmptyTitle")}</h3>
               <p>{t("galleryEmptyText")}</p>
             </div>
+          </div>
+        ) : galleryViewMode === "list" ? (
+          <div
+            ref={gridRef}
+            className="ue-gallery-list ue-gallery-list--selectable"
+            onPointerDown={handleSelectionPointerDown}
+            onPointerMove={handleSelectionPointerMove}
+            onPointerUp={handleSelectionPointerEnd}
+            onPointerCancel={handleSelectionPointerEnd}
+          >
+            {images.map((image) => {
+              const selected = pageSelectedPaths.includes(image.relative_path);
+
+              return (
+                <article
+                  key={image.relative_path}
+                  ref={(element) => {
+                    cardRefs.current[image.relative_path] = element;
+                  }}
+                  className={`ue-gallery-list-row ${selected ? "is-selected" : ""}`}
+                  onContextMenu={(event) => handleOpenContextMenu(event, image)}
+                  onClick={(event) => {
+                    if (selectionMode) {
+                      handleImageSelectionClick(image.relative_path, event);
+                      return;
+                    }
+                    if (isDraggingSelectionRef.current) {
+                      return;
+                    }
+                    onOpenDetail(image);
+                  }}
+                >
+                  <button
+                    className={`ue-trash-card-check ${selected ? "active" : ""}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      handleImageSelectionClick(image.relative_path, event);
+                    }}
+                    aria-label={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
+                    title={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
+                  >
+                    {selected ? <CheckSquare size={14} /> : <Square size={14} />}
+                  </button>
+                  <button
+                    className="ue-gallery-list-thumb"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      if (selectionMode) {
+                        handleImageSelectionClick(image.relative_path, event);
+                        return;
+                      }
+                      onOpenDetail(image);
+                    }}
+                    aria-label={t("galleryInspect")}
+                    title={t("galleryInspect")}
+                  >
+                    <img src={getGalleryImageUrl(image)} alt={image.title || image.filename} loading="lazy" decoding="async" />
+                  </button>
+                  <div className="ue-gallery-list-main">
+                    <div className="ue-gallery-list-heading">
+                      <h3 title={image.title || image.filename}>{image.title || image.filename}</h3>
+                      {image.category ? <span>{image.category}</span> : null}
+                    </div>
+                    <p title={image.relative_path}>{image.relative_path}</p>
+                    <div className="ue-gallery-list-meta">
+                      <span>{formatCompactDate(image.created_at)}</span>
+                      <span>{formatFileSize(image.size)}</span>
+                      {image.pinned ? <span>{t("galleryPin")}</span> : null}
+                    </div>
+                  </div>
+                  <div className="ue-gallery-list-actions">
+                    <button
+                      className="ue-icon-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onOpenWorkflow(image);
+                      }}
+                      aria-label={t("modalOpenWorkflow")}
+                      title={t("modalOpenWorkflow")}
+                    >
+                      <Send size={14} />
+                    </button>
+                    <button
+                      className="ue-icon-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenDetail(image);
+                      }}
+                      aria-label={t("galleryInspect")}
+                      title={t("galleryInspect")}
+                    >
+                      <Eye size={14} />
+                    </button>
+                    <button
+                      className="ue-icon-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        if (selected && pageSelectedPaths.length > 1) {
+                          setBoardPickerPaths(pageSelectedPaths);
+                        } else {
+                          setBoardPickerPaths([image.relative_path]);
+                        }
+                      }}
+                      aria-label={t("bulkAddToBoard")}
+                      title={t("bulkAddToBoard")}
+                    >
+                      <FolderPlus size={14} />
+                    </button>
+                    <button
+                      className={`ue-icon-action ${image.pinned ? "ue-icon-action--accent" : ""}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onUpdateImageState(image.relative_path, { pinned: !image.pinned });
+                      }}
+                      aria-label={image.pinned ? t("galleryUnpin") : t("galleryPin")}
+                      title={image.pinned ? t("galleryUnpin") : t("galleryPin")}
+                    >
+                      <Pin size={14} fill={image.pinned ? "currentColor" : "none"} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+            {selectionEnabled && selectionBox ? (
+              <div
+                className="ue-selection-box"
+                style={{
+                  left: Math.min(selectionBox.startX, selectionBox.currentX),
+                  top: Math.min(selectionBox.startY, selectionBox.currentY),
+                  width: Math.abs(selectionBox.currentX - selectionBox.startX),
+                  height: Math.abs(selectionBox.currentY - selectionBox.startY),
+                }}
+              />
+            ) : null}
           </div>
         ) : (
           <div
@@ -1512,7 +1772,7 @@ export const GalleryWorkspace = ({
                 </article>
               );
             })}
-            {selectionMode && selectionBox ? (
+            {selectionEnabled && selectionBox ? (
               <div
                 className="ue-selection-box"
                 style={{
@@ -1603,7 +1863,10 @@ export const GalleryWorkspace = ({
         categories={context?.categories ?? []}
         selectedCategory={selectedCategory}
         onClose={() => setShowCategoryPicker(false)}
-        onSelect={onCategoryChange}
+        onSelect={(category) => {
+          onCategoryChange(category);
+          onPageChange(1);
+        }}
       />
 
       <BoardPickerModal
@@ -1636,6 +1899,50 @@ export const GalleryWorkspace = ({
           >
             <ImageIcon size={14} />
             <span>{t("galleryInspect")}</span>
+          </button>
+          <button
+            className="ue-context-menu-item"
+            onClick={() => {
+              handleImageSelectionClick(contextMenu.image.relative_path, { ctrlKey: true, metaKey: false, shiftKey: false });
+              setContextMenu(null);
+            }}
+          >
+            {pageSelectedPaths.includes(contextMenu.image.relative_path) ? <CheckSquare size={14} /> : <Square size={14} />}
+            <span>{pageSelectedPaths.includes(contextMenu.image.relative_path) ? t("galleryDeselectImage") : t("gallerySelectImage")}</span>
+          </button>
+          <button
+            className="ue-context-menu-item"
+            onClick={() => {
+              void onUpdateImageState(contextMenu.image.relative_path, { pinned: !contextMenu.image.pinned });
+              setContextMenu(null);
+            }}
+          >
+            <Pin size={14} fill={contextMenu.image.pinned ? "currentColor" : "none"} />
+            <span>{contextMenu.image.pinned ? t("galleryUnpin") : t("galleryPin")}</span>
+          </button>
+          <button
+            className="ue-context-menu-item"
+            onClick={() => {
+              setBoardPickerPaths(
+                pageSelectedPaths.includes(contextMenu.image.relative_path) && pageSelectedPaths.length > 1
+                  ? pageSelectedPaths
+                  : [contextMenu.image.relative_path],
+              );
+              setContextMenu(null);
+            }}
+          >
+            <FolderPlus size={14} />
+            <span>{pageSelectedPaths.includes(contextMenu.image.relative_path) && pageSelectedPaths.length > 1 ? t("bulkAddToBoard") : t("bulkAddToBoard")}</span>
+          </button>
+          <button
+            className="ue-context-menu-item"
+            onClick={() => {
+              void onOpenWorkflow(contextMenu.image);
+              setContextMenu(null);
+            }}
+          >
+            <Send size={14} />
+            <span>{t("modalOpenWorkflow")}</span>
           </button>
           <button
             className="ue-context-menu-item"
@@ -1680,12 +1987,63 @@ export const GalleryWorkspace = ({
           <button
             className="ue-context-menu-item ue-context-menu-item--danger"
             onClick={() => {
-              void handleContextDelete(contextMenu.image);
+              if (pageSelectedPaths.includes(contextMenu.image.relative_path) && pageSelectedPaths.length > 1) {
+                void handleBatchDelete();
+              } else {
+                void handleContextDelete(contextMenu.image);
+              }
               setContextMenu(null);
             }}
           >
             <Trash2 size={14} />
-            <span>{t("commonDelete")}</span>
+            <span>{pageSelectedPaths.includes(contextMenu.image.relative_path) && pageSelectedPaths.length > 1 ? t("bulkDelete") : t("commonDelete")}</span>
+          </button>
+        </div>
+      ) : null}
+
+      {trashContextMenu ? (
+        <div
+          className="ue-context-menu"
+          style={{ top: trashContextMenu.y, left: trashContextMenu.x }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            className="ue-context-menu-item"
+            onClick={() => {
+              handleImageSelectionClick(trashContextMenu.item.id, { ctrlKey: true, metaKey: false, shiftKey: false });
+              setTrashContextMenu(null);
+            }}
+          >
+            {pageSelectedPaths.includes(trashContextMenu.item.id) ? <CheckSquare size={14} /> : <Square size={14} />}
+            <span>{pageSelectedPaths.includes(trashContextMenu.item.id) ? t("galleryDeselectImage") : t("gallerySelectImage")}</span>
+          </button>
+          <button
+            className="ue-context-menu-item"
+            onClick={() => {
+              if (pageSelectedPaths.includes(trashContextMenu.item.id) && pageSelectedPaths.length > 1) {
+                void handleRestoreSelectedTrash();
+              } else {
+                void onRestoreTrashItem(trashContextMenu.item.id);
+              }
+              setTrashContextMenu(null);
+            }}
+          >
+            <RotateCcw size={14} />
+            <span>{pageSelectedPaths.includes(trashContextMenu.item.id) && pageSelectedPaths.length > 1 ? t("trashRestoreSelected") : t("trashRestore")}</span>
+          </button>
+          <button
+            className="ue-context-menu-item ue-context-menu-item--danger"
+            onClick={() => {
+              if (pageSelectedPaths.includes(trashContextMenu.item.id) && pageSelectedPaths.length > 1) {
+                void handlePurgeSelectedTrash();
+              } else {
+                void onPurgeTrashItem(trashContextMenu.item.id);
+              }
+              setTrashContextMenu(null);
+            }}
+          >
+            <Trash2 size={14} />
+            <span>{pageSelectedPaths.includes(trashContextMenu.item.id) && pageSelectedPaths.length > 1 ? t("trashDeleteSelectedForever") : t("trashDeleteForever")}</span>
           </button>
         </div>
       ) : null}
