@@ -1,5 +1,13 @@
 export type WorkspaceTab = "gallery" | "library" | "workbench" | "settings";
 
+export interface UiPreferences {
+  defaultSelectionMode: boolean;
+  confirmWorkflowSend: boolean;
+  collapseSidebarOnLaunch: boolean;
+  enableImagePrefetch: boolean;
+  defaultFolderTreeView: boolean;
+}
+
 export interface GallerySource {
   id: string;
   name: string;

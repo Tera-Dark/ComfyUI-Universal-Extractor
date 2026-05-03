@@ -531,6 +531,76 @@
   animation: ue-scale-in var(--ue-duration-fast) var(--ue-ease) both;
 }
 
+.ue-context-menu--gallery {
+  width: 292px;
+  max-height: calc(100vh - 24px);
+  gap: 8px;
+  padding: 10px;
+  border-radius: 14px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.ue-context-menu-head {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 2px 4px 6px;
+  border-bottom: 1px solid var(--ue-line-soft);
+}
+
+.ue-context-menu-head strong,
+.ue-context-menu-head span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ue-context-menu-head strong {
+  color: var(--ue-ink);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.ue-context-menu-head span {
+  color: var(--ue-ink-muted);
+  font-size: 11px;
+}
+
+.ue-context-menu-section,
+.ue-context-menu-grid {
+  display: grid;
+  gap: 6px;
+}
+
+.ue-context-menu-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.ue-context-menu--gallery .ue-context-menu-item {
+  min-height: 32px;
+  padding: 0 9px;
+  border-radius: 10px;
+  gap: 8px;
+  font-size: 13px;
+}
+
+.ue-context-menu--gallery .ue-context-menu-item span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ue-context-menu--gallery .ue-context-menu-section .ue-context-menu-item,
+.ue-context-menu--gallery > .ue-context-menu-item {
+  justify-content: flex-start;
+}
+
+.ue-context-menu-grid--copy .ue-context-menu-item:last-child:nth-child(odd) {
+  grid-column: 1 / -1;
+}
+
 .ue-context-menu-item {
   display: inline-flex;
   align-items: center;

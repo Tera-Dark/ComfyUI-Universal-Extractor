@@ -15,7 +15,7 @@ import { useLibraryData } from "./hooks/useLibraryData";
 import { galleryApi } from "./services/galleryApi";
 import { useConfirm } from "./components/shared/ConfirmDialog";
 import { useToast } from "./components/shared/ToastViewport";
-import type { ImageRecord, LibraryInfo, WorkspaceTab } from "./types/universal-gallery";
+import type { ImageRecord, LibraryInfo, UiPreferences, WorkspaceTab } from "./types/universal-gallery";
 import "./App.css";
 
 const PENDING_WORKFLOW_KEY = "universal-extractor:pending-workflow";
@@ -23,6 +23,15 @@ const WORKFLOW_CHANNEL_NAME = "universal-extractor-workflow";
 const COMFY_WINDOW_NAME = "comfyui-main";
 const WORKFLOW_MESSAGE_TYPE = "universal-extractor:workflow-message";
 const MAX_STORAGE_WORKFLOW_BYTES = 1_500_000;
+const UI_PREFERENCES_KEY = "universal-extractor:ui-preferences";
+
+const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  defaultSelectionMode: false,
+  confirmWorkflowSend: true,
+  collapseSidebarOnLaunch: false,
+  enableImagePrefetch: true,
+  defaultFolderTreeView: true,
+};
 
 type FolderDialogMode = "create" | "merge" | "rename";
 
@@ -40,14 +49,50 @@ const matchesLibrarySearch = (library: LibraryInfo, searchTerm: string) => {
   return library.filename.toLowerCase().includes(query);
 };
 
+const getOrOpenComfyWindow = () => {
+  const comfyWindow = window.open("", COMFY_WINDOW_NAME);
+  if (!comfyWindow) {
+    return null;
+  }
+
+  try {
+    if (comfyWindow.location.href === "about:blank") {
+      comfyWindow.location.replace(`${window.location.origin}/`);
+    }
+  } catch {
+    // If the browser denies location access, still try the message channels below.
+  }
+
+  return comfyWindow;
+};
+
+const getStoredUiPreferences = (): UiPreferences => {
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem(UI_PREFERENCES_KEY) || "{}") as Partial<UiPreferences>;
+    return {
+      defaultSelectionMode: typeof parsed.defaultSelectionMode === "boolean" ? parsed.defaultSelectionMode : DEFAULT_UI_PREFERENCES.defaultSelectionMode,
+      confirmWorkflowSend: typeof parsed.confirmWorkflowSend === "boolean" ? parsed.confirmWorkflowSend : DEFAULT_UI_PREFERENCES.confirmWorkflowSend,
+      collapseSidebarOnLaunch: typeof parsed.collapseSidebarOnLaunch === "boolean" ? parsed.collapseSidebarOnLaunch : DEFAULT_UI_PREFERENCES.collapseSidebarOnLaunch,
+      enableImagePrefetch: typeof parsed.enableImagePrefetch === "boolean" ? parsed.enableImagePrefetch : DEFAULT_UI_PREFERENCES.enableImagePrefetch,
+      defaultFolderTreeView: typeof parsed.defaultFolderTreeView === "boolean" ? parsed.defaultFolderTreeView : DEFAULT_UI_PREFERENCES.defaultFolderTreeView,
+    };
+  } catch {
+    return DEFAULT_UI_PREFERENCES;
+  }
+};
+
 function App() {
   const { t } = useI18n();
   const { confirm } = useConfirm();
   const { pushToast } = useToast();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("gallery");
   const [librarySearchTerm, setLibrarySearchTerm] = useState("");
-  const [folderViewMode, setFolderViewMode] = useState<"tree" | "list">("tree");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => typeof window !== "undefined" ? window.innerWidth <= 960 : false);
+  const [uiPreferences, setUiPreferences] = useState<UiPreferences>(() => getStoredUiPreferences());
+  const [folderViewMode, setFolderViewMode] = useState<"tree" | "list">(() => getStoredUiPreferences().defaultFolderTreeView ? "tree" : "list");
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    const preferences = getStoredUiPreferences();
+    return typeof window !== "undefined" ? window.innerWidth <= 960 || preferences.collapseSidebarOnLaunch : preferences.collapseSidebarOnLaunch;
+  });
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [boardDialogOpen, setBoardDialogOpen] = useState(false);
 
@@ -60,6 +105,20 @@ function App() {
   );
 
   const canUseRawLibraryEditor = library.entryTotal <= 5000;
+
+  const updateUiPreferences = (updates: Partial<UiPreferences>) => {
+    setUiPreferences((current) => {
+      const next = { ...current, ...updates };
+      window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(next));
+      if (updates.defaultFolderTreeView !== undefined) {
+        setFolderViewMode(updates.defaultFolderTreeView ? "tree" : "list");
+      }
+      if (updates.collapseSidebarOnLaunch !== undefined && window.innerWidth > 960) {
+        setSidebarCollapsed(updates.collapseSidebarOnLaunch);
+      }
+      return next;
+    });
+  };
 
   const confirmDiscardLibraryEdits = async () => {
     if (!library.isDirty) {
@@ -333,15 +392,17 @@ function App() {
   };
 
   const handleOpenImageWorkflow = async (image: { relative_path: string; original_url?: string; url?: string }) => {
-    const approved = await confirm({
-      title: t("modalOpenWorkflow"),
-      message: t("workflowSendConfirm", { name: image.relative_path }),
-      tone: "info",
-      confirmLabel: t("commonCreate"),
-      cancelLabel: t("libraryCancel"),
-    });
-    if (!approved) {
-      return;
+    if (uiPreferences.confirmWorkflowSend) {
+      const approved = await confirm({
+        title: t("modalOpenWorkflow"),
+        message: t("workflowSendConfirm", { name: image.relative_path }),
+        tone: "info",
+        confirmLabel: t("commonCreate"),
+        cancelLabel: t("libraryCancel"),
+      });
+      if (!approved) {
+        return;
+      }
     }
 
     try {
@@ -360,7 +421,7 @@ function App() {
         return;
       }
 
-      const comfyWindow = window.open(`${window.location.origin}/`, COMFY_WINDOW_NAME);
+      const comfyWindow = getOrOpenComfyWindow();
       const message = {
         type: WORKFLOW_MESSAGE_TYPE,
         payload,
@@ -518,6 +579,8 @@ function App() {
               isRefreshing={gallery.isRefreshing}
               error={gallery.error}
               boards={gallery.boards}
+              defaultSelectionMode={uiPreferences.defaultSelectionMode}
+              enableImagePrefetch={uiPreferences.enableImagePrefetch}
               onOpenDetail={handleOpenGalleryDetail}
               onPageChange={gallery.setPage}
               onCategoryChange={gallery.setSelectedCategory}
@@ -643,6 +706,8 @@ function App() {
           ) : (
             <SettingsWorkspace
               sources={gallery.context?.sources ?? []}
+              preferences={uiPreferences}
+              onPreferencesChange={updateUiPreferences}
               onSourcesChange={() => gallery.refresh()}
             />
           )}

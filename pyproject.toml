@@ -1,7 +1,7 @@
 [project]
 name = "tera-universal-extractor"
 description = "ComfyUI custom node and gallery workspace for prompt libraries, searchable image notes, and reusable extraction workflows."
-version = "1.1.2"
+version = "1.1.3"
 license = { file = "LICENSE.txt" }
 readme = "README.md"
 requires-python = ">=3.10"

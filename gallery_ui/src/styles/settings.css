@@ -58,7 +58,8 @@
 }
 
 .ue-settings-source-list,
-.ue-settings-editor {
+.ue-settings-editor,
+.ue-settings-preferences {
   border: 1px solid var(--ue-line);
   border-radius: 8px;
   background: var(--ue-surface);
@@ -73,6 +74,83 @@
 
 .ue-settings-editor {
   padding: 18px;
+}
+
+.ue-settings-preferences {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.ue-preference-grid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.ue-preference-card {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 22px;
+  align-items: center;
+  gap: 10px;
+  min-height: 96px;
+  padding: 12px;
+  border: 1px solid var(--ue-line);
+  border-radius: 8px;
+  background: var(--ue-canvas);
+  color: var(--ue-ink);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--ue-duration-fast) var(--ue-ease),
+    border-color var(--ue-duration-fast) var(--ue-ease),
+    box-shadow var(--ue-duration-fast) var(--ue-ease),
+    transform var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-preference-card:hover {
+  border-color: rgba(161, 161, 170, 0.5);
+  background: #ffffff;
+  transform: translateY(-1px);
+}
+
+.ue-preference-card.active {
+  border-color: rgba(37, 99, 235, 0.28);
+  background: rgba(239, 246, 255, 0.72);
+  box-shadow: 0 10px 24px rgba(37, 99, 235, 0.08);
+}
+
+.ue-preference-icon {
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: var(--ue-surface-alt);
+  color: var(--ue-ink-soft);
+}
+
+.ue-preference-card.active .ue-preference-icon {
+  background: var(--ue-accent);
+  color: #ffffff;
+}
+
+.ue-preference-copy {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.ue-preference-copy strong {
+  color: var(--ue-ink);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.ue-preference-copy small {
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .ue-settings-diagnostics {
@@ -357,6 +435,10 @@
   .ue-settings-layout {
     grid-template-columns: 1fr;
   }
+
+  .ue-preference-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 620px) {
@@ -365,7 +447,8 @@
   }
 
   .ue-settings-toggle-grid,
-  .ue-settings-metrics {
+  .ue-settings-metrics,
+  .ue-preference-grid {
     grid-template-columns: 1fr;
   }
 

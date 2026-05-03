@@ -2,6 +2,7 @@ import {
   useEffect,
   useRef,
   useState,
+  type CSSProperties,
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
@@ -11,6 +12,7 @@ import {
   Boxes,
   ChevronLeft,
   ChevronRight,
+  ClipboardCopy,
   Expand,
   ExternalLink,
   FileJson,
@@ -29,6 +31,7 @@ import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
 import type { DetailNavigationState, ImageMetadata, ImageRecord } from "../../types/universal-gallery";
 import { formatFileSize, formatLongDateTime } from "../../utils/formatters";
+import { getPositivePromptText } from "../../utils/metadata";
 
 interface ImageDetailModalProps {
   image: ImageRecord;
@@ -61,6 +64,15 @@ interface DraftStateSnapshot {
   pinned: boolean;
 }
 
+interface LightboxVisual {
+  key: string;
+  src: string;
+  bg: string;
+  alt: string;
+}
+
+type SlideDirection = "next" | "prev";
+
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 5;
 
@@ -80,6 +92,29 @@ const isEditableTarget = (target: EventTarget | null) => {
     return false;
   }
   return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+};
+
+const makeLightboxVisual = (image: ImageRecord): LightboxVisual => ({
+  key: image.relative_path,
+  src: image.original_url || image.url,
+  bg: image.thumb_url || image.original_url || image.url,
+  alt: image.title || image.filename,
+});
+
+const preloadLightboxImage = async (src: string) => {
+  if (!src) {
+    return;
+  }
+
+  const image = new window.Image();
+  image.decoding = "async";
+  const loaded = new Promise<void>((resolve) => {
+    image.onload = () => resolve();
+    image.onerror = () => resolve();
+  });
+  image.src = src;
+  await loaded;
+  await image.decode?.().catch(() => undefined);
 };
 
 export const ImageDetailModal = ({
@@ -119,11 +154,14 @@ export const ImageDetailModal = ({
   const mediaRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const previousOverflowRef = useRef<string>("");
-  const prevImagePathRef = useRef(image.relative_path);
-  const [imageOpacity, setImageOpacity] = useState(1);
-  const [displayedSrc, setDisplayedSrc] = useState(image.original_url || image.url);
-  const [displayedBg, setDisplayedBg] = useState(image.thumb_url || image.original_url || image.url);
-  const fadeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visualPathRef = useRef(image.relative_path);
+  const previousNavigationIndexRef = useRef(navigation?.currentIndex ?? 0);
+  const visualTransitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visualTransitionTokenRef = useRef(0);
+  const [activeVisual, setActiveVisual] = useState<LightboxVisual>(() => makeLightboxVisual(image));
+  const [incomingVisual, setIncomingVisual] = useState<LightboxVisual | null>(null);
+  const [incomingReady, setIncomingReady] = useState(false);
+  const [slideDirection, setSlideDirection] = useState<SlideDirection>("next");
 
   useEffect(() => {
     setDraftTitle(image.title || "");
@@ -138,31 +176,72 @@ export const ImageDetailModal = ({
     dragStateRef.current = null;
   }, [image.relative_path, image.title, image.category, image.notes, image.pinned, image.favorite, image.filename]);
 
-  // Crossfade transition when navigating to a different image
+  // Keep the current image visible until the next image is decoded, then slide layers.
   useEffect(() => {
-    if (image.relative_path === prevImagePathRef.current) {
+    const nextVisual = makeLightboxVisual(image);
+    const nextIndex = navigation?.currentIndex ?? previousNavigationIndexRef.current;
+    const direction: SlideDirection = nextIndex < previousNavigationIndexRef.current ? "prev" : "next";
+    previousNavigationIndexRef.current = nextIndex;
+
+    if (image.relative_path === visualPathRef.current) {
+      setActiveVisual(nextVisual);
       return;
     }
-    prevImagePathRef.current = image.relative_path;
 
-    // Step 1: fade out
-    setImageOpacity(0);
+    visualPathRef.current = image.relative_path;
+    visualTransitionTokenRef.current += 1;
+    const token = visualTransitionTokenRef.current;
+    let cancelled = false;
 
-    // Step 2: after fade-out completes, swap src and fade in
-    if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
-    fadeTimerRef.current = setTimeout(() => {
-      setDisplayedSrc(image.original_url || image.url);
-      setDisplayedBg(image.thumb_url || image.original_url || image.url);
-      // Force a reflow before fading in
+    if (visualTransitionTimerRef.current) {
+      clearTimeout(visualTransitionTimerRef.current);
+    }
+    setSlideDirection(direction);
+    setIncomingReady(false);
+    setIncomingVisual(null);
+
+    const runTransition = async () => {
+      await preloadLightboxImage(nextVisual.src);
+      if (cancelled || token !== visualTransitionTokenRef.current) {
+        return;
+      }
+
+      setIncomingVisual(nextVisual);
       requestAnimationFrame(() => {
-        setImageOpacity(1);
+        if (!cancelled && token === visualTransitionTokenRef.current) {
+          setIncomingReady(true);
+        }
       });
-    }, 180);
+
+      visualTransitionTimerRef.current = setTimeout(() => {
+        if (cancelled || token !== visualTransitionTokenRef.current) {
+          return;
+        }
+        setActiveVisual(nextVisual);
+        setIncomingVisual(null);
+        setIncomingReady(false);
+      }, 360);
+    };
+
+    void runTransition();
 
     return () => {
-      if (fadeTimerRef.current) clearTimeout(fadeTimerRef.current);
+      cancelled = true;
+      if (visualTransitionTimerRef.current) {
+        clearTimeout(visualTransitionTimerRef.current);
+      }
     };
-  }, [image.relative_path, image.original_url, image.url, image.thumb_url]);
+  }, [image.relative_path, image.original_url, image.url, image.thumb_url, image.title, image.filename, navigation?.currentIndex]);
+
+  useEffect(() => {
+    const items = navigation?.items ?? [];
+    const index = navigation?.currentIndex ?? -1;
+    [items[index - 1], items[index + 1]]
+      .filter((item): item is ImageRecord => Boolean(item))
+      .forEach((item) => {
+        void preloadLightboxImage(makeLightboxVisual(item).src);
+      });
+  }, [navigation]);
 
   useEffect(() => {
     let cancelled = false;
@@ -409,6 +488,25 @@ export const ImageDetailModal = ({
     onClose();
   };
 
+  const copyText = async (value: string, successMessage: string) => {
+    if (!value.trim()) {
+      pushToast(t("metadataNoPositivePrompt"), "info");
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(value);
+      pushToast(successMessage, "success");
+    } catch (copyError) {
+      pushToast(copyError instanceof Error ? copyError.message : t("contextCopyError"), "error");
+    }
+  };
+
+  const handleCopyPositivePrompt = async () => {
+    const prompt = getPositivePromptText(metadata);
+    await copyText(prompt, t("metadataCopyPositiveSuccess"));
+  };
+
   const handleRequestClose = async () => {
     if (isStateDirty) {
       const approved = await confirm({
@@ -459,7 +557,15 @@ export const ImageDetailModal = ({
         onClick={(event) => event.stopPropagation()}
         onDoubleClick={handleBackgroundDoubleClick}
       >
-        <div className="ue-lightbox-backdrop" style={{ backgroundImage: `url(${displayedBg})`, transition: 'opacity 0.28s ease', opacity: imageOpacity }} />
+        <div className="ue-lightbox-backdrop-stack">
+          <div className="ue-lightbox-backdrop" style={{ backgroundImage: `url(${activeVisual.bg})` }} />
+          {incomingVisual ? (
+            <div
+              className={`ue-lightbox-backdrop ue-lightbox-backdrop--incoming ${incomingReady ? "is-visible" : ""}`}
+              style={{ backgroundImage: `url(${incomingVisual.bg})` }}
+            />
+          ) : null}
+        </div>
 
         <button
           className="ue-lightbox-close"
@@ -493,7 +599,7 @@ export const ImageDetailModal = ({
         <div className={`ue-lightbox-stage ${showInspector ? "has-inspector" : ""}`}>
           <div
             ref={mediaRef}
-            className={`ue-lightbox-media ${isExpandedView ? "is-expanded" : "is-fit"} ${isZoomed ? "is-zoomed" : ""} ${isDragging ? "is-dragging" : ""}`}
+            className={`ue-lightbox-media ${incomingVisual ? "is-transitioning" : ""} ${isExpandedView ? "is-expanded" : "is-fit"} ${isZoomed ? "is-zoomed" : ""} ${isDragging ? "is-dragging" : ""}`}
             onWheel={handleWheelZoom}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -503,15 +609,29 @@ export const ImageDetailModal = ({
           >
             <div className="ue-lightbox-gesture-hint">{t("modalGestureHint")}</div>
             <img
-              src={displayedSrc}
-              alt={image.title || image.filename}
+              key={activeVisual.key}
+              className={`ue-lightbox-image ue-lightbox-image--active ${incomingReady ? "is-sliding-out" : ""} slide-${slideDirection}`}
+              src={activeVisual.src}
+              alt={activeVisual.alt}
               draggable={false}
-              style={{ 
-                transform: `translate3d(${pan.x}px, ${pan.y}px, 0) scale(${zoomScale})`,
-                opacity: imageOpacity,
-                transition: 'opacity 0.22s ease, transform 160ms cubic-bezier(0.2, 0, 0, 1)',
-              }}
+              style={{
+                "--ue-pan-x": `${pan.x}px`,
+                "--ue-pan-y": `${pan.y}px`,
+                "--ue-zoom": zoomScale,
+              } as CSSProperties}
             />
+            {incomingVisual ? (
+              <img
+                key={incomingVisual.key}
+                className={`ue-lightbox-image ue-lightbox-image--incoming slide-${slideDirection} ${incomingReady ? "is-visible" : ""}`}
+                src={incomingVisual.src}
+                alt={incomingVisual.alt}
+                draggable={false}
+                style={{
+                  "--ue-zoom": zoomScale,
+                } as CSSProperties}
+              />
+            ) : null}
           </div>
 
           <aside className={`ue-lightbox-inspector ${showInspector ? "is-open" : ""}`}>
@@ -613,6 +733,33 @@ export const ImageDetailModal = ({
                   </details>
                 ) : null}
 
+                {metadata?.summary?.positive_prompt || metadata?.summary?.negative_prompt ? (
+                  <details className="ue-detail-disclosure" open>
+                    <summary>
+                      <ClipboardCopy size={15} />
+                      <span>{t("metadataPromptSummary")}</span>
+                    </summary>
+                    <div className="ue-metadata-summary ue-metadata-summary--detail">
+                      <label>
+                        <span>{t("metadataPositivePrompt")}</span>
+                        <textarea value={getPositivePromptText(metadata) || t("metadataNoPositivePrompt")} readOnly />
+                      </label>
+                      <label>
+                        <span>{t("metadataNegativePrompt")}</span>
+                        <textarea value={metadata.summary.negative_prompt || t("metadataNoNegativePrompt")} readOnly />
+                      </label>
+                    </div>
+                    <button
+                      className="ue-secondary-btn ue-detail-copy-prompt"
+                      type="button"
+                      onClick={() => void handleCopyPositivePrompt()}
+                    >
+                      <ClipboardCopy size={14} />
+                      <span>{t("metadataCopyPositive")}</span>
+                    </button>
+                  </details>
+                ) : null}
+
                 {metadata?.metadata && metadataKeys.length ? (
                   <details className="ue-detail-disclosure">
                     <summary>
@@ -663,6 +810,22 @@ export const ImageDetailModal = ({
             {...getTooltipProps(t("modalToggleInspector"))}
           >
             <BookOpen size={17} />
+          </button>
+          <button
+            className="ue-toolbar-btn"
+            onClick={() => void handleCopyPositivePrompt()}
+            aria-label={t("metadataCopyPositive")}
+            {...getTooltipProps(t("metadataCopyPositive"))}
+          >
+            <ClipboardCopy size={17} />
+          </button>
+          <button
+            className="ue-toolbar-btn"
+            onClick={() => setShowInspector(true)}
+            aria-label={t("metadataView")}
+            {...getTooltipProps(t("metadataView"))}
+          >
+            <FileJson size={17} />
           </button>
           <span className="ue-toolbar-divider" />
           <button

@@ -2,7 +2,9 @@ import { useMemo, useState } from "react";
 import {
   Check,
   CheckSquare,
+  ClipboardCopy,
   ExternalLink,
+  FileJson,
   Eye,
   FolderMinus,
   FolderPlus,
@@ -19,9 +21,12 @@ import {
 import { useI18n } from "../../i18n/I18nProvider";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
+import { galleryApi } from "../../services/galleryApi";
 import type { BoardMutationResult, BoardSummary, ImageRecord, MoveTargetOption } from "../../types/universal-gallery";
 import { formatCompactDate, formatFileSize } from "../../utils/formatters";
+import { getPositivePromptText } from "../../utils/metadata";
 import { BoardPickerModal } from "./BoardPickerModal";
+import { MetadataViewerModal } from "./MetadataViewerModal";
 
 interface GalleryInspectorPanelProps {
   selectedImages: ImageRecord[];
@@ -81,6 +86,7 @@ export const GalleryInspectorPanel = ({
   const [bulkRenameTemplate, setBulkRenameTemplate] = useState("set-{page}-{n}");
   const [bulkRenameStart, setBulkRenameStart] = useState(1);
   const [bulkRenamePadding, setBulkRenamePadding] = useState(2);
+  const [metadataViewerImage, setMetadataViewerImage] = useState<ImageRecord | null>(null);
 
   const selectedCount = selectedPaths.length;
   const primaryImage = selectedImages.length === 1 ? selectedImages[0] : null;
@@ -122,6 +128,21 @@ export const GalleryInspectorPanel = ({
 
     await onDeleteImages(selectedPaths);
     onClose();
+  };
+
+  const handleCopyPositivePrompt = async (image: ImageRecord) => {
+    try {
+      const metadata = await galleryApi.getImageMetadata(image.relative_path);
+      const prompt = getPositivePromptText(metadata);
+      if (!prompt) {
+        pushToast(t("metadataNoPositivePrompt"), "info");
+        return;
+      }
+      await navigator.clipboard.writeText(prompt);
+      pushToast(t("metadataCopyPositiveSuccess"), "success");
+    } catch (error) {
+      pushToast(error instanceof Error ? error.message : t("metadataLoadError"), "error");
+    }
   };
 
   const handleRemoveFromSelectedBoard = async () => {
@@ -223,6 +244,14 @@ export const GalleryInspectorPanel = ({
               <button className="ue-secondary-btn" onClick={() => void onOpenWorkflow(primaryImage)}>
                 <Send size={14} />
                 <span>{t("modalOpenWorkflow")}</span>
+              </button>
+              <button className="ue-secondary-btn" onClick={() => void handleCopyPositivePrompt(primaryImage)}>
+                <ClipboardCopy size={14} />
+                <span>{t("metadataCopyPositive")}</span>
+              </button>
+              <button className="ue-secondary-btn" onClick={() => setMetadataViewerImage(primaryImage)}>
+                <FileJson size={14} />
+                <span>{t("metadataView")}</span>
               </button>
               <button
                 className="ue-secondary-btn"
@@ -362,6 +391,10 @@ export const GalleryInspectorPanel = ({
         onCreateBoard={onCreateBoard}
         onAddToBoard={handleAddToBoard}
       />
+
+      {metadataViewerImage ? (
+        <MetadataViewerModal image={metadataViewerImage} onClose={() => setMetadataViewerImage(null)} />
+      ) : null}
     </>
   );
 };

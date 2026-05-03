@@ -23,6 +23,11 @@
   overflow: hidden;
 }
 
+.ue-lightbox-backdrop-stack {
+  position: absolute;
+  inset: 0;
+}
+
 .ue-lightbox-backdrop {
   position: absolute;
   inset: -5%;
@@ -31,6 +36,15 @@
   filter: blur(24px) saturate(0.86);
   opacity: 0.42;
   transform: scale(1.08);
+  transition: opacity 260ms var(--ue-ease);
+}
+
+.ue-lightbox-backdrop--incoming {
+  opacity: 0;
+}
+
+.ue-lightbox-backdrop--incoming.is-visible {
+  opacity: 0.42;
 }
 
 .ue-lightbox-close {
@@ -117,6 +131,7 @@
 }
 
 .ue-lightbox-media {
+  --ue-slide-distance: min(86vw, 1180px);
   position: relative;
   display: flex;
   align-items: center;
@@ -126,6 +141,10 @@
   overflow: auto;
   overscroll-behavior: contain;
   touch-action: none;
+}
+
+.ue-lightbox-media.is-transitioning {
+  overflow: hidden;
 }
 
 .ue-lightbox-media.is-fit {
@@ -150,9 +169,48 @@
   -webkit-user-drag: none;
   transform-origin: center center;
   transition:
-    transform 160ms var(--ue-ease),
+    transform 360ms cubic-bezier(0.22, 1, 0.36, 1),
     box-shadow var(--ue-duration-base) var(--ue-ease);
   will-change: transform;
+}
+
+.ue-lightbox-image--active {
+  --ue-pan-x: 0px;
+  --ue-pan-y: 0px;
+  --ue-zoom: 1;
+  transform: translate3d(var(--ue-pan-x), var(--ue-pan-y), 0) scale(var(--ue-zoom));
+}
+
+.ue-lightbox-image--active.is-sliding-out {
+  pointer-events: none;
+}
+
+.ue-lightbox-image--active.is-sliding-out.slide-next {
+  transform: translate3d(calc(var(--ue-pan-x) - var(--ue-slide-distance)), var(--ue-pan-y), 0) scale(var(--ue-zoom));
+}
+
+.ue-lightbox-image--active.is-sliding-out.slide-prev {
+  transform: translate3d(calc(var(--ue-pan-x) + var(--ue-slide-distance)), var(--ue-pan-y), 0) scale(var(--ue-zoom));
+}
+
+.ue-lightbox-image--incoming {
+  --ue-zoom: 1;
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  pointer-events: none;
+}
+
+.ue-lightbox-image--incoming.slide-next {
+  transform: translate3d(calc(-50% + var(--ue-slide-distance)), -50%, 0) scale(var(--ue-zoom));
+}
+
+.ue-lightbox-image--incoming.slide-prev {
+  transform: translate3d(calc(-50% - var(--ue-slide-distance)), -50%, 0) scale(var(--ue-zoom));
+}
+
+.ue-lightbox-image--incoming.is-visible {
+  transform: translate3d(-50%, -50%, 0) scale(var(--ue-zoom));
 }
 
 .ue-lightbox-media.is-expanded img {
@@ -388,6 +446,92 @@
   font-family: "SF Mono", Consolas, monospace;
   font-size: 11px;
   line-height: 1.65;
+}
+
+.ue-detail-copy-prompt {
+  margin-top: 12px;
+}
+
+.ue-metadata-backdrop {
+  z-index: 95;
+  background: rgba(15, 15, 18, 0.48);
+  backdrop-filter: blur(8px);
+}
+
+.ue-metadata-modal {
+  display: grid;
+  gap: 16px;
+  width: min(860px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  padding: 20px;
+  border: 1px solid rgba(228, 228, 231, 0.92);
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 28px 72px rgba(24, 24, 27, 0.24);
+  overflow: auto;
+}
+
+.ue-metadata-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ue-line-soft);
+}
+
+.ue-metadata-head span {
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ue-metadata-head h2 {
+  margin: 4px 0 0;
+  color: var(--ue-ink);
+  font-size: 18px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.ue-metadata-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ue-metadata-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ue-metadata-summary--detail {
+  grid-template-columns: 1fr;
+  margin-top: 12px;
+}
+
+.ue-metadata-summary label {
+  display: grid;
+  gap: 8px;
+}
+
+.ue-metadata-summary span {
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ue-metadata-summary textarea {
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--ue-line);
+  border-radius: var(--ue-r-md);
+  background: var(--ue-surface);
+  color: var(--ue-ink);
+  font: 12px/1.55 "SF Mono", Consolas, monospace;
 }
 
 .ue-lightbox-toolbar {

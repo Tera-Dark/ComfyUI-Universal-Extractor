@@ -11,12 +11,15 @@ import {
   HardDrive,
   Images,
   ListTree,
+  MoreHorizontal,
   Minimize2,
   PencilLine,
   Pin,
+  Search,
   Tag,
   Trash,
   Trash2,
+  X,
 } from "lucide-react";
 
 import { useI18n } from "../../i18n/I18nProvider";
@@ -125,6 +128,23 @@ const getAncestorPaths = (path: string) => {
     .map((_, index) => segments.slice(0, index + 1).join("/"));
 };
 
+const collectFolderSearchPaths = (subfolders: string[], query: string) => {
+  const normalizedQuery = query.trim().toLowerCase();
+  if (!normalizedQuery) {
+    return subfolders;
+  }
+
+  const paths = new Set<string>();
+  subfolders.forEach((subfolder) => {
+    if (!subfolder.toLowerCase().includes(normalizedQuery)) {
+      return;
+    }
+    getAncestorPaths(subfolder).forEach((ancestor) => paths.add(ancestor));
+    paths.add(subfolder);
+  });
+  return subfolders.filter((subfolder) => paths.has(subfolder));
+};
+
 const TreeBranch = ({
   node,
   depth,
@@ -134,6 +154,7 @@ const TreeBranch = ({
   onSelect,
   onContextMenu,
   pinnedFolders,
+  searchActive,
 }: {
   node: TreeNode;
   depth: number;
@@ -143,16 +164,17 @@ const TreeBranch = ({
   onSelect: (value: string) => void;
   onContextMenu: (event: MouseEvent, path: string) => void;
   pinnedFolders: Set<string>;
+  searchActive: boolean;
 }) => {
   const hasChildren = node.children.length > 0;
-  const expanded = expandedPaths.has(node.path);
+  const expanded = searchActive || expandedPaths.has(node.path);
   const pinned = pinnedFolders.has(node.path);
 
   return (
     <div className="ue-tree-branch">
       <div
         className={`ue-tree-row ${selectedSubfolder === node.path ? "active" : ""}`}
-        style={{ paddingLeft: `${depth * 16}px` }}
+        style={{ paddingLeft: `${depth * 12}px` }}
       >
         {hasChildren ? (
           <button
@@ -189,9 +211,10 @@ const TreeBranch = ({
               selectedSubfolder={selectedSubfolder}
               onToggle={onToggle}
               onSelect={onSelect}
-              onContextMenu={onContextMenu}
-              pinnedFolders={pinnedFolders}
-            />
+                onContextMenu={onContextMenu}
+                pinnedFolders={pinnedFolders}
+                searchActive={searchActive}
+              />
           ))}
         </div>
       ) : null}
@@ -232,18 +255,25 @@ export const WorkspaceSidebar = ({
   const [pinnedFolderPaths, setPinnedFolderPaths] = useState<Set<string>>(() => getStoredPinnedFolders());
   const [folderSortMode, setFolderSortMode] = useState<FolderSortMode>(() => getStoredFolderSort());
   const [folderContextMenu, setFolderContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+  const [folderSearchQuery, setFolderSearchQuery] = useState("");
+  const [folderActionsMenuOpen, setFolderActionsMenuOpen] = useState(false);
   const [expandedSidebarGroups, setExpandedSidebarGroups] = useState<Set<SidebarGroupId>>(
     () => new Set(["folders", "boards", "categories"]),
   );
+  const visibleSubfolders = useMemo(
+    () => collectFolderSearchPaths(galleryContext?.subfolders ?? [], folderSearchQuery),
+    [folderSearchQuery, galleryContext?.subfolders],
+  );
   const sortedSubfolders = useMemo(
-    () => [...(galleryContext?.subfolders ?? [])].sort((left, right) => compareFolderKey(left, right, pinnedFolderPaths, folderSortMode)),
-    [folderSortMode, galleryContext?.subfolders, pinnedFolderPaths],
+    () => [...visibleSubfolders].sort((left, right) => compareFolderKey(left, right, pinnedFolderPaths, folderSortMode)),
+    [folderSortMode, pinnedFolderPaths, visibleSubfolders],
   );
   const folderTree = useMemo(
-    () => buildFolderTree(galleryContext?.subfolders ?? [], pinnedFolderPaths, folderSortMode),
-    [folderSortMode, galleryContext?.subfolders, pinnedFolderPaths],
+    () => buildFolderTree(visibleSubfolders, pinnedFolderPaths, folderSortMode),
+    [folderSortMode, pinnedFolderPaths, visibleSubfolders],
   );
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
+  const folderSearchActive = folderSearchQuery.trim().length > 0;
 
   useEffect(() => {
     window.localStorage.setItem(PINNED_FOLDERS_STORAGE_KEY, JSON.stringify([...pinnedFolderPaths]));
@@ -276,6 +306,28 @@ export const WorkspaceSidebar = ({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [folderContextMenu]);
+
+  useEffect(() => {
+    if (!folderActionsMenuOpen) {
+      return;
+    }
+    const closeMenu = () => setFolderActionsMenuOpen(false);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setFolderActionsMenuOpen(false);
+      }
+    };
+    window.addEventListener("click", closeMenu);
+    window.addEventListener("resize", closeMenu);
+    window.addEventListener("scroll", closeMenu, true);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => {
+      window.removeEventListener("click", closeMenu);
+      window.removeEventListener("resize", closeMenu);
+      window.removeEventListener("scroll", closeMenu, true);
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [folderActionsMenuOpen]);
 
   useEffect(() => {
     setExpandedPaths(new Set());
@@ -384,6 +436,7 @@ export const WorkspaceSidebar = ({
             </button>
           </div>
 
+          <div className="ue-sidebar-scroll" data-has-query={folderSearchActive ? "true" : "false"}>
           <div className="ue-sidebar-group">
             <div className="ue-sidebar-group-header">
               <button
@@ -396,6 +449,15 @@ export const WorkspaceSidebar = ({
                 <span>{t("sidebarOutputDirs")}</span>
                 <em>{t("sidebarFolderCount", { count: galleryContext?.subfolders.length ?? 0 })}</em>
               </button>
+              <div className="ue-sidebar-subactions">
+                <button
+                  className="ue-sidebar-subaction"
+                  onClick={onCreateFolder}
+                  title={t("sidebarCreateFolder")}
+                  aria-label={t("sidebarCreateFolder")}
+                >
+                  <FolderPlus size={12} />
+                </button>
               <div className="ue-sidebar-viewmodes">
                 <button
                   className={folderViewMode === "list" ? "active" : ""}
@@ -414,75 +476,97 @@ export const WorkspaceSidebar = ({
                   <FolderTree size={14} />
                 </button>
               </div>
+                <div className="ue-sidebar-more">
+                  <button
+                    className={`ue-sidebar-subaction ${folderActionsMenuOpen ? "active" : ""}`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      setFolderActionsMenuOpen((current) => !current);
+                    }}
+                    title={t("sidebarMoreActions")}
+                    aria-label={t("sidebarMoreActions")}
+                  >
+                    <MoreHorizontal size={13} />
+                  </button>
+                  {folderActionsMenuOpen ? (
+                    <div className="ue-sidebar-action-menu" onClick={(event) => event.stopPropagation()}>
+                      <button onClick={() => {
+                        toggleFolderSortMode();
+                        setFolderActionsMenuOpen(false);
+                      }}>
+                        <ListTree size={14} />
+                        <span>{folderSortMode === "asc" ? t("folderSortDesc") : t("folderSortAsc")}</span>
+                      </button>
+                      <button onClick={() => {
+                        if (selectedSubfolder) {
+                          togglePinnedFolder(selectedSubfolder);
+                          setFolderActionsMenuOpen(false);
+                        }
+                      }} disabled={!selectedSubfolder}>
+                        <Pin size={14} fill={selectedSubfolder && pinnedFolderPaths.has(selectedSubfolder) ? "currentColor" : "none"} />
+                        <span>{selectedSubfolder && pinnedFolderPaths.has(selectedSubfolder) ? t("folderUnpin") : t("folderPin")}</span>
+                      </button>
+                      <button onClick={() => {
+                        if (selectedSubfolder) {
+                          onRenameFolder(selectedSubfolder);
+                          setFolderActionsMenuOpen(false);
+                        }
+                      }} disabled={!selectedSubfolder}>
+                        <PencilLine size={14} />
+                        <span>{t("folderRename")}</span>
+                      </button>
+                      <button onClick={() => {
+                        onMergeFolder();
+                        setFolderActionsMenuOpen(false);
+                      }} disabled={!selectedSubfolder}>
+                        <ArrowRightLeft size={14} />
+                        <span>{t("sidebarMergeFolder")}</span>
+                      </button>
+                      <button onClick={() => {
+                        onDeleteFolder();
+                        setFolderActionsMenuOpen(false);
+                      }} disabled={!selectedSubfolder} className="is-danger">
+                        <Trash2 size={14} />
+                        <span>{t("sidebarDeleteFolder")}</span>
+                      </button>
+                      {folderViewMode === "tree" ? (
+                        <button onClick={() => {
+                          collapseAllFolders();
+                          setFolderActionsMenuOpen(false);
+                        }}>
+                          <Minimize2 size={14} />
+                          <span>{t("sidebarCollapseAll")}</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              </div>
             </div>
             {expandedSidebarGroups.has("folders") ? (
               <>
-                <div className="ue-sidebar-subactions ue-sidebar-subactions--dense">
-                  <button
-                    className="ue-sidebar-subaction"
-                    onClick={onCreateFolder}
-                    title={t("sidebarCreateFolder")}
-                    aria-label={t("sidebarCreateFolder")}
-                  >
-                    <FolderPlus size={12} />
-                  </button>
-                  <button
-                    className={`ue-sidebar-subaction ${folderSortMode === "desc" ? "active" : ""}`}
-                    onClick={toggleFolderSortMode}
-                    title={folderSortMode === "asc" ? t("folderSortDesc") : t("folderSortAsc")}
-                    aria-label={folderSortMode === "asc" ? t("folderSortDesc") : t("folderSortAsc")}
-                  >
-                    <ListTree size={12} />
-                  </button>
-                  <button
-                    className={`ue-sidebar-subaction ${selectedSubfolder && pinnedFolderPaths.has(selectedSubfolder) ? "active" : ""}`}
-                    onClick={() => selectedSubfolder && togglePinnedFolder(selectedSubfolder)}
-                    disabled={!selectedSubfolder}
-                    title={selectedSubfolder && pinnedFolderPaths.has(selectedSubfolder) ? t("folderUnpin") : t("folderPin")}
-                    aria-label={selectedSubfolder && pinnedFolderPaths.has(selectedSubfolder) ? t("folderUnpin") : t("folderPin")}
-                  >
-                    <Pin size={12} fill={selectedSubfolder && pinnedFolderPaths.has(selectedSubfolder) ? "currentColor" : "none"} />
-                  </button>
-                  <button
-                    className="ue-sidebar-subaction"
-                    onClick={() => selectedSubfolder && onRenameFolder(selectedSubfolder)}
-                    disabled={!selectedSubfolder}
-                    title={t("folderRename")}
-                    aria-label={t("folderRename")}
-                  >
-                    <PencilLine size={12} />
-                  </button>
-                  <button
-                    className="ue-sidebar-subaction"
-                    onClick={onMergeFolder}
-                    disabled={!selectedSubfolder}
-                    title={t("sidebarMergeFolder")}
-                    aria-label={t("sidebarMergeFolder")}
-                  >
-                    <ArrowRightLeft size={12} />
-                  </button>
-                  <button
-                    className="ue-sidebar-subaction"
-                    onClick={onDeleteFolder}
-                    disabled={!selectedSubfolder}
-                    title={t("sidebarDeleteFolder")}
-                    aria-label={t("sidebarDeleteFolder")}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                {folderViewMode === "tree" ? (
+                <label className="ue-sidebar-search">
+                  <Search size={13} />
+                  <input
+                    value={folderSearchQuery}
+                    placeholder={t("sidebarFolderSearch")}
+                    onChange={(event) => setFolderSearchQuery(event.target.value)}
+                  />
+                  {folderSearchActive ? (
                     <button
-                      className="ue-sidebar-subaction"
-                      onClick={collapseAllFolders}
-                      title={t("sidebarCollapseAll")}
-                      aria-label={t("sidebarCollapseAll")}
-                  >
-                    <Minimize2 size={12} />
-                  </button>
+                      type="button"
+                      onClick={() => setFolderSearchQuery("")}
+                      title={t("sidebarClearFolderSearch")}
+                      aria-label={t("sidebarClearFolderSearch")}
+                    >
+                      <X size={12} />
+                    </button>
                   ) : null}
-                </div>
+                </label>
 
-                {folderViewMode === "tree" ? (
+                {folderSearchActive && visibleSubfolders.length === 0 ? (
+                  <div className="ue-sidebar-empty">{t("sidebarNoFolderMatches")}</div>
+                ) : folderViewMode === "tree" ? (
                   <div className="ue-tree-panel">
                     {folderTree.map((node) => (
                       <TreeBranch
@@ -495,31 +579,35 @@ export const WorkspaceSidebar = ({
                         onSelect={onSubfolderSelect}
                         onContextMenu={handleFolderContextMenu}
                         pinnedFolders={pinnedFolderPaths}
+                        searchActive={folderSearchActive}
                       />
                     ))}
                   </div>
                 ) : (
                   <div className="ue-tree-list ue-tree-list--flat">
-                    <button
-                      className={`ue-tree-item ue-tree-item--compact ${selectedSubfolder === "" && selectedBoardId === "" && !pinnedOnly ? "active" : ""}`}
-                      onClick={() => onSubfolderSelect("")}
-                    >
-                      <Folder size={14} />
-                      <span>./</span>
-                    </button>
+                    {!folderSearchActive ? (
+                      <button
+                        className={`ue-tree-item ue-tree-item--compact ${selectedSubfolder === "" && selectedBoardId === "" && !pinnedOnly ? "active" : ""}`}
+                        onClick={() => onSubfolderSelect("")}
+                      >
+                        <Folder size={14} />
+                        <span>./</span>
+                      </button>
+                    ) : null}
                     {sortedSubfolders.map((subfolder) => (
                       <button
                         key={subfolder}
                         className={`ue-tree-item ue-tree-item--compact ${selectedSubfolder === subfolder ? "active" : ""} ${pinnedFolderPaths.has(subfolder) ? "is-pinned" : ""}`}
                         onClick={() => onSubfolderSelect(subfolder)}
                         onContextMenu={(event) => handleFolderContextMenu(event, subfolder)}
+                        title={subfolder}
                       >
                         <Folder size={14} />
                         <span>{subfolder}</span>
                         {pinnedFolderPaths.has(subfolder) ? <Pin size={11} fill="currentColor" /> : null}
                       </button>
                     ))}
-                  </div>
+                </div>
                 )}
               </>
             ) : null}
@@ -614,6 +702,7 @@ export const WorkspaceSidebar = ({
                 ))}
               </div>
             ) : null}
+          </div>
           </div>
         </div>
       ) : (

@@ -1,12 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Check,
+  ChevronsLeft,
   FolderPlus,
   HardDrive,
+  ImagePlus,
+  MousePointer2,
   RefreshCw,
   Save,
   Settings,
   ShieldCheck,
+  SplitSquareVertical,
   Trash2,
   TriangleAlert,
 } from "lucide-react";
@@ -16,10 +20,12 @@ import { useToast } from "../shared/ToastViewport";
 import { useI18n } from "../../i18n/I18nProvider";
 import { galleryApi } from "../../services/galleryApi";
 import { formatFileSize } from "../../utils/formatters";
-import type { GallerySource, GallerySourceDiagnostic } from "../../types/universal-gallery";
+import type { GallerySource, GallerySourceDiagnostic, UiPreferences } from "../../types/universal-gallery";
 
 interface SettingsWorkspaceProps {
   sources: GallerySource[];
+  preferences: UiPreferences;
+  onPreferencesChange: (updates: Partial<UiPreferences>) => void;
   onSourcesChange: () => void;
 }
 
@@ -49,7 +55,40 @@ const sourceIcon = (kind: GallerySource["kind"]) => {
   return <FolderPlus size={16} />;
 };
 
-export const SettingsWorkspace = ({ sources, onSourcesChange }: SettingsWorkspaceProps) => {
+const preferenceItems = [
+  {
+    key: "defaultSelectionMode",
+    icon: MousePointer2,
+    titleKey: "settingsPrefDefaultSelection",
+    descriptionKey: "settingsPrefDefaultSelectionHint",
+  },
+  {
+    key: "confirmWorkflowSend",
+    icon: ShieldCheck,
+    titleKey: "settingsPrefConfirmWorkflow",
+    descriptionKey: "settingsPrefConfirmWorkflowHint",
+  },
+  {
+    key: "collapseSidebarOnLaunch",
+    icon: ChevronsLeft,
+    titleKey: "settingsPrefCollapseSidebar",
+    descriptionKey: "settingsPrefCollapseSidebarHint",
+  },
+  {
+    key: "enableImagePrefetch",
+    icon: ImagePlus,
+    titleKey: "settingsPrefImagePrefetch",
+    descriptionKey: "settingsPrefImagePrefetchHint",
+  },
+  {
+    key: "defaultFolderTreeView",
+    icon: SplitSquareVertical,
+    titleKey: "settingsPrefFolderTree",
+    descriptionKey: "settingsPrefFolderTreeHint",
+  },
+] as const;
+
+export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, onSourcesChange }: SettingsWorkspaceProps) => {
   const { t } = useI18n();
   const { pushToast } = useToast();
   const { confirm } = useConfirm();
@@ -186,6 +225,41 @@ export const SettingsWorkspace = ({ sources, onSourcesChange }: SettingsWorkspac
             <strong>{totalImages}</strong>
             <span>{t("settingsIndexedImages")}</span>
           </div>
+        </div>
+      </div>
+
+      <div className="ue-settings-preferences">
+        <div className="ue-settings-panel-heading">
+          <div>
+            <h2>{t("settingsPreferencesTitle")}</h2>
+            <p>{t("settingsPreferencesHint")}</p>
+          </div>
+          <Settings size={18} />
+        </div>
+
+        <div className="ue-preference-grid">
+          {preferenceItems.map((item) => {
+            const Icon = item.icon;
+            const checked = preferences[item.key];
+            return (
+              <button
+                key={item.key}
+                className={`ue-preference-card ${checked ? "active" : ""}`}
+                type="button"
+                onClick={() => onPreferencesChange({ [item.key]: !checked })}
+                aria-pressed={checked}
+              >
+                <span className="ue-preference-icon">
+                  <Icon size={16} />
+                </span>
+                <span className="ue-preference-copy">
+                  <strong>{t(item.titleKey)}</strong>
+                  <small>{t(item.descriptionKey)}</small>
+                </span>
+                <span className="ue-toggle-dot">{checked ? <Check size={13} /> : null}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
 
