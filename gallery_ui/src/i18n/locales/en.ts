@@ -529,6 +529,8 @@ const en = {
   settingsPrefCollapseSidebarHint: "Start with the resource sidebar collapsed on desktop, useful for smaller screens or focused browsing.",
   settingsPrefImagePrefetch: "Preload nearby images",
   settingsPrefImagePrefetchHint: "Preloads nearby thumbnails while scrolling; turn off to reduce background network and disk reads.",
+  settingsPrefLiveRefresh: "Keep gallery live",
+  settingsPrefLiveRefreshHint: "Automatically rescans when the gallery opens, then quietly checks for new ComfyUI outputs while the page is visible.",
   settingsPrefFolderTree: "Use folder tree by default",
   settingsPrefFolderTreeHint: "When off, output folders default to a flat list, useful for shallow folder sets.",
   settingsPathOk: "Path is ready, {count} images found at the top level.",

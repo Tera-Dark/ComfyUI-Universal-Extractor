@@ -7,6 +7,8 @@
 ```bash
 npm install
 npm run dev
+npm run typecheck
+npm run test
 npm run build
 npm run preview
 npm run lint
@@ -15,13 +17,23 @@ npm run lint
 常规验证顺序：
 
 ```bash
+npm run typecheck
+npm run lint
+npm run test:run
 npm run build
 ```
 
 项目根目录还需要配合 Python 后端校验：
 
 ```bash
+python -m pytest
 python -m compileall py\gallery
+```
+
+Windows 本地也可以在仓库根目录运行：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 ```
 
 ## 目录职责
@@ -89,6 +101,8 @@ python -m compileall py\gallery
 ## 构建与缓存
 
 执行 `npm run build` 后，Vite 会生成新的 hash 资源文件。ComfyUI 或浏览器可能仍请求旧 hash 文件；如果用户环境出现旧资源 404，需要把当前构建产物同步复制到旧 hash 文件名，保持兼容。
+
+`npm run build` 会在 Vite 构建后运行 `scripts/sync-dist-compat.mjs`，自动把最新 JS/CSS 内容同步到已跟踪的旧 hash 兼容文件名。CI 只验证构建可以通过，不会自动提交 `dist/`。发布前仍需显式提交 `dist/index.html` 和相关 `dist/assets/index-*.js`、`dist/assets/index-*.css` 产物。
 
 已知构建入口：
 

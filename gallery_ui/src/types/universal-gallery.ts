@@ -5,6 +5,7 @@ export interface UiPreferences {
   confirmWorkflowSend: boolean;
   collapseSidebarOnLaunch: boolean;
   enableImagePrefetch: boolean;
+  enableLiveGalleryRefresh: boolean;
   defaultFolderTreeView: boolean;
 }
 

@@ -5,6 +5,9 @@ import tailwindcss from '@tailwindcss/vite'
 // https://vitejs.dev/config/
 export default defineConfig({
   base: '/gallery/',
+  build: {
+    emptyOutDir: false,
+  },
   plugins: [
     react(),
     tailwindcss(),

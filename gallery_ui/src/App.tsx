@@ -30,6 +30,7 @@ const DEFAULT_UI_PREFERENCES: UiPreferences = {
   confirmWorkflowSend: true,
   collapseSidebarOnLaunch: false,
   enableImagePrefetch: true,
+  enableLiveGalleryRefresh: true,
   defaultFolderTreeView: true,
 };
 
@@ -74,6 +75,7 @@ const getStoredUiPreferences = (): UiPreferences => {
       confirmWorkflowSend: typeof parsed.confirmWorkflowSend === "boolean" ? parsed.confirmWorkflowSend : DEFAULT_UI_PREFERENCES.confirmWorkflowSend,
       collapseSidebarOnLaunch: typeof parsed.collapseSidebarOnLaunch === "boolean" ? parsed.collapseSidebarOnLaunch : DEFAULT_UI_PREFERENCES.collapseSidebarOnLaunch,
       enableImagePrefetch: typeof parsed.enableImagePrefetch === "boolean" ? parsed.enableImagePrefetch : DEFAULT_UI_PREFERENCES.enableImagePrefetch,
+      enableLiveGalleryRefresh: typeof parsed.enableLiveGalleryRefresh === "boolean" ? parsed.enableLiveGalleryRefresh : DEFAULT_UI_PREFERENCES.enableLiveGalleryRefresh,
       defaultFolderTreeView: typeof parsed.defaultFolderTreeView === "boolean" ? parsed.defaultFolderTreeView : DEFAULT_UI_PREFERENCES.defaultFolderTreeView,
     };
   } catch {
@@ -96,7 +98,10 @@ function App() {
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [boardDialogOpen, setBoardDialogOpen] = useState(false);
 
-  const gallery = useGalleryData();
+  const gallery = useGalleryData({
+    isActive: activeTab === "gallery",
+    liveRefreshEnabled: uiPreferences.enableLiveGalleryRefresh,
+  });
   const library = useLibraryData(true);
 
   const filteredLibraries = useMemo(

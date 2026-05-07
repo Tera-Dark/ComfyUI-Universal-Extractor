@@ -81,6 +81,12 @@ const preferenceItems = [
     descriptionKey: "settingsPrefImagePrefetchHint",
   },
   {
+    key: "enableLiveGalleryRefresh",
+    icon: RefreshCw,
+    titleKey: "settingsPrefLiveRefresh",
+    descriptionKey: "settingsPrefLiveRefreshHint",
+  },
+  {
     key: "defaultFolderTreeView",
     icon: SplitSquareVertical,
     titleKey: "settingsPrefFolderTree",

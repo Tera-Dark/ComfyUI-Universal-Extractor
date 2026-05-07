@@ -231,7 +231,7 @@ export const ImageDetailModal = ({
         clearTimeout(visualTransitionTimerRef.current);
       }
     };
-  }, [image.relative_path, image.original_url, image.url, image.thumb_url, image.title, image.filename, navigation?.currentIndex]);
+  }, [image, navigation?.currentIndex]);
 
   useEffect(() => {
     const items = navigation?.items ?? [];

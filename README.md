@@ -211,21 +211,31 @@ npm run build
 
 ## 验证
 
-推荐在提交前执行：
+开发环境先安装测试依赖：
 
 ```bash
-cd gallery_ui
-npm run build
-cd ..
-python -m compileall py\gallery
+pip install -r requirements-dev.txt
 ```
 
-如果修改了 TypeScript 类型或组件，也建议执行：
+Windows 本地推荐使用一键验证脚本；脚本会优先使用 ComfyUI Aki 自带 Python，找不到时回退到 `python`：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
+```
+
+也可以分步执行：
 
 ```bash
+D:\comfyui\ComfyUI-aki-v1.5\ComfyUI-aki-v1.5\python\python.exe -m pytest
+D:\comfyui\ComfyUI-aki-v1.5\ComfyUI-aki-v1.5\python\python.exe -m compileall py\gallery
 cd gallery_ui
+npm run typecheck
 npm run lint
+npm run test:run
+npm run build
 ```
+
+CI 会在 Windows 上执行同一组 Python 和前端检查。`npm run build` 会自动把最新 CSS/JS 内容同步到已跟踪的旧 hash 兼容文件名，降低 ComfyUI 或浏览器旧缓存请求静态资源 404 的概率。CI 只验证构建可以通过，不会自动提交 `gallery_ui/dist/`；发布前仍需显式提交构建产物。
 
 ## 系统要求
 

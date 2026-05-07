@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   CalendarX,
   ChevronDown,
@@ -715,13 +715,13 @@ export const GalleryWorkspace = ({
     }
   };
 
-  const setSelection = (relativePaths: string[]) => {
+  const setSelection = useCallback((relativePaths: string[]) => {
     const visiblePathSet = new Set(visibleSelectionPaths);
     const dedupedPaths = relativePaths.filter(
       (path, index, paths) => visiblePathSet.has(path) && paths.indexOf(path) === index,
     );
     onSelectionChange(dedupedPaths);
-  };
+  }, [onSelectionChange, visibleSelectionPaths]);
 
   const toggleSelection = (relativePath: string, preserveAnchor = false) => {
     if (pageSelectedPaths.includes(relativePath)) {
@@ -771,15 +771,15 @@ export const GalleryWorkspace = ({
     toggleSelection(relativePath);
   };
 
-  const selectAllVisible = () => {
+  const selectAllVisible = useCallback(() => {
     setSelection(visibleSelectionPaths);
     lastSelectedPathRef.current = visibleSelectionPaths[0] || "";
-  };
+  }, [setSelection, visibleSelectionPaths]);
 
-  const clearSelection = () => {
+  const clearSelection = useCallback(() => {
     onSelectionChange([]);
     lastSelectedPathRef.current = "";
-  };
+  }, [onSelectionChange]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -799,7 +799,7 @@ export const GalleryWorkspace = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [selectedImagePaths.length, visibleSelectionPaths, pageSelectedPaths]);
+  }, [selectedImagePaths.length, visibleSelectionPaths, pageSelectedPaths, selectAllVisible, clearSelection]);
 
   const handleBatchDelete = async () => {
     if (!hasSelection) {

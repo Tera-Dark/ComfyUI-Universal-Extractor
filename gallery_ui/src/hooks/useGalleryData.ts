@@ -6,8 +6,17 @@ import type { BoardSummary, ColorIndexStatus, DetailNavigationState, GalleryCont
 import { PAGE_SIZE } from "../utils/formatters";
 
 const TRASH_SUBFOLDER_KEY = "__trash__";
+const LIVE_GALLERY_REFRESH_INTERVAL_MS = 12_000;
+const LIVE_GALLERY_REFRESH_FOCUS_DEBOUNCE_MS = 4_000;
 
-export const useGalleryData = () => {
+interface UseGalleryDataOptions {
+  isActive?: boolean;
+  liveRefreshEnabled?: boolean;
+}
+
+export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
+  const isActive = options.isActive ?? true;
+  const liveRefreshEnabled = options.liveRefreshEnabled ?? true;
   const { t } = useI18n();
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [context, setContext] = useState<GalleryContext | null>(null);
@@ -41,6 +50,8 @@ export const useGalleryData = () => {
   const hasLoadedImagesRef = useRef(false);
   const consumedContextRefreshKeyRef = useRef(0);
   const consumedImagesRefreshKeyRef = useRef(0);
+  const liveRefreshRunningRef = useRef(false);
+  const lastLiveRefreshAtRef = useRef(0);
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const isTrashView = selectedSubfolder === TRASH_SUBFOLDER_KEY;
 
@@ -79,7 +90,8 @@ export const useGalleryData = () => {
 
   useEffect(() => {
     let isCancelled = false;
-    const shouldForceRefresh = refreshKey > 0 && consumedImagesRefreshKeyRef.current !== refreshKey;
+    const shouldForceRefresh =
+      !hasLoadedImagesRef.current || (refreshKey > 0 && consumedImagesRefreshKeyRef.current !== refreshKey);
     if (shouldForceRefresh) {
       consumedImagesRefreshKeyRef.current = refreshKey;
     }
@@ -128,6 +140,13 @@ export const useGalleryData = () => {
         setTrashItems([]);
         setTotal(imageResponse.total ?? 0);
         setColorIndexStatus(imageResponse.color_index_status ?? null);
+        if (shouldForceRefresh) {
+          const contextResponse = await galleryApi.getContext(false);
+          if (!isCancelled) {
+            setContext(contextResponse);
+            setColorIndexStatus(contextResponse.color_index_status ?? imageResponse.color_index_status ?? null);
+          }
+        }
         void galleryApi
           .prewarmThumbnails((imageResponse.images ?? []).map((image) => image.relative_path), PAGE_SIZE)
           .catch(() => undefined);
@@ -152,6 +171,95 @@ export const useGalleryData = () => {
   }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, t, isTrashView]);
 
   useEffect(() => {
+    if (!liveRefreshEnabled || !isActive || isTrashView) {
+      return;
+    }
+
+    const refreshSilently = async (reason: "interval" | "focus") => {
+      if (liveRefreshRunningRef.current || document.visibilityState === "hidden") {
+        return;
+      }
+
+      const now = Date.now();
+      if (reason === "focus" && now - lastLiveRefreshAtRef.current < LIVE_GALLERY_REFRESH_FOCUS_DEBOUNCE_MS) {
+        return;
+      }
+
+      liveRefreshRunningRef.current = true;
+      lastLiveRefreshAtRef.current = now;
+      try {
+        const imageResponse = await galleryApi.listImages(
+          page,
+          PAGE_SIZE,
+          deferredSearchTerm,
+          selectedCategory,
+          selectedSubfolder,
+          selectedBoardId,
+          dateFrom,
+          dateTo,
+          favoritesOnly,
+          selectedColorFamily,
+          sortBy,
+          sortOrder,
+          true,
+        );
+        const nextImages = imageResponse.images ?? [];
+        const canReplaceCurrentPage = page === 1 && sortBy === "created_at" && sortOrder === "desc";
+
+        setTotal(imageResponse.total ?? 0);
+        setColorIndexStatus(imageResponse.color_index_status ?? null);
+        if (canReplaceCurrentPage) {
+          setImages(nextImages);
+          void galleryApi
+            .prewarmThumbnails(nextImages.map((image) => image.relative_path), PAGE_SIZE)
+            .catch(() => undefined);
+        }
+
+        const contextResponse = await galleryApi.getContext(false);
+        setContext(contextResponse);
+        setColorIndexStatus(contextResponse.color_index_status ?? imageResponse.color_index_status ?? null);
+      } catch {
+        // Silent refresh should never interrupt browsing; manual refresh still reports errors.
+      } finally {
+        liveRefreshRunningRef.current = false;
+      }
+    };
+
+    const interval = window.setInterval(() => {
+      void refreshSilently("interval");
+    }, LIVE_GALLERY_REFRESH_INTERVAL_MS);
+    const handleVisibleRefresh = () => {
+      if (document.visibilityState === "visible") {
+        void refreshSilently("focus");
+      }
+    };
+
+    window.addEventListener("focus", handleVisibleRefresh);
+    document.addEventListener("visibilitychange", handleVisibleRefresh);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", handleVisibleRefresh);
+      document.removeEventListener("visibilitychange", handleVisibleRefresh);
+    };
+  }, [
+    liveRefreshEnabled,
+    isActive,
+    isTrashView,
+    page,
+    deferredSearchTerm,
+    selectedCategory,
+    selectedSubfolder,
+    selectedBoardId,
+    dateFrom,
+    dateTo,
+    favoritesOnly,
+    selectedColorFamily,
+    sortBy,
+    sortOrder,
+  ]);
+
+  useEffect(() => {
     if (!colorIndexStatus || colorIndexStatus.complete || isTrashView) {
       return;
     }
@@ -164,6 +272,13 @@ export const useGalleryData = () => {
     }, 5000);
     return () => window.clearInterval(interval);
   }, [colorIndexStatus, isTrashView]);
+
+  useEffect(() => {
+    if (!liveRefreshEnabled || !isActive || isTrashView || !hasLoadedImagesRef.current) {
+      return;
+    }
+    setRefreshKey((value) => value + 1);
+  }, [liveRefreshEnabled, isActive, isTrashView]);
 
   const refresh = () => setRefreshKey((value) => value + 1);
 

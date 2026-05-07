@@ -1,0 +1,141 @@
+import { act, renderHook } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+
+import { I18nProvider } from "../i18n/I18nProvider";
+import type { GalleryContext, ImageListResponse } from "../types/universal-gallery";
+import { galleryApi } from "../services/galleryApi";
+import { useGalleryData } from "./useGalleryData";
+
+vi.mock("../services/galleryApi", () => ({
+  galleryApi: {
+    getContext: vi.fn(),
+    listImages: vi.fn(),
+    listTrash: vi.fn(),
+    prewarmThumbnails: vi.fn(),
+    getColorIndexStatus: vi.fn(),
+  },
+}));
+
+const contextResponse: GalleryContext = {
+  base_dir: "D:/ComfyUI",
+  output_dir_absolute: "D:/ComfyUI/output",
+  output_dir_relative: "./output",
+  import_image_subfolder: "universal_gallery_imports",
+  import_image_target_relative: "./output/universal_gallery_imports",
+  categories: [],
+  subfolders: [],
+  move_targets: [],
+  sources: [],
+  active_source_count: 0,
+  pinned_count: 0,
+  boards: [],
+  color_index_status: {
+    running: false,
+    queued: 0,
+    total: 1,
+    indexed: 1,
+    missing: 0,
+    complete: true,
+    version: "3",
+    threshold: 0.25,
+  },
+};
+
+const imagePage = (suffix: string, total: number): ImageListResponse => ({
+  images: [
+    {
+      filename: `image-${suffix}.png`,
+      relative_path: `image-${suffix}.png`,
+      subfolder: "",
+      url: `/view?filename=image-${suffix}.png&type=output`,
+      original_url: `/view?filename=image-${suffix}.png&type=output`,
+      thumb_url: `/universal_gallery/api/thumb?relative_path=image-${suffix}.png`,
+      size: 10,
+      created_at: 100,
+      favorite: false,
+      pinned: false,
+      boards: [],
+      category: "",
+      title: "",
+      notes: "",
+    },
+  ],
+  total,
+  page: 1,
+  limit: 48,
+  color_index_status: contextResponse.color_index_status,
+});
+
+const wrapper = ({ children }: { children: ReactNode }) => <I18nProvider>{children}</I18nProvider>;
+
+const flushAsyncEffects = async () => {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+};
+
+describe("useGalleryData live refresh", () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.mocked(galleryApi.getContext).mockResolvedValue(contextResponse);
+    vi.mocked(galleryApi.prewarmThumbnails).mockResolvedValue({
+      ok: true,
+      queued: [],
+      skipped: [],
+      status: {
+        pending: 0,
+        queued: 0,
+        completed: 0,
+        failed: 0,
+        last_error: "",
+        updated_at: 0,
+      },
+    });
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("visible");
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it("quietly refreshes the first gallery page while visible", async () => {
+    vi.mocked(galleryApi.listImages)
+      .mockResolvedValueOnce(imagePage("initial", 1))
+      .mockResolvedValue(imagePage("refresh", 2));
+
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: true }), { wrapper });
+
+    await flushAsyncEffects();
+    expect(galleryApi.listImages).toHaveBeenCalled();
+    const callsBeforeInterval = vi.mocked(galleryApi.listImages).mock.calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+    await flushAsyncEffects();
+
+    expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforeInterval + 1);
+    expect(result.current.images[0]?.filename).toBe("image-refresh.png");
+    expect(result.current.total).toBe(2);
+    expect(vi.mocked(galleryApi.listImages).mock.calls.at(-1)?.at(-1)).toBe(true);
+  });
+
+  it("does not schedule live refresh when the preference is disabled", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
+
+    renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: false }), { wrapper });
+
+    await flushAsyncEffects();
+    expect(galleryApi.listImages).toHaveBeenCalled();
+    const callsBeforeInterval = vi.mocked(galleryApi.listImages).mock.calls.length;
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(24_000);
+    });
+    await flushAsyncEffects();
+
+    expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforeInterval);
+  });
+});

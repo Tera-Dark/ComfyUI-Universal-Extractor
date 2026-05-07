@@ -1,4 +1,7 @@
-from .py.plugin import load_node_class, register_gallery_routes
+try:
+    from .py.plugin import load_node_class, register_gallery_routes
+except ImportError:
+    from py.plugin import load_node_class, register_gallery_routes
 
 
 UniversalTextExtractor = load_node_class()

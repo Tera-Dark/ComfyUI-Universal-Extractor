@@ -25,3 +25,7 @@ PublisherId = "teradark"
 DisplayName = "ComfyUI Universal Extractor"
 Icon = "https://raw.githubusercontent.com/Tera-Dark/ComfyUI-Universal-Extractor/master/gallery_ui/public/favicon.svg"
 requires-comfyui = ">=0.3.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

@@ -526,6 +526,8 @@ const zhCN = {
   settingsPrefCollapseSidebarHint: "桌面端打开图库时默认收起左侧资源栏，适合小屏或专注看图。",
   settingsPrefImagePrefetch: "预加载附近图片",
   settingsPrefImagePrefetchHint: "滚动图库时提前加载附近缩略图，关闭后可减少后台网络和磁盘读取。",
+  settingsPrefLiveRefresh: "图库自动同步最新输出",
+  settingsPrefLiveRefreshHint: "进入图库时自动重扫一次；页面可见时静默检查 ComfyUI 新输出，减少手动刷新。",
   settingsPrefFolderTree: "目录默认树形视图",
   settingsPrefFolderTreeHint: "关闭后输出目录默认使用平铺列表，更适合目录层级很浅的图库。",
   settingsPathOk: "路径可用，顶层发现 {count} 张图片。",

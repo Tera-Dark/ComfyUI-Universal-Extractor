@@ -1,0 +1,57 @@
+name: Verify
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    name: Windows verification
+    runs-on: windows-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Run Python tests
+        run: python -m pytest
+
+      - name: Compile gallery backend
+        run: python -m compileall py\gallery
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: gallery_ui/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: gallery_ui
+        run: npm ci
+
+      - name: Typecheck frontend
+        working-directory: gallery_ui
+        run: npm run typecheck
+
+      - name: Lint frontend
+        working-directory: gallery_ui
+        run: npm run lint
+
+      - name: Test frontend
+        working-directory: gallery_ui
+        run: npm run test:run
+
+      - name: Build frontend
+        working-directory: gallery_ui
+        run: npm run build
