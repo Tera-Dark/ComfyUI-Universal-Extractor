@@ -24,6 +24,8 @@ const COMFY_WINDOW_NAME = "comfyui-main";
 const WORKFLOW_MESSAGE_TYPE = "universal-extractor:workflow-message";
 const MAX_STORAGE_WORKFLOW_BYTES = 1_500_000;
 const UI_PREFERENCES_KEY = "universal-extractor:ui-preferences";
+const DEFAULT_OUTPUT_SOURCE_ROOT = "default_output::";
+const FOLDER_REF_SEPARATOR = "::";
 
 const DEFAULT_UI_PREFERENCES: UiPreferences = {
   defaultSelectionMode: false,
@@ -33,6 +35,11 @@ const DEFAULT_UI_PREFERENCES: UiPreferences = {
   enableLiveGalleryRefresh: true,
   defaultFolderTreeView: true,
 };
+
+const isSourceRootRef = (value: string) => value.includes(FOLDER_REF_SEPARATOR) && value.split(FOLDER_REF_SEPARATOR, 2)[1] === "";
+
+const toFolderDialogValue = (value: string) =>
+  value.startsWith(DEFAULT_OUTPUT_SOURCE_ROOT) ? value.slice(DEFAULT_OUTPUT_SOURCE_ROOT.length) : value;
 
 type FolderDialogMode = "create" | "merge" | "rename";
 
@@ -265,7 +272,12 @@ function App() {
   };
 
   const handleCreateFolder = () => {
-    const basePath = gallery.selectedSubfolder ? `${gallery.selectedSubfolder}/` : "";
+    const basePath =
+      !gallery.selectedSubfolder || gallery.selectedSubfolder === DEFAULT_OUTPUT_SOURCE_ROOT
+        ? ""
+        : isSourceRootRef(gallery.selectedSubfolder)
+          ? gallery.selectedSubfolder
+          : `${toFolderDialogValue(gallery.selectedSubfolder)}/`;
     setFolderDialog({ mode: "create", initialValue: basePath });
   };
 
@@ -320,7 +332,7 @@ function App() {
     }
     const approved = await confirm({
       title: t("commonDelete"),
-      message: t("folderDeleteConfirm", { name: gallery.selectedSubfolder }),
+      message: t("folderDeleteConfirm", { name: toFolderDialogValue(gallery.selectedSubfolder) }),
       tone: gallery.selectedSubfolder.includes("/") ? "warning" : "danger",
       confirmLabel: t("commonDelete"),
       cancelLabel: t("libraryCancel"),
@@ -348,7 +360,7 @@ function App() {
     if (!path) {
       return;
     }
-    setFolderDialog({ mode: "rename", initialValue: path, sourcePath: path });
+    setFolderDialog({ mode: "rename", initialValue: toFolderDialogValue(path), sourcePath: path });
   };
 
   const handleWorkbenchLibrarySelect = async (name: string) => {
@@ -582,6 +594,7 @@ function App() {
               importMessage={gallery.importMessage}
               isLoading={gallery.isLoading}
               isRefreshing={gallery.isRefreshing}
+              hasPendingLiveRefresh={gallery.hasPendingLiveRefresh}
               error={gallery.error}
               boards={gallery.boards}
               defaultSelectionMode={uiPreferences.defaultSelectionMode}
@@ -605,6 +618,7 @@ function App() {
               onDeleteBoard={gallery.deleteBoard}
               onDeleteImages={gallery.deleteImages}
               onImportFiles={handleImportFiles}
+              onApplyPendingLiveRefresh={gallery.refresh}
               onRestoreTrashItem={async (id) => {
                 await gallery.restoreTrashItem(id);
                 pushToast(t("trashRestore"), "success");

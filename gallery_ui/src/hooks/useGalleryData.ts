@@ -6,13 +6,22 @@ import type { BoardSummary, ColorIndexStatus, DetailNavigationState, GalleryCont
 import { PAGE_SIZE } from "../utils/formatters";
 
 const TRASH_SUBFOLDER_KEY = "__trash__";
-const LIVE_GALLERY_REFRESH_INTERVAL_MS = 12_000;
+const DEFAULT_OUTPUT_SOURCE_ROOT = "default_output::";
+const FOLDER_REF_SEPARATOR = "::";
+const LIVE_GALLERY_REFRESH_INTERVAL_MS = 6_000;
 const LIVE_GALLERY_REFRESH_FOCUS_DEBOUNCE_MS = 4_000;
 
 interface UseGalleryDataOptions {
   isActive?: boolean;
   liveRefreshEnabled?: boolean;
 }
+
+const getSourceRootRef = (folderRef: string) => {
+  if (folderRef.includes(FOLDER_REF_SEPARATOR)) {
+    return `${folderRef.split(FOLDER_REF_SEPARATOR, 1)[0]}${FOLDER_REF_SEPARATOR}`;
+  }
+  return DEFAULT_OUTPUT_SOURCE_ROOT;
+};
 
 export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const isActive = options.isActive ?? true;
@@ -25,7 +34,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
-  const [selectedSubfolder, setSelectedSubfolder] = useState("");
+  const [selectedSubfolder, setSelectedSubfolder] = useState(DEFAULT_OUTPUT_SOURCE_ROOT);
   const [selectedBoardId, setSelectedBoardId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -41,6 +50,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasPendingLiveRefresh, setHasPendingLiveRefresh] = useState(false);
   const [selectedImage, setSelectedImage] = useState<ImageRecord | null>(null);
   const [detailNavigation, setDetailNavigation] = useState<DetailNavigationState | null>(null);
   const [selectedImagePaths, setSelectedImagePaths] = useState<string[]>([]);
@@ -52,6 +62,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const consumedImagesRefreshKeyRef = useRef(0);
   const liveRefreshRunningRef = useRef(false);
   const lastLiveRefreshAtRef = useRef(0);
+  const liveRefreshFingerprintRef = useRef("");
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const isTrashView = selectedSubfolder === TRASH_SUBFOLDER_KEY;
 
@@ -188,6 +199,18 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       liveRefreshRunningRef.current = true;
       lastLiveRefreshAtRef.current = now;
       try {
+        const freshness = await galleryApi.getImageFreshness(selectedSubfolder, liveRefreshFingerprintRef.current);
+        liveRefreshFingerprintRef.current = freshness.fingerprint;
+        if (!freshness.changed) {
+          return;
+        }
+
+        const canReplaceCurrentPage = page === 1 && sortBy === "created_at" && sortOrder === "desc";
+        if (!canReplaceCurrentPage) {
+          setHasPendingLiveRefresh(true);
+          return;
+        }
+
         const imageResponse = await galleryApi.listImages(
           page,
           PAGE_SIZE,
@@ -204,16 +227,14 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
           true,
         );
         const nextImages = imageResponse.images ?? [];
-        const canReplaceCurrentPage = page === 1 && sortBy === "created_at" && sortOrder === "desc";
 
         setTotal(imageResponse.total ?? 0);
         setColorIndexStatus(imageResponse.color_index_status ?? null);
-        if (canReplaceCurrentPage) {
-          setImages(nextImages);
-          void galleryApi
-            .prewarmThumbnails(nextImages.map((image) => image.relative_path), PAGE_SIZE)
-            .catch(() => undefined);
-        }
+        setHasPendingLiveRefresh(false);
+        setImages(nextImages);
+        void galleryApi
+          .prewarmThumbnails(nextImages.map((image) => image.relative_path), PAGE_SIZE)
+          .catch(() => undefined);
 
         const contextResponse = await galleryApi.getContext(false);
         setContext(contextResponse);
@@ -260,6 +281,11 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   ]);
 
   useEffect(() => {
+    liveRefreshFingerprintRef.current = "";
+    setHasPendingLiveRefresh(false);
+  }, [selectedSubfolder]);
+
+  useEffect(() => {
     if (!colorIndexStatus || colorIndexStatus.complete || isTrashView) {
       return;
     }
@@ -280,7 +306,10 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     setRefreshKey((value) => value + 1);
   }, [liveRefreshEnabled, isActive, isTrashView]);
 
-  const refresh = () => setRefreshKey((value) => value + 1);
+  const refresh = () => {
+    setHasPendingLiveRefresh(false);
+    setRefreshKey((value) => value + 1);
+  };
 
   const applyContextPatch = (
     updater: (current: GalleryContext) => GalleryContext,
@@ -413,7 +442,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       categories: response.categories ?? current.categories,
     }));
     if (selectedSubfolder === path || selectedSubfolder.startsWith(`${path}/`)) {
-      setSelectedSubfolder("");
+      setSelectedSubfolder(getSourceRootRef(path));
     }
     refresh();
     return response;
@@ -427,7 +456,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       categories: response.categories ?? current.categories,
     }));
     if (selectedSubfolder === sourcePath || selectedSubfolder.startsWith(`${sourcePath}/`)) {
-      setSelectedSubfolder(targetPath);
+      setSelectedSubfolder(response.target_path ?? targetPath);
     }
     refresh();
     return response;
@@ -442,7 +471,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     }));
     if (selectedSubfolder === sourcePath || selectedSubfolder.startsWith(`${sourcePath}/`)) {
       const suffix = selectedSubfolder.slice(sourcePath.length);
-      setSelectedSubfolder(`${targetPath}${suffix}`);
+      setSelectedSubfolder(`${response.target_path ?? targetPath}${suffix}`);
     }
     refresh();
     return response;
@@ -557,6 +586,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     setGridColumns,
     isLoading,
     isRefreshing,
+    hasPendingLiveRefresh,
     error,
     selectedImage,
     setSelectedImage,

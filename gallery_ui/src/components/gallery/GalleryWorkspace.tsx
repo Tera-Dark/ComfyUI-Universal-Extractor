@@ -185,6 +185,7 @@ interface GalleryWorkspaceProps {
   importMessage: string;
   isLoading: boolean;
   isRefreshing: boolean;
+  hasPendingLiveRefresh: boolean;
   error: string | null;
   boards: BoardSummary[];
   defaultSelectionMode: boolean;
@@ -208,6 +209,7 @@ interface GalleryWorkspaceProps {
   onDeleteBoard: (boardId: string) => Promise<unknown>;
   onDeleteImages: (relativePaths: string[]) => Promise<unknown>;
   onImportFiles: (files: File[], targetSourceId?: string) => Promise<unknown>;
+  onApplyPendingLiveRefresh: () => void;
   onRestoreTrashItem: (id: string) => Promise<void>;
   onRestoreTrashItems: (ids: string[]) => Promise<void>;
   onPurgeTrashItem: (id: string) => Promise<void>;
@@ -278,6 +280,7 @@ export const GalleryWorkspace = ({
   importMessage,
   isLoading,
   isRefreshing,
+  hasPendingLiveRefresh,
   error,
   boards,
   defaultSelectionMode,
@@ -301,6 +304,7 @@ export const GalleryWorkspace = ({
   onDeleteBoard,
   onDeleteImages,
   onImportFiles,
+  onApplyPendingLiveRefresh,
   onRestoreTrashItem,
   onRestoreTrashItems,
   onPurgeTrashItem,
@@ -1140,6 +1144,17 @@ export const GalleryWorkspace = ({
               {favoritesOnly ? <em>{t("galleryPinnedOnly")}</em> : null}
               {selectedBoard ? <em>{t("sidebarBoards")}</em> : null}
               {isRefreshing ? <em>{t("commonLoading")}</em> : null}
+              {hasPendingLiveRefresh && !isTrashView ? (
+                <button
+                  className="ue-live-refresh-pill"
+                  type="button"
+                  onClick={onApplyPendingLiveRefresh}
+                  title={t("galleryLiveRefreshAction")}
+                >
+                  <RotateCcw size={12} />
+                  <span>{t("galleryLiveRefreshPending")}</span>
+                </button>
+              ) : null}
             </div>
           </div>
 

@@ -32,12 +32,13 @@ ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台�
 主要能力：
 
 - **多图源管理**：默认挂载 ComfyUI `output/` 和 `input/`，自定义图源会经过路径、权限和导入目标校验。
-- **图片索引**：SQLite 分页索引图片路径、大小、时间、状态、主色、色系占比和色板。
+- **图片索引**：SQLite 分页索引图片路径、大小、时间、状态、主色、色系占比和色板；内部使用 schema 版本、组合索引、FTS 搜索表和色系关系表优化大图库加载。
+- **轻量即时同步**：页面可见时先调用 freshness 指纹检查当前视图，只有检测到文件变化才触发增量索引和列表刷新，避免定时全量重扫。
 - **缩略图与预热**：使用 Pillow 生成 WebP 缩略图，并支持后台预热。
 - **统一筛选面板**：分类、排序字段、升降序、日期范围、Pin 状态和色系筛选统一收纳在筛选入口中；面板采用固定头部、可滚动内容区和固定底部，色系筛选使用紧凑调色板布局。
 - **色系筛选**：支持红、橙、黄、绿、青、蓝、紫、粉、棕、黑、白、灰，以及暖色、冷色、低饱和分组；单个色系占比达到 25% 才会命中筛选。
-- **网格/列表模式**：图库、垃圾箱、词库子项目均支持两种常见排列方式。
-- **资源栏导航**：快捷入口固定在侧边栏顶部，输出目录、图版和分类共用一个滚动区；输出目录支持搜索、树形/列表切换、置顶、排序和右键管理。
+- **网格/列表模式**：图库、垃圾箱、词库子项目均支持两种常见排列方式；垃圾箱网格使用自适应瀑布流，长文件名和原始路径会限制在卡片内部。
+- **资源栏导航**：快捷入口固定在侧边栏顶部，输出图库和输入图库是独立 source 范围；目录区只显示当前入口对应的目录。目录支持搜索、树形/列表切换、置顶、默认按修改时间排序、名称排序备选和右键管理。
 - **选择交互**：默认关闭选择模式，单击图片打开详情；开启选择模式后支持左键拖选、Shift 连选、右键菜单和悬浮操作。
 - **右侧 Inspector**：普通图库页选中图片后，桌面端显示贴屏右侧详情栏并挤压中间内容；移动端以抽屉展示。
 - **图片详情页**：支持左右翻页、键盘导航、缩放、双击背景退出、发送工作流到 ComfyUI；如果 ComfyUI 已打开，会通过消息通道加载到现有页面，避免触发离开页面确认。
@@ -109,6 +110,8 @@ ComfyUI-Universal-Extractor/
 │       └── metadata.py
 ├── web/comfyui/
 │   └── top_menu_extension.js
+├── docs/
+│   └── architecture.md
 ├── gallery_ui/
 │   ├── src/
 │   └── dist/
@@ -125,7 +128,7 @@ ComfyUI-Universal-Extractor/
 
 - `gallery_state.json`：图片状态、分类、图版等持久化数据。
 - `gallery_sources.json`：图库源配置。
-- `gallery_index.sqlite3`：图片分页索引，包含色系和色板字段。
+- `gallery_index.sqlite3`：图片分页索引，包含 `gallery_images` 主表、`gallery_index_meta` 元信息、`gallery_images_fts` 搜索表和 `gallery_image_color_family` 色系关系表。数据库使用 `PRAGMA user_version` 管理内部 schema 迁移。
 - `thumb_cache/`：缩略图缓存。
 - `trash/`：插件内置垃圾箱。
 
@@ -149,6 +152,7 @@ ComfyUI-Universal-Extractor/
 | --- | --- | --- |
 | `GET` | `/api/context` | 获取图源、图版、分类等上下文 |
 | `GET` | `/api/images` | 分页查询图片，支持搜索、分类、日期、Pin、色系筛选和排序；返回色系索引状态 |
+| `GET` | `/api/images/freshness` | 轻量检查当前图库视图是否发生图片文件变化；用于前端自动同步，不重建完整索引 |
 | `GET` | `/api/image-file` | 读取图片文件，仅允许受支持的图片扩展名 |
 | `GET` | `/api/metadata` | 获取图片元数据和工作流信息 |
 | `GET` | `/api/thumb` | 获取缩略图 |
@@ -186,6 +190,8 @@ ComfyUI-Universal-Extractor/
 
 图片列表索引和色系索引是分层执行的：基础图片列表先写入 SQLite，保证图库首屏不被像素分析阻塞；当前页图片会优先进入色系补全队列，全库色系索引由后台单线程低优先级补齐。
 
+图片索引支持增量同步：当 `/api/images/freshness` 或手动刷新发现文件变化时，后端优先只 upsert 新增/修改图片并删除已消失图片；只有冷启动、来源签名变化或数据库缺失时才回退全量重建。列表搜索优先使用 SQLite FTS5，色系筛选优先使用 `gallery_image_color_family` 关系表；旧字段继续保留以兼容已有响应格式。
+
 色系分析会优先读取已有 WebP 缩略图；没有缩略图时才回退读取原图。Pillow 会生成：
 
 - `dominant_color`：主色十六进制值。
@@ -207,7 +213,7 @@ npm run dev
 npm run build
 ```
 
-构建后如果 ComfyUI 或浏览器仍请求旧 hash 文件，可能出现静态资源 404。发布或本地验证时，需要把最新构建产物同步到旧 hash 兼容文件名，或清理浏览器和 ComfyUI 侧缓存。
+构建后如果 ComfyUI 或浏览器仍请求旧 hash 文件，可能出现静态资源 404。发布或本地验证时，需要把当前构建产物同步到旧 hash 兼容文件名，或清理浏览器和 ComfyUI 侧缓存。
 
 ## 验证
 
@@ -235,7 +241,7 @@ npm run test:run
 npm run build
 ```
 
-CI 会在 Windows 上执行同一组 Python 和前端检查。`npm run build` 会自动把最新 CSS/JS 内容同步到已跟踪的旧 hash 兼容文件名，降低 ComfyUI 或浏览器旧缓存请求静态资源 404 的概率。CI 只验证构建可以通过，不会自动提交 `gallery_ui/dist/`；发布前仍需显式提交构建产物。
+CI 会在 Windows 上执行同一组 Python 和前端检查。`npm run build` 会自动把当前 CSS/JS 内容同步到已跟踪的旧 hash 兼容文件名，降低 ComfyUI 或浏览器旧缓存请求静态资源 404 的概率。CI 只验证构建可以通过，不会自动提交 `gallery_ui/dist/`；发布前仍需显式提交构建产物。
 
 ## 系统要求
 

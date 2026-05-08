@@ -74,8 +74,10 @@ IMAGE_REF_SEPARATOR = "::"
 DEFAULT_OUTPUT_SOURCE_ID = "default_output"
 DEFAULT_INPUT_SOURCE_ID = "default_input"
 GALLERY_INDEX_DB_FILE = os.path.join(DATA_DIR, "gallery_index.sqlite3")
+GALLERY_INDEX_SCHEMA_VERSION = 4
 COLOR_INDEX_VERSION = "3"
 COLOR_FAMILY_MIN_RATIO = 0.25
+IMAGE_FRESHNESS_CACHE_TTL_SECONDS = 3.0
 IMAGE_INDEX_CACHE: dict[str, Any] = {
     "signature": None,
     "output_dir": None,
@@ -86,6 +88,8 @@ IMAGE_INDEX_CACHE: dict[str, Any] = {
     "dirty": False,
 }
 IMAGE_INDEX_LOCK = Lock()
+IMAGE_FRESHNESS_CACHE: dict[str, dict[str, Any]] = {}
+IMAGE_FRESHNESS_LOCK = Lock()
 LIBRARY_CACHE: dict[str, dict[str, Any]] = {}
 LIBRARY_CACHE_LOCK = Lock()
 THUMB_GENERATION_SEMAPHORE = BoundedSemaphore(2)
@@ -846,6 +850,26 @@ def resolve_subfolder_path(subfolder: str) -> tuple[str, str]:
     return normalized_subfolder, full_path
 
 
+def _resolve_folder_ref_path(folder_ref: str, *, require_writable: bool = True) -> tuple[dict[str, Any], str, str]:
+    source_id, relative_dir = parse_folder_ref(folder_ref)
+    return resolve_source_subfolder_path(source_id, relative_dir, require_writable=require_writable)
+
+
+def _normalize_folder_ref_for_source(source_id: str, relative_dir: str) -> str:
+    return make_folder_ref(source_id, relative_dir)
+
+
+def _image_state_folder_prefix(source_id: str, relative_dir: str) -> str:
+    return relative_dir if _sanitize_source_id(source_id) == DEFAULT_OUTPUT_SOURCE_ID else make_folder_ref(source_id, relative_dir)
+
+
+def _coerce_target_folder_ref(target_folder: str, default_source_id: str) -> str:
+    value = str(target_folder or "").strip()
+    if IMAGE_REF_SEPARATOR in value:
+        return value
+    return _normalize_folder_ref_for_source(default_source_id, value)
+
+
 def resolve_source_subfolder_path(source_id: str, subfolder: str = "", *, require_writable: bool = False) -> tuple[dict[str, Any], str, str]:
     source = get_gallery_source(source_id)
     if not source.get("enabled", True):
@@ -1135,12 +1159,49 @@ def _connect_gallery_index_db() -> sqlite3.Connection:
         )
         """
     )
+    connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS gallery_image_color_family (
+            relative_path TEXT NOT NULL,
+            family TEXT NOT NULL,
+            score REAL NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY(relative_path, family)
+        )
+        """
+    )
+    try:
+        connection.execute(
+            """
+            CREATE VIRTUAL TABLE IF NOT EXISTS gallery_images_fts
+            USING fts5(relative_path UNINDEXED, search_text, tokenize='trigram')
+            """
+        )
+        connection.execute(
+            "INSERT OR IGNORE INTO gallery_index_meta(key, value) VALUES('fts_available', '1')"
+        )
+    except sqlite3.OperationalError as error:
+        connection.execute(
+            "INSERT OR REPLACE INTO gallery_index_meta(key, value) VALUES('fts_available', '0')"
+        )
+        print(f"[Universal Extractor] Gallery FTS unavailable, falling back to LIKE search: {error}")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_source ON gallery_images(source_id)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_created ON gallery_images(created_at DESC)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_dir ON gallery_images(relative_dir)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_category ON gallery_images(category)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_pinned ON gallery_images(pinned)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_color_family ON gallery_images(color_family)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_source_dir_created ON gallery_images(source_id, relative_dir, created_at DESC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_pinned_created ON gallery_images(pinned, created_at DESC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_category_created ON gallery_images(category, created_at DESC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_color_created ON gallery_images(color_family, created_at DESC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_filename_nocase ON gallery_images(filename COLLATE NOCASE)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_size_desc ON gallery_images(size DESC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_color_family_created ON gallery_image_color_family(family, created_at DESC)")
+    current_version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+    if current_version < GALLERY_INDEX_SCHEMA_VERSION:
+        connection.execute(f"PRAGMA user_version = {GALLERY_INDEX_SCHEMA_VERSION}")
+    connection.commit()
     return connection
 
 
@@ -1162,14 +1223,27 @@ def _collect_index_subfolders(source_id: str, relative_dir: str, subfolders: set
     parts = [part for part in relative_dir.split("/") if part]
     for index in range(len(parts)):
         folder_path = "/".join(parts[: index + 1])
-        if source_id == DEFAULT_OUTPUT_SOURCE_ID:
-            subfolders.add(folder_path)
-        else:
-            subfolders.add(f"{source_id}{IMAGE_REF_SEPARATOR}{folder_path}")
+        subfolders.add(make_folder_ref(source_id, folder_path))
 
 
-def _collect_directory_subfolders(sources: list[dict[str, Any]]) -> set[str]:
-    subfolders: set[str] = set()
+def _folder_ref_key(folder_ref: str) -> tuple[str, str]:
+    source_id, relative_dir = parse_folder_ref(folder_ref)
+    return source_id, relative_dir.casefold()
+
+
+def _merge_subfolder_refs(*groups: set[str]) -> set[str]:
+    merged: dict[tuple[str, str], str] = {}
+    for group in groups:
+        for folder_ref in group:
+            normalized_ref = normalize_relative_path(folder_ref)
+            if not normalized_ref:
+                continue
+            merged.setdefault(_folder_ref_key(normalized_ref), normalized_ref)
+    return set(merged.values())
+
+
+def _collect_directory_subfolder_details(sources: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    subfolders: dict[str, dict[str, Any]] = {}
     for source in sources:
         if not source.get("enabled", True) or not source.get("exists"):
             continue
@@ -1193,15 +1267,27 @@ def _collect_directory_subfolders(sources: list[dict[str, Any]]) -> set[str]:
 
                 relative_dir = normalize_relative_path(os.path.relpath(entry.path, source_root))
                 if relative_dir:
-                    if source["id"] == DEFAULT_OUTPUT_SOURCE_ID:
-                        subfolders.add(relative_dir)
-                    else:
-                        subfolders.add(f'{source["id"]}{IMAGE_REF_SEPARATOR}{relative_dir}')
+                    folder_ref = make_folder_ref(source["id"], relative_dir)
+                    try:
+                        stat = entry.stat(follow_symlinks=False)
+                        modified_at = int(stat.st_mtime)
+                    except OSError:
+                        modified_at = 0
+                    subfolders[folder_ref] = {
+                        "path": folder_ref,
+                        "source_id": source["id"],
+                        "relative_path": relative_dir,
+                        "modified_at": modified_at,
+                    }
 
                 if source.get("recursive", True):
                     stack.append(entry.path)
 
     return subfolders
+
+
+def _collect_directory_subfolders(sources: list[dict[str, Any]]) -> set[str]:
+    return set(_collect_directory_subfolder_details(sources))
 
 
 def _image_row_to_payload(row: sqlite3.Row, source: dict[str, Any]) -> dict[str, Any]:
@@ -1329,6 +1415,7 @@ def _schedule_color_index_backfill(
                         return
 
                     updates = []
+                    failed_paths = []
                     for row in rows:
                         source = source_by_id.get(str(row["source_id"]))
                         if not source:
@@ -1337,6 +1424,12 @@ def _schedule_color_index_backfill(
                         if not os.path.isfile(full_path) or not full_path.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
                             continue
                         color_profile = _extract_image_color_profile(full_path, str(row["relative_path"]))
+                        if (
+                            color_profile["dominant_color"] == COLOR_PROFILE_DEFAULT["dominant_color"]
+                            and color_profile["color_family_scores_json"] == COLOR_PROFILE_DEFAULT["color_family_scores_json"]
+                        ):
+                            failed_paths.append(str(row["relative_path"]))
+                            continue
                         updates.append(
                             (
                                 color_profile["dominant_color"],
@@ -1365,9 +1458,21 @@ def _schedule_color_index_backfill(
                             """,
                             updates,
                         )
+                        updated_paths = [path for *_color_fields, path in updates]
+                        placeholders = ",".join("?" for _ in updated_paths)
+                        updated_rows = connection.execute(
+                            f"""
+                            SELECT relative_path, filename, title, category, notes, color_family, color_families_text,
+                                   color_family_scores_json, created_at
+                            FROM gallery_images
+                            WHERE relative_path IN ({placeholders})
+                            """,
+                            updated_paths,
+                        ).fetchall()
+                        _sync_auxiliary_rows(connection, updated_rows)
                         processed += len(updates)
-                    else:
-                        skipped_paths = [str(row["relative_path"]) for row in rows]
+                    skipped_paths = failed_paths if failed_paths else ([] if updates else [str(row["relative_path"]) for row in rows])
+                    if skipped_paths:
                         connection.executemany(
                             """
                             UPDATE gallery_images
@@ -1380,6 +1485,17 @@ def _schedule_color_index_backfill(
                             """,
                             [(path,) for path in skipped_paths],
                         )
+                        placeholders = ",".join("?" for _ in skipped_paths)
+                        skipped_rows = connection.execute(
+                            f"""
+                            SELECT relative_path, filename, title, category, notes, color_family, color_families_text,
+                                   color_family_scores_json, created_at
+                            FROM gallery_images
+                            WHERE relative_path IN ({placeholders})
+                            """,
+                            skipped_paths,
+                        ).fetchall()
+                        _sync_auxiliary_rows(connection, skipped_rows)
                     connection.commit()
 
                     if processed and processed % 800 == 0:
@@ -1409,15 +1525,150 @@ def _image_row_state(row: sqlite3.Row) -> dict[str, Any]:
     }
 
 
-def _sync_image_state_to_index_db(connection: sqlite3.Connection, state_map: dict[str, dict[str, Any]] | None = None):
-    state_map = state_map if state_map is not None else get_image_state_map()
-    connection.execute("CREATE TEMP TABLE IF NOT EXISTS temp_gallery_state_paths(relative_path TEXT PRIMARY KEY)")
-    connection.execute("DELETE FROM temp_gallery_state_paths")
-    if state_map:
+def _gallery_state_file_path() -> str:
+    return os.path.join(DATA_DIR, "gallery_state.json")
+
+
+def _gallery_state_signature(state_map: dict[str, dict[str, Any]] | None = None) -> tuple[str, str]:
+    if state_map is None:
+        state_file = _gallery_state_file_path()
+        try:
+            with open(state_file, "rb") as file:
+                payload = file.read()
+            return str(os.stat(state_file).st_mtime_ns), hashlib.sha256(payload).hexdigest()
+        except OSError:
+            state_map = {}
+
+    payload = json.dumps(state_map, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+    return "memory", hashlib.sha256(payload).hexdigest()
+
+
+def _current_state_paths_from_db(connection: sqlite3.Connection) -> set[str]:
+    encoded_paths = _index_meta_get(connection, "gallery_state_paths_json")
+    if encoded_paths:
+        try:
+            parsed = json.loads(encoded_paths)
+            if isinstance(parsed, list):
+                return {normalize_relative_path(path) for path in parsed if str(path).strip()}
+        except json.JSONDecodeError:
+            pass
+
+    rows = connection.execute(
+        """
+        SELECT relative_path
+        FROM gallery_images
+        WHERE title <> '' OR category <> '' OR notes <> '' OR pinned = 1 OR boards_text <> ''
+        """
+    ).fetchall()
+    return {str(row["relative_path"]) for row in rows}
+
+
+def _search_text_for_row(row: sqlite3.Row | dict[str, Any]) -> str:
+    return " ".join(
+        [
+            str(row["filename"] or ""),
+            str(row["relative_path"] or ""),
+            str(row["title"] or ""),
+            str(row["category"] or ""),
+            str(row["notes"] or ""),
+        ]
+    )
+
+
+def _fts_match_query(search: str) -> str:
+    value = str(search or "").strip()
+    if len(value) < 3:
+        return ""
+    return f'"{value.replace(chr(34), chr(34) + chr(34))}"'
+
+
+def _color_family_rows_for_image(row: sqlite3.Row | dict[str, Any]) -> list[tuple[str, str, float, int]]:
+    relative_path = str(row["relative_path"])
+    created_at = int(row["created_at"] or 0)
+    families: dict[str, float] = {}
+    primary_family = str(row["color_family"] or "").strip()
+    if primary_family:
+        families[primary_family] = max(families.get(primary_family, 0), 1.0)
+    for family in str(row["color_families_text"] or "").splitlines():
+        family = family.strip()
+        if family:
+            families[family] = max(families.get(family, 0), COLOR_FAMILY_MIN_RATIO)
+    try:
+        score_map = json.loads(str(row["color_family_scores_json"] or "{}"))
+    except json.JSONDecodeError:
+        score_map = {}
+    if isinstance(score_map, dict):
+        for family, score in score_map.items():
+            try:
+                parsed_score = float(score)
+            except (TypeError, ValueError):
+                continue
+            if parsed_score >= COLOR_FAMILY_MIN_RATIO or family in {"warm", "cool", "low_saturation"} and parsed_score > 0:
+                families[str(family)] = max(families.get(str(family), 0), parsed_score)
+    return [(relative_path, family, score, created_at) for family, score in sorted(families.items())]
+
+
+def _sync_auxiliary_rows(connection: sqlite3.Connection, rows: list[sqlite3.Row | dict[str, Any]], remove_paths: list[str] | None = None):
+    removed_paths = [normalize_relative_path(path) for path in (remove_paths or []) if normalize_relative_path(path)]
+    if removed_paths:
+        connection.executemany("DELETE FROM gallery_image_color_family WHERE relative_path = ?", [(path,) for path in removed_paths])
+        if _index_meta_get(connection, "fts_available") == "1":
+            connection.executemany("DELETE FROM gallery_images_fts WHERE relative_path = ?", [(path,) for path in removed_paths])
+
+    if not rows:
+        return
+
+    relative_paths = [str(row["relative_path"]) for row in rows]
+    connection.executemany("DELETE FROM gallery_image_color_family WHERE relative_path = ?", [(path,) for path in relative_paths])
+    color_rows: list[tuple[str, str, float, int]] = []
+    for row in rows:
+        color_rows.extend(_color_family_rows_for_image(row))
+    if color_rows:
         connection.executemany(
-            "INSERT OR IGNORE INTO temp_gallery_state_paths(relative_path) VALUES(?)",
-            [(relative_path,) for relative_path in state_map],
+            """
+            INSERT OR REPLACE INTO gallery_image_color_family(relative_path, family, score, created_at)
+            VALUES(?, ?, ?, ?)
+            """,
+            color_rows,
         )
+
+    if _index_meta_get(connection, "fts_available") == "1":
+        connection.executemany("DELETE FROM gallery_images_fts WHERE relative_path = ?", [(path,) for path in relative_paths])
+        connection.executemany(
+            "INSERT INTO gallery_images_fts(relative_path, search_text) VALUES(?, ?)",
+            [(str(row["relative_path"]), _search_text_for_row(row)) for row in rows],
+        )
+
+
+def _ensure_auxiliary_tables_current(connection: sqlite3.Connection):
+    if _index_meta_get(connection, "auxiliary_schema_version") == str(GALLERY_INDEX_SCHEMA_VERSION):
+        return
+    rows = connection.execute(
+        """
+        SELECT relative_path, filename, title, category, notes, color_family, color_families_text,
+               color_family_scores_json, created_at
+        FROM gallery_images
+        """
+    ).fetchall()
+    connection.execute("DELETE FROM gallery_image_color_family")
+    if _index_meta_get(connection, "fts_available") == "1":
+        connection.execute("DELETE FROM gallery_images_fts")
+    _sync_auxiliary_rows(connection, rows)
+    _index_meta_set(connection, "auxiliary_schema_version", str(GALLERY_INDEX_SCHEMA_VERSION))
+
+
+def _sync_image_state_to_index_db(connection: sqlite3.Connection, state_map: dict[str, dict[str, Any]] | None = None):
+    state_mtime, state_digest = _gallery_state_signature(state_map)
+    if (
+        _index_meta_get(connection, "gallery_state_mtime") == state_mtime
+        and _index_meta_get(connection, "gallery_state_digest") == state_digest
+    ):
+        return False
+
+    state_map = state_map if state_map is not None else get_image_state_map()
+    previous_paths = _current_state_paths_from_db(connection)
+    current_paths = {normalize_relative_path(path) for path in state_map if normalize_relative_path(path)}
+    cleared_paths = sorted(previous_paths - current_paths)
     rows = [
         (
             str(image_state.get("title", "")),
@@ -1438,13 +1689,32 @@ def _sync_image_state_to_index_db(connection: sqlite3.Connection, state_map: dic
             """,
             rows,
         )
-    connection.execute(
-        """
-        UPDATE gallery_images
-        SET title = '', category = '', notes = '', pinned = 0, boards_text = ''
-        WHERE relative_path NOT IN (SELECT relative_path FROM temp_gallery_state_paths)
-        """,
-    )
+    if cleared_paths:
+        connection.executemany(
+            """
+            UPDATE gallery_images
+            SET title = '', category = '', notes = '', pinned = 0, boards_text = ''
+            WHERE relative_path = ?
+            """,
+            [(path,) for path in cleared_paths],
+        )
+    affected_paths = sorted(current_paths | set(cleared_paths))
+    if affected_paths:
+        placeholders = ",".join("?" for _ in affected_paths)
+        affected_rows = connection.execute(
+            f"""
+            SELECT relative_path, filename, title, category, notes, color_family, color_families_text,
+                   color_family_scores_json, created_at
+            FROM gallery_images
+            WHERE relative_path IN ({placeholders})
+            """,
+            affected_paths,
+        ).fetchall()
+        _sync_auxiliary_rows(connection, affected_rows)
+    _index_meta_set(connection, "gallery_state_mtime", state_mtime)
+    _index_meta_set(connection, "gallery_state_digest", state_digest)
+    _index_meta_set(connection, "gallery_state_paths_json", json.dumps(sorted(current_paths), ensure_ascii=False))
+    return True
 
 
 def _load_image_index_from_db(sources: list[dict[str, Any]], signature: str) -> dict[str, Any] | None:
@@ -1590,6 +1860,19 @@ def _save_image_index_to_db(index: dict[str, Any]):
             """,
             rows,
         )
+        connection.execute("DELETE FROM gallery_image_color_family")
+        if _index_meta_get(connection, "fts_available") == "1":
+            connection.execute("DELETE FROM gallery_images_fts")
+        auxiliary_rows = connection.execute(
+            """
+            SELECT relative_path, filename, title, category, notes, color_family, color_families_text,
+                   color_family_scores_json, created_at
+            FROM gallery_images
+            """
+        ).fetchall()
+        _sync_auxiliary_rows(connection, auxiliary_rows)
+        _index_meta_set(connection, "auxiliary_schema_version", str(GALLERY_INDEX_SCHEMA_VERSION))
+        _sync_image_state_to_index_db(connection, image_states)
         _index_meta_set(connection, "source_signature", str(index.get("signature") or ""))
         _index_meta_set(connection, "color_index_version", COLOR_INDEX_VERSION if index.get("color_index_complete") else "")
         _index_meta_set(connection, "built_at", str(index.get("built_at") or scanned_at))
@@ -1605,6 +1888,8 @@ def invalidate_image_index_cache():
         IMAGE_INDEX_CACHE["output_dir"] = None
         IMAGE_INDEX_CACHE["signature"] = None
         IMAGE_INDEX_CACHE["dirty"] = True
+    with IMAGE_FRESHNESS_LOCK:
+        IMAGE_FRESHNESS_CACHE.clear()
 
 
 def _build_image_index(sources: list[dict[str, Any]], include_color_profiles: bool = False) -> dict[str, Any]:
@@ -1664,7 +1949,7 @@ def _build_image_index(sources: list[dict[str, Any]], include_color_profiles: bo
                         "source_kind": source["kind"],
                         "source_path": source["path"],
                         "source_relative_path": relative_path,
-                        "relative_dir": relative_dir.lower(),
+                        "relative_dir": relative_dir,
                         "subfolder": subfolder_ref if relative_dir or source["id"] != DEFAULT_OUTPUT_SOURCE_ID else resolved_subfolder,
                         "display_subfolder": display_dir,
                         "url": original_url,
@@ -1698,6 +1983,254 @@ def _build_image_index(sources: list[dict[str, Any]], include_color_profiles: bo
     if not include_color_profiles:
         _schedule_color_index_backfill(sources, index["signature"])
     return index
+
+
+def _image_record_for_file(source: dict[str, Any], full_path: str, stat: os.stat_result) -> dict[str, Any]:
+    source_root = source.get("path", "")
+    relative_path = normalize_relative_path(os.path.relpath(full_path, source_root))
+    image_ref = make_image_ref(source["id"], relative_path)
+    relative_dir = normalize_relative_path(os.path.dirname(relative_path))
+    display_dir = relative_dir
+    subfolder_ref = relative_dir
+    if source["id"] != DEFAULT_OUTPUT_SOURCE_ID:
+        subfolder_ref = f'{source["id"]}{IMAGE_REF_SEPARATOR}{relative_dir}' if relative_dir else source["id"]
+    original_url, resolved_subfolder = build_view_url(image_ref)
+    return {
+        "filename": os.path.basename(full_path),
+        "relative_path": image_ref,
+        "source_id": source["id"],
+        "source_relative_path": relative_path,
+        "relative_dir": relative_dir,
+        "subfolder": subfolder_ref if relative_dir or source["id"] != DEFAULT_OUTPUT_SOURCE_ID else resolved_subfolder,
+        "display_subfolder": display_dir,
+        "size": stat.st_size,
+        "created_at": int(stat.st_ctime),
+        "modified_at": int(stat.st_mtime),
+        "title": "",
+        "category": "",
+        "notes": "",
+        "pinned": 0,
+        "boards_text": "",
+        **COLOR_PROFILE_DEFAULT,
+    }
+
+
+def _scan_index_records_for_scope(sources: list[dict[str, Any]], scope: str = "") -> dict[str, dict[str, Any]]:
+    scoped_sources, _ = _freshness_sources_for_subfolder(sources, scope)
+    records: dict[str, dict[str, Any]] = {}
+    for source, relative_scope in scoped_sources:
+        if not source.get("enabled", True) or not source.get("exists"):
+            continue
+        source_root = source.get("path", "")
+        if not source_root:
+            continue
+        try:
+            scan_root = (
+                _ensure_within_directory(source_root, os.path.join(source_root, relative_scope), source.get("name", "source"))
+                if relative_scope
+                else _real_abs(source_root)
+            )
+        except ValueError:
+            continue
+        if not os.path.isdir(scan_root):
+            continue
+
+        stack = [scan_root]
+        while stack:
+            current_dir = stack.pop()
+            try:
+                with os.scandir(current_dir) as iterator:
+                    entries = list(iterator)
+            except (FileNotFoundError, PermissionError, OSError):
+                continue
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        if source.get("recursive", True):
+                            stack.append(entry.path)
+                        continue
+                    if not entry.is_file(follow_symlinks=False) or not entry.name.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
+                        continue
+                    stat = entry.stat()
+                except (FileNotFoundError, PermissionError, OSError):
+                    continue
+                record = _image_record_for_file(source, entry.path, stat)
+                records[record["relative_path"]] = record
+    return records
+
+
+def _scope_where_sql(sources: list[dict[str, Any]], scope: str = "") -> tuple[str, list[Any]]:
+    scoped_sources, _ = _freshness_sources_for_subfolder(sources, scope)
+    clauses: list[str] = []
+    params: list[Any] = []
+    for source, relative_scope in scoped_sources:
+        source_id = source.get("id")
+        if not source_id:
+            continue
+        if relative_scope:
+            clauses.append("(source_id = ? AND (lower(relative_dir) = ? OR lower(relative_dir) LIKE ?))")
+            normalized_scope = relative_scope.lower()
+            params.extend([source_id, normalized_scope, f"{normalized_scope}/%"])
+        else:
+            clauses.append("source_id = ?")
+            params.append(source_id)
+    return " OR ".join(clauses) if clauses else "0 = 1", params
+
+
+def _sync_image_index_incremental_locked(sources: list[dict[str, Any]], signature: str, scope: str = "") -> dict[str, Any]:
+    if not os.path.exists(GALLERY_INDEX_DB_FILE) or not _image_index_db_has_signature(signature):
+        return _build_image_index(sources)
+
+    scanned_records = _scan_index_records_for_scope(sources, scope)
+    where_sql, params = _scope_where_sql(sources, scope)
+    scanned_at = time.time()
+    state_map = get_image_state_map()
+    upsert_rows: list[tuple[Any, ...]] = []
+    upsert_payloads: list[dict[str, Any]] = []
+    priority_paths: list[str] = []
+
+    with _connect_gallery_index_db() as connection:
+        existing_rows = connection.execute(
+            f"""
+            SELECT relative_path, size, modified_at
+            FROM gallery_images
+            WHERE {where_sql}
+            """,
+            params,
+        ).fetchall()
+        existing = {str(row["relative_path"]): row for row in existing_rows}
+        scanned_paths = set(scanned_records)
+        deleted_paths = sorted(set(existing) - scanned_paths)
+
+        for relative_path, record in scanned_records.items():
+            existing_row = existing.get(relative_path)
+            if (
+                existing_row
+                and int(existing_row["size"]) == int(record["size"])
+                and int(existing_row["modified_at"]) == int(record["modified_at"])
+            ):
+                continue
+            image_state = state_map.get(relative_path, default_image_state())
+            record = {
+                **record,
+                "title": str(image_state.get("title", "")),
+                "category": str(image_state.get("category", "")),
+                "notes": str(image_state.get("notes", "")),
+                "pinned": 1 if image_state.get("pinned", image_state.get("favorite", False)) else 0,
+                "boards_text": _boards_to_search_text(image_state.get("boards", [])),
+            }
+            upsert_payloads.append(record)
+            priority_paths.append(relative_path)
+            upsert_rows.append(
+                (
+                    record["relative_path"],
+                    record["source_id"],
+                    record["source_relative_path"],
+                    record["filename"],
+                    record["relative_dir"],
+                    record["subfolder"],
+                    record["display_subfolder"],
+                    int(record["size"]),
+                    int(record["created_at"]),
+                    int(record["modified_at"]),
+                    record["title"],
+                    record["category"],
+                    record["notes"],
+                    int(record["pinned"]),
+                    record["boards_text"],
+                    record["dominant_color"],
+                    record["color_family"],
+                    record["color_families_text"],
+                    record["color_family_scores_json"],
+                    record["palette_json"],
+                    float(record["color_saturation"]),
+                    float(record["color_luma"]),
+                    scanned_at,
+                )
+            )
+
+        if deleted_paths:
+            connection.executemany("DELETE FROM gallery_images WHERE relative_path = ?", [(path,) for path in deleted_paths])
+            _sync_auxiliary_rows(connection, [], remove_paths=deleted_paths)
+        if upsert_rows:
+            connection.executemany(
+                """
+                INSERT INTO gallery_images(
+                    relative_path, source_id, source_relative_path, filename, relative_dir,
+                    subfolder, display_subfolder, size, created_at, modified_at,
+                    title, category, notes, pinned, boards_text,
+                    dominant_color, color_family, color_families_text,
+                    color_family_scores_json, palette_json, color_saturation, color_luma,
+                    scanned_at
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(relative_path) DO UPDATE SET
+                    source_id = excluded.source_id,
+                    source_relative_path = excluded.source_relative_path,
+                    filename = excluded.filename,
+                    relative_dir = excluded.relative_dir,
+                    subfolder = excluded.subfolder,
+                    display_subfolder = excluded.display_subfolder,
+                    size = excluded.size,
+                    created_at = excluded.created_at,
+                    modified_at = excluded.modified_at,
+                    title = excluded.title,
+                    category = excluded.category,
+                    notes = excluded.notes,
+                    pinned = excluded.pinned,
+                    boards_text = excluded.boards_text,
+                    dominant_color = excluded.dominant_color,
+                    color_family = excluded.color_family,
+                    color_families_text = excluded.color_families_text,
+                    color_family_scores_json = excluded.color_family_scores_json,
+                    palette_json = excluded.palette_json,
+                    color_saturation = excluded.color_saturation,
+                    color_luma = excluded.color_luma,
+                    scanned_at = excluded.scanned_at
+                """,
+                upsert_rows,
+            )
+            _sync_auxiliary_rows(connection, upsert_payloads)
+            _index_meta_set(connection, "color_index_version", "")
+        _sync_image_state_to_index_db(connection, state_map)
+        _index_meta_set(connection, "source_signature", signature)
+        _index_meta_set(connection, "built_at", str(scanned_at))
+        connection.commit()
+
+    if priority_paths:
+        _schedule_color_index_backfill(sources, signature, priority_paths)
+    return {
+        "signature": signature,
+        "output_dir": get_output_dir(),
+        "images": [],
+        "subfolders": [],
+        "sources": sources,
+        "built_at": scanned_at,
+    }
+
+
+def ensure_image_index_db_current(force_refresh: bool = False, scope: str = "") -> tuple[list[dict[str, Any]], str]:
+    sources = list_gallery_sources()
+    signature = _source_signature(sources)
+    with IMAGE_INDEX_LOCK:
+        should_sync = force_refresh or IMAGE_INDEX_CACHE.get("dirty") or not _image_index_db_has_signature(signature)
+        if should_sync:
+            if force_refresh or _image_index_db_has_signature(signature):
+                _sync_image_index_incremental_locked(sources, signature, scope=scope)
+            else:
+                _build_image_index(sources)
+            IMAGE_INDEX_CACHE.update(
+                {
+                    "signature": signature,
+                    "output_dir": get_output_dir(),
+                    "built_at": time.time(),
+                    "images": [],
+                    "subfolders": [],
+                    "sources": [],
+                    "dirty": False,
+                }
+            )
+    return sources, signature
 
 
 def build_move_target_options(image_index: dict[str, Any]) -> list[dict[str, str]]:
@@ -1746,7 +2279,11 @@ def get_image_index(force_refresh: bool = False) -> dict[str, Any]:
         )
 
         if should_rebuild:
-            cached_index = None if force_refresh or IMAGE_INDEX_CACHE.get("dirty") else _load_image_index_from_db(sources, signature)
+            if force_refresh or (IMAGE_INDEX_CACHE.get("dirty") and _image_index_db_has_signature(signature)):
+                _sync_image_index_incremental_locked(sources, signature)
+                cached_index = _load_image_index_from_db(sources, signature)
+            else:
+                cached_index = _load_image_index_from_db(sources, signature)
             IMAGE_INDEX_CACHE.update(cached_index if cached_index is not None else _build_image_index(sources))
             IMAGE_INDEX_CACHE["dirty"] = False
 
@@ -1760,13 +2297,57 @@ def get_image_index(force_refresh: bool = False) -> dict[str, Any]:
         }
 
 
+def _collect_subfolders_from_db(sources: list[dict[str, Any]]) -> set[str]:
+    if not os.path.exists(GALLERY_INDEX_DB_FILE):
+        return set()
+    subfolders: set[str] = set()
+    with _connect_gallery_index_db() as connection:
+        rows = connection.execute(
+            """
+            SELECT DISTINCT source_id, relative_dir
+            FROM gallery_images
+            WHERE relative_dir <> ''
+            """
+        ).fetchall()
+    source_ids = {source["id"] for source in sources}
+    for row in rows:
+        source_id = str(row["source_id"])
+        if source_id not in source_ids:
+            continue
+        _collect_index_subfolders(source_id, str(row["relative_dir"]), subfolders)
+    return subfolders
+
+
 def collect_subfolders(output_dir: str, force_refresh: bool = False) -> list[str]:
     if not output_dir or not os.path.exists(output_dir):
         return []
-    image_index = get_image_index(force_refresh=force_refresh)
-    subfolders = set(image_index["subfolders"])
-    subfolders.update(_collect_directory_subfolders(image_index.get("sources", list_gallery_sources())))
+    sources, _ = ensure_image_index_db_current(force_refresh=force_refresh)
+    directory_subfolders = set(_collect_directory_subfolder_details(sources))
+    database_subfolders = _collect_subfolders_from_db(sources)
+    subfolders = _merge_subfolder_refs(directory_subfolders, database_subfolders)
     return sorted(subfolders, key=lambda value: value.lower())
+
+
+def collect_subfolder_details(output_dir: str, force_refresh: bool = False) -> list[dict[str, Any]]:
+    if not output_dir or not os.path.exists(output_dir):
+        return []
+    sources, _ = ensure_image_index_db_current(force_refresh=force_refresh)
+    directory_details = _collect_directory_subfolder_details(sources)
+    database_subfolders = _collect_subfolders_from_db(sources)
+    merged_refs = _merge_subfolder_refs(set(directory_details), database_subfolders)
+    details: list[dict[str, Any]] = []
+    for folder_ref in merged_refs:
+        source_id, relative_path = parse_folder_ref(folder_ref)
+        detail = directory_details.get(folder_ref)
+        if detail is None:
+            detail = {
+                "path": folder_ref,
+                "source_id": source_id,
+                "relative_path": relative_path,
+                "modified_at": 0,
+            }
+        details.append(detail)
+    return sorted(details, key=lambda item: str(item["path"]).lower())
 
 
 def list_images(
@@ -1820,9 +2401,10 @@ def list_images(
         if normalized_subfolder:
             if filter_source_id and indexed_image.get("source_id", "").lower() != filter_source_id:
                 continue
+            image_relative_dir = str(indexed_image["relative_dir"]).lower()
             if filter_relative_dir and not (
-                indexed_image["relative_dir"] == filter_relative_dir
-                or indexed_image["relative_dir"].startswith(f"{filter_relative_dir}/")
+                image_relative_dir == filter_relative_dir
+                or image_relative_dir.startswith(f"{filter_relative_dir}/")
             ):
                 continue
         if normalized_board_id and normalized_board_id not in image_state.get("boards", []):
@@ -1847,6 +2429,127 @@ def list_images(
     return images
 
 
+def _freshness_scope_key(signature: str, subfolder: str) -> str:
+    return json.dumps(
+        {
+            "signature": signature,
+            "subfolder": normalize_relative_path(subfolder),
+        },
+        sort_keys=True,
+        ensure_ascii=False,
+    )
+
+
+def _freshness_sources_for_subfolder(
+    sources: list[dict[str, Any]],
+    subfolder: str,
+) -> tuple[list[tuple[dict[str, Any], str]], str]:
+    normalized_subfolder = normalize_relative_path(subfolder)
+    if not normalized_subfolder:
+        return [(source, "") for source in sources], ""
+
+    source_id, relative_dir = parse_folder_ref(normalized_subfolder)
+    scoped_sources = [(source, relative_dir) for source in sources if source.get("id") == source_id]
+    return scoped_sources, make_folder_ref(source_id, relative_dir) if source_id != DEFAULT_OUTPUT_SOURCE_ID or relative_dir else relative_dir
+
+
+def _scan_image_freshness(sources: list[dict[str, Any]], subfolder: str) -> dict[str, Any]:
+    scoped_sources, normalized_subfolder = _freshness_sources_for_subfolder(sources, subfolder)
+    records: list[str] = []
+    image_count = 0
+    latest_created_ns = -1
+    latest_created_at = 0
+    latest_relative_path = ""
+
+    for source, relative_scope in scoped_sources:
+        if not source.get("enabled", True) or not source.get("exists"):
+            continue
+        source_root = source.get("path", "")
+        if not source_root:
+            continue
+        try:
+            scan_root = (
+                _ensure_within_directory(source_root, os.path.join(source_root, relative_scope), source.get("name", "source"))
+                if relative_scope
+                else _real_abs(source_root)
+            )
+        except ValueError:
+            continue
+        if not os.path.isdir(scan_root):
+            continue
+
+        stack = [scan_root]
+        while stack:
+            current_dir = stack.pop()
+            try:
+                with os.scandir(current_dir) as iterator:
+                    entries = list(iterator)
+            except (FileNotFoundError, PermissionError, OSError):
+                continue
+
+            for entry in entries:
+                try:
+                    if entry.is_dir(follow_symlinks=False):
+                        if source.get("recursive", True):
+                            stack.append(entry.path)
+                        continue
+                    if not entry.is_file(follow_symlinks=False) or not entry.name.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
+                        continue
+                    stat = entry.stat()
+                except (FileNotFoundError, PermissionError, OSError):
+                    continue
+
+                relative_path = normalize_relative_path(os.path.relpath(entry.path, source_root))
+                image_ref = make_image_ref(source["id"], relative_path)
+                image_count += 1
+                created_ns = getattr(stat, "st_ctime_ns", int(stat.st_ctime * 1_000_000_000))
+                if created_ns > latest_created_ns:
+                    latest_created_ns = created_ns
+                    latest_created_at = int(stat.st_ctime)
+                    latest_relative_path = image_ref
+                modified_ns = getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))
+                records.append(f"{image_ref}\0{stat.st_size}\0{modified_ns}")
+
+    digest = hashlib.sha256()
+    digest.update(_source_signature(sources).encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(normalized_subfolder.encode("utf-8"))
+    for record in sorted(records):
+        digest.update(b"\0")
+        digest.update(record.encode("utf-8", errors="surrogateescape"))
+
+    return {
+        "fingerprint": digest.hexdigest(),
+        "image_count": image_count,
+        "latest_created_at": latest_created_at,
+        "latest_relative_path": latest_relative_path,
+        "checked_at": time.time(),
+        "subfolder": normalized_subfolder,
+    }
+
+
+def get_image_freshness(subfolder: str = "", known: str = "") -> dict[str, Any]:
+    sources = list_gallery_sources()
+    signature = _source_signature(sources)
+    cache_key = _freshness_scope_key(signature, subfolder)
+    now = time.time()
+
+    with IMAGE_FRESHNESS_LOCK:
+        cached = IMAGE_FRESHNESS_CACHE.get(cache_key)
+        if cached and now - float(cached.get("checked_at", 0)) < IMAGE_FRESHNESS_CACHE_TTL_SECONDS:
+            payload = dict(cached)
+        else:
+            payload = _scan_image_freshness(sources, subfolder)
+            IMAGE_FRESHNESS_CACHE[cache_key] = dict(payload)
+
+    fingerprint = str(payload.get("fingerprint") or "")
+    known_fingerprint = str(known or "").strip()
+    return {
+        **payload,
+        "changed": bool(known_fingerprint and known_fingerprint != fingerprint),
+    }
+
+
 def list_images_page(
     page: int = 1,
     limit: int = 60,
@@ -1862,12 +2565,7 @@ def list_images_page(
     sort_order: str = "desc",
     force_refresh: bool = False,
 ) -> dict[str, Any]:
-    sources = list_gallery_sources()
-    signature = _source_signature(sources)
-    with IMAGE_INDEX_LOCK:
-        if force_refresh or IMAGE_INDEX_CACHE.get("dirty") or not _image_index_db_has_signature(signature):
-            IMAGE_INDEX_CACHE.update(_build_image_index(sources))
-            IMAGE_INDEX_CACHE["dirty"] = False
+    sources, signature = ensure_image_index_db_current(force_refresh=force_refresh, scope=subfolder)
     source_by_id = {source["id"]: source for source in sources}
     normalized_search = search.strip().lower()
     normalized_category = category.strip().lower()
@@ -1889,11 +2587,17 @@ def list_images_page(
     where_clauses = ["1 = 1"]
     params: list[Any] = []
 
+    fts_query = ""
     if normalized_search:
-        where_clauses.append(
-            "lower(filename || ' ' || relative_path || ' ' || title || ' ' || category || ' ' || notes) LIKE ?"
-        )
-        params.append(f"%{normalized_search}%")
+        fts_query = _fts_match_query(normalized_search)
+        if fts_query:
+            where_clauses.append("relative_path IN (SELECT relative_path FROM gallery_images_fts WHERE gallery_images_fts MATCH ?)")
+            params.append(fts_query)
+        else:
+            where_clauses.append(
+                "lower(filename || ' ' || relative_path || ' ' || title || ' ' || category || ' ' || notes) LIKE ?"
+            )
+            params.append(f"%{normalized_search}%")
     if normalized_category:
         where_clauses.append("lower(category) = ?")
         params.append(normalized_category)
@@ -1902,7 +2606,7 @@ def list_images_page(
             where_clauses.append("source_id = ?")
             params.append(filter_source_id)
         if filter_relative_dir:
-            where_clauses.append("(relative_dir = ? OR relative_dir LIKE ?)")
+            where_clauses.append("(lower(relative_dir) = ? OR lower(relative_dir) LIKE ?)")
             params.extend([filter_relative_dir, f"{filter_relative_dir}/%"])
     if normalized_board_id:
         where_clauses.append("boards_text LIKE ?")
@@ -1917,11 +2621,13 @@ def list_images_page(
         where_clauses.append("pinned = 1")
     if normalized_color_family:
         if normalized_color_family == "low_saturation":
-            where_clauses.append("(color_families_text LIKE ? OR (color_saturation > 0 AND color_saturation < 0.18))")
-            params.append("%\nlow_saturation\n%")
+            where_clauses.append(
+                "(relative_path IN (SELECT relative_path FROM gallery_image_color_family WHERE family = ?) OR (color_saturation > 0 AND color_saturation < 0.18))"
+            )
+            params.append("low_saturation")
         else:
-            where_clauses.append("(color_family = ? OR color_families_text LIKE ?)")
-            params.extend([normalized_color_family, f"%\n{normalized_color_family}\n%"])
+            where_clauses.append("relative_path IN (SELECT relative_path FROM gallery_image_color_family WHERE family = ?)")
+            params.append(normalized_color_family)
 
     sort_field = {
         "filename": "filename COLLATE NOCASE",
@@ -1935,26 +2641,54 @@ def list_images_page(
     where_sql = " AND ".join(where_clauses)
 
     with _connect_gallery_index_db() as connection:
+        _ensure_auxiliary_tables_current(connection)
         if not _color_index_is_current(connection):
             _schedule_color_index_backfill(sources, signature)
         _sync_image_state_to_index_db(connection)
-        total = int(
-            connection.execute(f"SELECT COUNT(*) AS total FROM gallery_images WHERE {where_sql}", params).fetchone()["total"]
-        )
-        rows = connection.execute(
-            f"""
-            SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
-                   subfolder, display_subfolder, size, created_at, modified_at,
-                   title, category, notes, pinned, boards_text,
-                   dominant_color, color_family, color_families_text,
-                   color_family_scores_json, palette_json, color_saturation, color_luma
-            FROM gallery_images
-            WHERE {where_sql}
-            ORDER BY {sort_field} {sort_direction}
-            LIMIT ? OFFSET ?
-            """,
-            [*params, safe_limit, offset],
-        ).fetchall()
+        try:
+            total = int(
+                connection.execute(f"SELECT COUNT(*) AS total FROM gallery_images WHERE {where_sql}", params).fetchone()["total"]
+            )
+            rows = connection.execute(
+                f"""
+                SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
+                       subfolder, display_subfolder, size, created_at, modified_at,
+                       title, category, notes, pinned, boards_text,
+                       dominant_color, color_family, color_families_text,
+                       color_family_scores_json, palette_json, color_saturation, color_luma
+                FROM gallery_images
+                WHERE {where_sql}
+                ORDER BY {sort_field} {sort_direction}
+                LIMIT ? OFFSET ?
+                """,
+                [*params, safe_limit, offset],
+            ).fetchall()
+        except sqlite3.OperationalError:
+            if not fts_query:
+                raise
+            fallback_where = where_sql.replace(
+                "relative_path IN (SELECT relative_path FROM gallery_images_fts WHERE gallery_images_fts MATCH ?)",
+                "lower(filename || ' ' || relative_path || ' ' || title || ' ' || category || ' ' || notes) LIKE ?",
+                1,
+            )
+            fallback_params = [f"%{normalized_search}%" if value == fts_query else value for value in params]
+            total = int(
+                connection.execute(f"SELECT COUNT(*) AS total FROM gallery_images WHERE {fallback_where}", fallback_params).fetchone()["total"]
+            )
+            rows = connection.execute(
+                f"""
+                SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
+                       subfolder, display_subfolder, size, created_at, modified_at,
+                       title, category, notes, pinned, boards_text,
+                       dominant_color, color_family, color_families_text,
+                       color_family_scores_json, palette_json, color_saturation, color_luma
+                FROM gallery_images
+                WHERE {fallback_where}
+                ORDER BY {sort_field} {sort_direction}
+                LIMIT ? OFFSET ?
+                """,
+                [*fallback_params, safe_limit, offset],
+            ).fetchall()
         connection.commit()
 
     _schedule_color_index_backfill(sources, signature, [str(row["relative_path"]) for row in rows])
@@ -1994,13 +2728,29 @@ def _board_cover_payload(relative_path: str) -> dict[str, str] | None:
 
 def list_boards(force_refresh: bool = False) -> list[dict[str, Any]]:
     boards = get_raw_boards()
-    indexed_images = get_image_index(force_refresh=force_refresh)["images"]
+    sources, _ = ensure_image_index_db_current(force_refresh=force_refresh)
     image_states = get_image_state_map()
     board_counts: dict[str, int] = {board_id: 0 for board_id in boards}
     first_cover_by_board: dict[str, str] = {}
+    state_paths = sorted(image_states)
+    existing_paths: list[str] = []
+    if state_paths and os.path.exists(GALLERY_INDEX_DB_FILE):
+        with _connect_gallery_index_db() as connection:
+            _sync_image_state_to_index_db(connection, image_states)
+            placeholders = ",".join("?" for _ in state_paths)
+            rows = connection.execute(
+                f"""
+                SELECT relative_path
+                FROM gallery_images
+                WHERE relative_path IN ({placeholders})
+                ORDER BY created_at DESC
+                """,
+                state_paths,
+            ).fetchall()
+            connection.commit()
+        existing_paths = [str(row["relative_path"]) for row in rows]
 
-    for indexed_image in indexed_images:
-        relative_path = indexed_image["relative_path"]
+    for relative_path in existing_paths:
         image_state = image_states.get(relative_path, default_image_state())
         for board_id in image_state.get("boards", []):
             if board_id not in boards:
@@ -2062,10 +2812,20 @@ def get_gallery_context(force_refresh: bool = False) -> dict:
     output_dir = get_output_dir()
     base_dir = get_comfy_base_dir()
     import_dir = os.path.join(output_dir, IMPORT_IMAGE_SUBFOLDER) if output_dir else ""
-    image_index = get_image_index(force_refresh=force_refresh)
-    subfolders = collect_subfolders(output_dir, force_refresh=force_refresh)
-    image_states = get_image_state_map()
-    pinned_count = sum(1 for indexed_image in image_index["images"] if image_states.get(indexed_image["relative_path"], {}).get("pinned", False))
+    sources, _ = ensure_image_index_db_current(force_refresh=force_refresh)
+    subfolder_details = collect_subfolder_details(output_dir, force_refresh=False)
+    subfolders = [str(item["path"]) for item in subfolder_details]
+    source_counts: dict[str, int] = {source["id"]: 0 for source in sources}
+    pinned_count = 0
+    if os.path.exists(GALLERY_INDEX_DB_FILE):
+        with _connect_gallery_index_db() as connection:
+            _ensure_auxiliary_tables_current(connection)
+            _sync_image_state_to_index_db(connection)
+            for row in connection.execute("SELECT source_id, COUNT(*) AS total FROM gallery_images GROUP BY source_id"):
+                source_counts[str(row["source_id"])] = int(row["total"])
+            pinned_count = int(connection.execute("SELECT COUNT(*) AS total FROM gallery_images WHERE pinned = 1").fetchone()["total"])
+            connection.commit()
+    indexed_sources = [{**source, "image_count": source_counts.get(source["id"], 0)} for source in sources]
 
     return {
         "base_dir": base_dir,
@@ -2075,9 +2835,10 @@ def get_gallery_context(force_refresh: bool = False) -> dict:
         "import_image_target_relative": build_relative_display(import_dir, base_dir) if import_dir else "",
         "categories": collect_categories(),
         "subfolders": subfolders,
-        "move_targets": build_move_target_options({**image_index, "subfolders": subfolders}),
-        "sources": image_index.get("sources", list_gallery_sources()),
-        "active_source_count": sum(1 for source in image_index.get("sources", []) if source.get("enabled") and source.get("exists")),
+        "subfolder_details": subfolder_details,
+        "move_targets": build_move_target_options({"sources": indexed_sources, "subfolders": subfolders}),
+        "sources": indexed_sources,
+        "active_source_count": sum(1 for source in indexed_sources if source.get("enabled") and source.get("exists")),
         "pinned_count": pinned_count,
         "color_index_status": get_color_index_status(),
         "boards": list_boards(force_refresh=force_refresh),
@@ -2760,42 +3521,54 @@ def batch_rename_images(
 
 
 def create_folder(subfolder: str) -> dict[str, Any]:
-    normalized_subfolder, full_path = resolve_subfolder_path(subfolder)
+    source, normalized_subfolder, full_path = _resolve_folder_ref_path(subfolder, require_writable=True)
     if not normalized_subfolder:
         raise ValueError("folder path required")
     os.makedirs(full_path, exist_ok=True)
     invalidate_image_index_cache()
-    return {"ok": True, "path": normalized_subfolder, "subfolders": collect_subfolders(_ensure_output_dir(), force_refresh=True)}
+    return {
+        "ok": True,
+        "path": _normalize_folder_ref_for_source(source["id"], normalized_subfolder),
+        "subfolders": collect_subfolders(_ensure_output_dir(), force_refresh=True),
+    }
 
 
 def delete_folder(subfolder: str) -> dict[str, Any]:
-    normalized_subfolder, full_path = resolve_subfolder_path(subfolder)
+    source, normalized_subfolder, full_path = _resolve_folder_ref_path(subfolder, require_writable=True)
     if not normalized_subfolder:
-        raise ValueError("cannot delete root output directory")
+        raise ValueError("cannot delete root gallery source directory")
     if not os.path.exists(full_path):
         raise FileNotFoundError("folder not found")
 
-    state_snapshot, categories = extract_image_states_by_prefix(normalized_subfolder)
+    normalized_folder_ref = _normalize_folder_ref_for_source(source["id"], normalized_subfolder)
+    state_snapshot, categories = extract_image_states_by_prefix(_image_state_folder_prefix(source["id"], normalized_subfolder))
     image_count = len(state_snapshot)
     move_path_to_trash(
         full_path=full_path,
         kind="folder",
-        original_path=normalized_subfolder,
+        original_path=normalized_folder_ref,
         state_snapshot=state_snapshot,
         image_count=image_count,
     )
     invalidate_image_index_cache()
     return {
         "ok": True,
-        "path": normalized_subfolder,
+        "path": normalized_folder_ref,
         "subfolders": collect_subfolders(_ensure_output_dir(), force_refresh=True),
         "categories": categories,
     }
 
 
 def merge_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any]:
-    source_relative, source_full_path = resolve_subfolder_path(source_subfolder)
-    target_relative, target_full_path = resolve_subfolder_path(target_subfolder)
+    source, source_relative, source_full_path = _resolve_folder_ref_path(source_subfolder, require_writable=True)
+    target_source_id, target_relative_from_ref = parse_folder_ref(_coerce_target_folder_ref(target_subfolder, source["id"]))
+    if target_source_id != source["id"]:
+        raise ValueError("source and target folders must stay in the same gallery source")
+    target_source, target_relative, target_full_path = resolve_source_subfolder_path(
+        target_source_id,
+        target_relative_from_ref,
+        require_writable=True,
+    )
 
     if not source_relative or not target_relative:
         raise ValueError("source and target folders required")
@@ -2806,7 +3579,6 @@ def merge_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any]
     os.makedirs(target_full_path, exist_ok=True)
 
     path_mapping: dict[str, str] = {}
-    output_dir = _ensure_output_dir()
     for root, dirs, files in os.walk(source_full_path):
         relative_root = os.path.relpath(root, source_full_path)
         relative_root = "" if relative_root == "." else normalize_relative_path(relative_root)
@@ -2821,17 +3593,17 @@ def merge_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any]
             destination_file = ensure_unique_path(destination_root, filename)
             shutil.move(source_file, destination_file)
 
-            source_rel_path = normalize_relative_path(os.path.relpath(source_file, output_dir))
-            destination_rel_path = normalize_relative_path(os.path.relpath(destination_file, output_dir))
-            path_mapping[source_rel_path] = destination_rel_path
+            source_rel_path = normalize_relative_path(os.path.relpath(source_file, source["path"]))
+            destination_rel_path = normalize_relative_path(os.path.relpath(destination_file, target_source["path"]))
+            path_mapping[make_image_ref(source["id"], source_rel_path)] = make_image_ref(target_source["id"], destination_rel_path)
 
     shutil.rmtree(source_full_path, ignore_errors=True)
     categories = move_image_states(path_mapping)
     invalidate_image_index_cache()
     return {
         "ok": True,
-        "source_path": source_relative,
-        "target_path": target_relative,
+        "source_path": _normalize_folder_ref_for_source(source["id"], source_relative),
+        "target_path": _normalize_folder_ref_for_source(target_source["id"], target_relative),
         "moved": len(path_mapping),
         "subfolders": collect_subfolders(_ensure_output_dir(), force_refresh=True),
         "categories": categories,
@@ -2839,8 +3611,15 @@ def merge_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any]
 
 
 def rename_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any]:
-    source_relative, source_full_path = resolve_subfolder_path(source_subfolder)
-    target_relative, target_full_path = resolve_subfolder_path(target_subfolder)
+    source, source_relative, source_full_path = _resolve_folder_ref_path(source_subfolder, require_writable=True)
+    target_source_id, target_relative_from_ref = parse_folder_ref(_coerce_target_folder_ref(target_subfolder, source["id"]))
+    if target_source_id != source["id"]:
+        raise ValueError("source and target folders must stay in the same gallery source")
+    target_source, target_relative, target_full_path = resolve_source_subfolder_path(
+        target_source_id,
+        target_relative_from_ref,
+        require_writable=True,
+    )
 
     if not source_relative or not target_relative:
         raise ValueError("source and target folders required")
@@ -2855,24 +3634,23 @@ def rename_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any
 
     parent_dir = os.path.dirname(target_full_path)
     os.makedirs(parent_dir, exist_ok=True)
-    output_dir = _ensure_output_dir()
     path_mapping: dict[str, str] = {}
 
     for root, _dirs, files in os.walk(source_full_path):
         for filename in files:
             source_file = os.path.join(root, filename)
-            source_rel_path = normalize_relative_path(os.path.relpath(source_file, output_dir))
+            source_rel_path = normalize_relative_path(os.path.relpath(source_file, source["path"]))
             relative_to_source = normalize_relative_path(os.path.relpath(source_file, source_full_path))
             destination_rel_path = normalize_relative_path(os.path.join(target_relative, relative_to_source))
-            path_mapping[source_rel_path] = destination_rel_path
+            path_mapping[make_image_ref(source["id"], source_rel_path)] = make_image_ref(target_source["id"], destination_rel_path)
 
     os.rename(source_full_path, target_full_path)
     categories = move_image_states(path_mapping)
     invalidate_image_index_cache()
     return {
         "ok": True,
-        "source_path": source_relative,
-        "target_path": target_relative,
+        "source_path": _normalize_folder_ref_for_source(source["id"], source_relative),
+        "target_path": _normalize_folder_ref_for_source(target_source["id"], target_relative),
         "subfolders": collect_subfolders(_ensure_output_dir(), force_refresh=True),
         "categories": categories,
     }
