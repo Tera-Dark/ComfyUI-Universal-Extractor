@@ -1,5 +1,13 @@
 # Universal Gallery Frontend
 
+## Maintenance notes
+
+- `npm run audit:dist` reports tracked `dist/assets/index-*.js` and `index-*.css` counts, sizes, and latest entrypoint assets.
+- The repository-level `scripts\verify.ps1` runs frontend build, dist audit, and release metadata checks after Python verification.
+- `WorkspaceSidebar` keeps folder source scoping and sorting helpers in `src/components/shared/folderTree.ts`.
+- `GalleryWorkspace` keeps image prefetch state and card image loading in `src/components/gallery/galleryImagePrefetch.ts` and `GalleryCardImage.tsx`.
+- Floating menu placement, dismiss behavior, and editable-target shortcut guards are centralized in `src/utils/interaction.ts`.
+
 这是 ComfyUI Universal Extractor 的图库前端，使用 React、TypeScript 和 Vite 构建。构建产物位于 `gallery_ui/dist/`，由后端以 `/gallery/` 路径挂载到 ComfyUI。
 
 ## 开发命令
@@ -38,8 +46,9 @@ powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 
 ## 目录职责
 
-- `src/App.tsx`：应用入口，管理顶部导航、全局状态和图库三栏布局。
+- `src/App.tsx`：应用入口，管理顶部导航、全局状态和图库工作台布局。
 - `src/components/gallery/GalleryWorkspace.tsx`：图库主体浏览区，包含筛选、排序、网格/列表、垃圾箱瀑布流、拖选、右键菜单和选择态。
+- `src/components/gallery/DualFolderWorkspace.tsx`：双栏目录整理模式，负责左右目录选择、多选状态、批量拖拽移动、右键菜单和双栏快捷键。
 - `src/components/gallery/GalleryInspectorPanel.tsx`：图库右侧 Inspector，处理单图详情、多选批量操作、色板展示和移动端抽屉。
 - `src/components/library/`：词库页面，支持网格/列表、搜索、分页和跳页。
 - `src/components/shared/`：通用弹窗、侧边栏、上下文菜单等共享组件。
@@ -51,11 +60,11 @@ powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 
 ## 布局约定
 
-图库主页面采用三栏模型：
+图库主页面采用稳定主内容区 + 覆盖式 Inspector 模型：
 
 - 左侧资源栏：图源、输出/输入图库范围、当前 source 目录、图版、分类等导航。
 - 中间内容区：图库浏览、筛选、排序、分页、网格/列表。
-- 右侧 Inspector：当普通图库页选中图片时出现，桌面端挤压中间内容，移动端以抽屉显示。
+- 右侧 Inspector：当普通图库页选中图片时出现，桌面端以固定覆盖层显示，不改变中间图库滚动容器宽度；移动端以抽屉显示。
 
 左侧资源栏采用固定快捷入口 + 单一滚动区模型：输出图库、输入图库和垃圾箱固定在顶部。输出图库/输入图库是实际 source 范围切换，目录区只显示当前 source 下的目录，不再把输入目录嵌套显示在输出树里。当前目录支持搜索、树形/列表切换、置顶、默认按修改时间排序、名称排序备选和更多操作菜单，避免多个嵌套滚动条抢占鼠标滚轮。
 
@@ -92,6 +101,9 @@ powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 - Shift 支持连续选择。
 - 右键菜单支持单图和多选批量操作。
 - 单图右键菜单和详情入口支持复制图片、复制文件名、复制路径、复制正面提示词、查看 Metadata、打开原图等高频操作。
+- 双栏模式使用文件管理器式交互：单击选择，Ctrl/Meta 追加选择，Shift 连选，双击打开详情；拖动已选图片到另一栏会批量移动，外部文件拖入仍只走导入。双栏卡片应与普通图库卡片保持一致的 hover、选中、图片缩放、文本裁剪和真实分辨率展示体验。
+- 双栏模式的右键菜单复用项目内上下文菜单样式，支持打开详情/原图/工作流、查看 Metadata、复制图片/文件名/路径/正向提示词、选择/取消、移动到另一栏、Pin/取消 Pin、加入图版和删除。
+- 双栏模式快捷键：Ctrl/Meta+A 全选当前栏，Escape 关闭菜单或清空选择，Delete 删除所选，Enter 打开聚焦图片详情，Ctrl/Meta+M 移动到另一栏，Ctrl/Meta+R 刷新左右栏，Tab 切换左右栏焦点；输入框和目录搜索框聚焦时不触发这些快捷键。
 - 网格/列表切换要覆盖图库、垃圾箱和词库子项目；垃圾箱网格模式保持瀑布流自适应，不使用固定拉伸列。
 - 小型子页面和弹窗使用统一的标题、说明、输入区、操作区排版。
 - “在 ComfyUI 中打开工作流”优先通过 `BroadcastChannel`、`postMessage` 和 `localStorage` 把工作流发送到已打开的 ComfyUI 页面；只有没有可复用窗口时才打开新的 ComfyUI 页面，避免已有工作流触发浏览器离开确认。

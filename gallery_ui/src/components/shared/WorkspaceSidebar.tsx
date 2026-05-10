@@ -24,12 +24,28 @@ import {
 
 import { useI18n } from "../../i18n/I18nProvider";
 import type { BoardSummary, GalleryContext, GallerySource, LibraryInfo, WorkspaceTab } from "../../types/universal-gallery";
-
-interface TreeNode {
-  path: string;
-  name: string;
-  children: TreeNode[];
-}
+import { FloatingLayerPortal, placeMenuForEvent, useDismissableLayer } from "../../utils/interaction";
+import {
+  buildFolderTree,
+  collectFolderSearchPaths,
+  compareFolderKey,
+  DEFAULT_OUTPUT_SOURCE_ID,
+  filterSubfoldersBySource,
+  FOLDER_SORT_STORAGE_KEY,
+  formatFolderLabel,
+  getAncestorPaths,
+  getFolderPinAliases,
+  getFolderSourceId,
+  getStoredFolderSort,
+  getStoredPinnedFolders,
+  isFolderPinned,
+  isSourceRootRef,
+  makeSourceRootRef,
+  PINNED_FOLDERS_STORAGE_KEY,
+  TRASH_SUBFOLDER_KEY,
+  type FolderSortMode,
+  type TreeNode,
+} from "./folderTree";
 
 interface WorkspaceSidebarProps {
   collapsed: boolean;
@@ -48,8 +64,8 @@ interface WorkspaceSidebarProps {
   onPinnedOnlySelect: () => void;
   onCreateBoard: () => void;
   onCreateFolder: () => void;
-  onDeleteFolder: () => void;
-  onMergeFolder: () => void;
+  onDeleteFolder: (path?: string) => void;
+  onMergeFolder: (path?: string) => void;
   onRenameFolder: (path: string) => void;
   libraries: LibraryInfo[];
   activeLibraryName: string | null;
@@ -60,203 +76,7 @@ interface WorkspaceSidebarProps {
   onCreateLibrary: () => void;
 }
 
-const DEFAULT_OUTPUT_SOURCE_ID = "default_output";
-const FOLDER_REF_SEPARATOR = "::";
-const TRASH_SUBFOLDER_KEY = "__trash__";
-
-const splitFolderPath = (subfolder: string) => subfolder.split(/[\\/]+/).filter(Boolean);
-
-type FolderSortMode = "modified" | "name";
 type SidebarGroupId = "folders" | "boards" | "categories";
-
-const PINNED_FOLDERS_STORAGE_KEY = "universal-extractor:pinned-folders";
-const FOLDER_SORT_STORAGE_KEY = "universal-extractor:folder-sort";
-
-const getStoredPinnedFolders = () => {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(PINNED_FOLDERS_STORAGE_KEY) || "[]");
-    return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
-  } catch {
-    return new Set<string>();
-  }
-};
-
-const getStoredFolderSort = (): FolderSortMode =>
-  window.localStorage.getItem(FOLDER_SORT_STORAGE_KEY) === "name" ? "name" : "modified";
-
-const getFolderPinAliases = (folderRef: string) => {
-  const { sourceId, relativePath } = parseFolderRef(folderRef);
-  return sourceId === DEFAULT_OUTPUT_SOURCE_ID && relativePath ? [folderRef, relativePath] : [folderRef];
-};
-
-const isFolderPinned = (folderRef: string, pinnedFolders: Set<string>) =>
-  getFolderPinAliases(folderRef).some((alias) => pinnedFolders.has(alias));
-
-const compareFolderKey = (
-  left: string,
-  right: string,
-  pinnedFolders: Set<string>,
-  sortMode: FolderSortMode,
-  folderModifiedAt: Map<string, number> = new Map(),
-) => {
-  const leftPinned = isFolderPinned(left, pinnedFolders);
-  const rightPinned = isFolderPinned(right, pinnedFolders);
-  if (leftPinned !== rightPinned) {
-    return leftPinned ? -1 : 1;
-  }
-  if (sortMode === "modified") {
-    const modifiedResult = (folderModifiedAt.get(right) ?? 0) - (folderModifiedAt.get(left) ?? 0);
-    if (modifiedResult !== 0) {
-      return modifiedResult;
-    }
-  }
-  const result = left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
-  return result;
-};
-
-const parseFolderRef = (folderRef: string) => {
-  const value = folderRef.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-  if (value.includes(FOLDER_REF_SEPARATOR)) {
-    const [sourceId, ...rest] = value.split(FOLDER_REF_SEPARATOR);
-    return {
-      sourceId: sourceId || DEFAULT_OUTPUT_SOURCE_ID,
-      relativePath: rest.join(FOLDER_REF_SEPARATOR).replace(/^\/+|\/+$/g, ""),
-    };
-  }
-  return { sourceId: DEFAULT_OUTPUT_SOURCE_ID, relativePath: value };
-};
-
-const makeFolderRef = (sourceId: string, relativePath: string) => {
-  const normalizedPath = relativePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
-  if (!normalizedPath) {
-    return makeSourceRootRef(sourceId);
-  }
-  return `${sourceId || DEFAULT_OUTPUT_SOURCE_ID}${FOLDER_REF_SEPARATOR}${normalizedPath}`;
-};
-
-const makeSourceRootRef = (sourceId: string) => `${sourceId || DEFAULT_OUTPUT_SOURCE_ID}${FOLDER_REF_SEPARATOR}`;
-
-const getFolderSourceId = (folderRef: string) => parseFolderRef(folderRef).sourceId;
-
-const isSourceRootRef = (folderRef: string) => {
-  const { relativePath } = parseFolderRef(folderRef);
-  return !relativePath;
-};
-
-const defaultSourceLabel = (source: GallerySource | undefined, fallbackId: string) => source?.name || fallbackId;
-
-const formatFolderLabel = (
-  folderRef: string,
-  sources: GallerySource[],
-  getSourceLabel: (source: GallerySource | undefined, fallbackId: string) => string,
-  currentSourceId = "",
-) => {
-  const { sourceId, relativePath } = parseFolderRef(folderRef);
-  if (currentSourceId && sourceId === currentSourceId) {
-    return relativePath || "./";
-  }
-  if (sourceId === DEFAULT_OUTPUT_SOURCE_ID) {
-    return relativePath || "./";
-  }
-  const source = sources.find((item) => item.id === sourceId);
-  const sourceLabel = getSourceLabel(source, sourceId);
-  return relativePath ? `${sourceLabel} / ${relativePath}` : sourceLabel;
-};
-
-const sortTreeNodes = (
-  nodes: TreeNode[],
-  pinnedFolders: Set<string>,
-  sortMode: FolderSortMode,
-  folderModifiedAt: Map<string, number> = new Map(),
-): TreeNode[] =>
-  [...nodes]
-    .sort((left, right) => compareFolderKey(left.path, right.path, pinnedFolders, sortMode, folderModifiedAt))
-    .map((node) => ({ ...node, children: sortTreeNodes(node.children, pinnedFolders, sortMode, folderModifiedAt) }));
-
-export const buildFolderTree = (
-  subfolders: string[],
-  pinnedFolders: Set<string>,
-  sortMode: FolderSortMode,
-  sources: GallerySource[] = [],
-  getSourceLabel: (source: GallerySource | undefined, fallbackId: string) => string = defaultSourceLabel,
-  rootSourceId = "",
-  folderModifiedAt: Map<string, number> = new Map(),
-) => {
-  const root: TreeNode[] = [];
-  const nodeMap = new Map<string, TreeNode>();
-  const sourceMap = new Map(sources.map((source) => [source.id, source]));
-
-  subfolders.forEach((subfolder) => {
-    const { sourceId, relativePath } = parseFolderRef(subfolder);
-    if (rootSourceId && sourceId !== rootSourceId) {
-      return;
-    }
-    const segments = splitFolderPath(relativePath);
-    let currentPath = "";
-    let currentLevel = root;
-
-    if (!rootSourceId && sourceId !== DEFAULT_OUTPUT_SOURCE_ID) {
-      currentPath = makeSourceRootRef(sourceId);
-      let sourceNode = nodeMap.get(currentPath);
-      if (!sourceNode) {
-        sourceNode = { path: currentPath, name: getSourceLabel(sourceMap.get(sourceId), sourceId), children: [] };
-        nodeMap.set(currentPath, sourceNode);
-        root.push(sourceNode);
-      }
-      currentLevel = sourceNode.children;
-    }
-
-    segments.forEach((segment) => {
-      const nextRelativePath = currentPath && sourceId !== DEFAULT_OUTPUT_SOURCE_ID
-        ? `${parseFolderRef(currentPath).relativePath}/${segment}`
-        : currentPath
-          ? `${currentPath}/${segment}`
-          : segment;
-      currentPath = makeFolderRef(sourceId, nextRelativePath);
-      let node = nodeMap.get(currentPath);
-
-      if (!node) {
-        node = { path: currentPath, name: segment, children: [] };
-        nodeMap.set(currentPath, node);
-        currentLevel.push(node);
-      }
-
-      currentLevel = node.children;
-    });
-  });
-
-  return sortTreeNodes(root, pinnedFolders, sortMode, folderModifiedAt);
-};
-
-const getAncestorPaths = (path: string) => {
-  const { sourceId, relativePath } = parseFolderRef(path);
-  const segments = splitFolderPath(relativePath);
-  const ancestors = sourceId === DEFAULT_OUTPUT_SOURCE_ID ? [] : [makeSourceRootRef(sourceId)];
-  return segments
-    .slice(0, -1)
-    .map((_, index) => makeFolderRef(sourceId, segments.slice(0, index + 1).join("/")))
-    .reduce((paths, ancestor) => [...paths, ancestor], ancestors);
-};
-
-const collectFolderSearchPaths = (subfolders: string[], query: string) => {
-  const normalizedQuery = query.trim().toLowerCase();
-  if (!normalizedQuery) {
-    return subfolders;
-  }
-
-  const paths = new Set<string>();
-  subfolders.forEach((subfolder) => {
-    if (!subfolder.toLowerCase().includes(normalizedQuery)) {
-      return;
-    }
-    getAncestorPaths(subfolder).forEach((ancestor) => paths.add(ancestor));
-    paths.add(subfolder);
-  });
-  return subfolders.filter((subfolder) => paths.has(subfolder));
-};
-
-const filterSubfoldersBySource = (subfolders: string[], sourceId: string) =>
-  subfolders.filter((subfolder) => getFolderSourceId(subfolder) === sourceId);
 
 const TreeBranch = ({
   node,
@@ -368,8 +188,8 @@ export const WorkspaceSidebar = ({
   const [pinnedFolderPaths, setPinnedFolderPaths] = useState<Set<string>>(() => getStoredPinnedFolders());
   const [folderSortMode, setFolderSortMode] = useState<FolderSortMode>(() => getStoredFolderSort());
   const [folderContextMenu, setFolderContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
+  const [folderActionsMenu, setFolderActionsMenu] = useState<{ x: number; y: number } | null>(null);
   const [folderSearchQuery, setFolderSearchQuery] = useState("");
-  const [folderActionsMenuOpen, setFolderActionsMenuOpen] = useState(false);
   const [expandedSidebarGroups, setExpandedSidebarGroups] = useState<Set<SidebarGroupId>>(
     () => new Set(["folders", "boards", "categories"]),
   );
@@ -447,51 +267,17 @@ export const WorkspaceSidebar = ({
     window.localStorage.setItem(FOLDER_SORT_STORAGE_KEY, folderSortMode);
   }, [folderSortMode]);
 
-  useEffect(() => {
-    if (!folderContextMenu) {
-      return;
-    }
-    const closeMenu = () => setFolderContextMenu(null);
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setFolderContextMenu(null);
-      }
-    };
-    window.addEventListener("click", closeMenu);
-    window.addEventListener("contextmenu", closeMenu);
-    window.addEventListener("resize", closeMenu);
-    window.addEventListener("scroll", closeMenu, true);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("click", closeMenu);
-      window.removeEventListener("contextmenu", closeMenu);
-      window.removeEventListener("resize", closeMenu);
-      window.removeEventListener("scroll", closeMenu, true);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [folderContextMenu]);
+  const closeFolderContextMenu = useCallback(() => setFolderContextMenu(null), []);
+  useDismissableLayer(Boolean(folderContextMenu), closeFolderContextMenu, {
+    closeOnContextMenu: true,
+    closeOnScroll: true,
+  });
 
-  useEffect(() => {
-    if (!folderActionsMenuOpen) {
-      return;
-    }
-    const closeMenu = () => setFolderActionsMenuOpen(false);
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setFolderActionsMenuOpen(false);
-      }
-    };
-    window.addEventListener("click", closeMenu);
-    window.addEventListener("resize", closeMenu);
-    window.addEventListener("scroll", closeMenu, true);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("click", closeMenu);
-      window.removeEventListener("resize", closeMenu);
-      window.removeEventListener("scroll", closeMenu, true);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [folderActionsMenuOpen]);
+  const closeFolderActionsMenu = useCallback(() => setFolderActionsMenu(null), []);
+  useDismissableLayer(Boolean(folderActionsMenu), closeFolderActionsMenu, {
+    closeOnContextMenu: true,
+    closeOnScroll: true,
+  });
 
   useEffect(() => {
     setExpandedPaths(new Set());
@@ -528,12 +314,24 @@ export const WorkspaceSidebar = ({
   const handleFolderContextMenu = (event: MouseEvent, path: string) => {
     event.preventDefault();
     event.stopPropagation();
-    onSubfolderSelect(path);
+    const position = placeMenuForEvent(event, { width: 220, height: 220 }, "pointer");
     setFolderContextMenu({
       path,
-      x: Math.min(event.clientX, window.innerWidth - 220),
-      y: Math.min(event.clientY, window.innerHeight - 220),
+      x: position.x,
+      y: position.y,
     });
+  };
+
+  const handleFolderActionsMenu = (event: MouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    const position = placeMenuForEvent(event, { width: 220, height: folderViewMode === "tree" ? 240 : 204 });
+    setFolderActionsMenu((current) => current ? null : position);
+  };
+
+  const runFolderAction = (action: () => void) => {
+    action();
+    closeFolderActionsMenu();
   };
 
   const togglePinnedFolder = (path: string) => {
@@ -680,68 +478,13 @@ export const WorkspaceSidebar = ({
                 </div>
                 <div className="ue-sidebar-more">
                   <button
-                    className={`ue-sidebar-subaction ${folderActionsMenuOpen ? "active" : ""}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      setFolderActionsMenuOpen((current) => !current);
-                    }}
+                    className={`ue-sidebar-subaction ${folderActionsMenu ? "active" : ""}`}
+                    onClick={handleFolderActionsMenu}
                     title={t("sidebarMoreActions")}
                     aria-label={t("sidebarMoreActions")}
                   >
                     <MoreHorizontal size={13} />
                   </button>
-                  {folderActionsMenuOpen ? (
-                    <div className="ue-sidebar-action-menu" onClick={(event) => event.stopPropagation()}>
-                      <button onClick={() => {
-                        toggleFolderSortMode();
-                        setFolderActionsMenuOpen(false);
-                      }}>
-                        <ListTree size={14} />
-                        <span>{folderSortMode === "modified" ? t("folderSortByName") : t("folderSortByModified")}</span>
-                      </button>
-                      <button onClick={() => {
-                        if (selectedSubfolder) {
-                          togglePinnedFolder(selectedSubfolder);
-                          setFolderActionsMenuOpen(false);
-                        }
-                      }} disabled={!selectedConcreteFolder}>
-                        <Pin size={14} fill={selectedSubfolder && isFolderPinned(selectedSubfolder, pinnedFolderPaths) ? "currentColor" : "none"} />
-                        <span>{selectedSubfolder && isFolderPinned(selectedSubfolder, pinnedFolderPaths) ? t("folderUnpin") : t("folderPin")}</span>
-                      </button>
-                      <button onClick={() => {
-                        if (selectedSubfolder) {
-                          onRenameFolder(selectedSubfolder);
-                          setFolderActionsMenuOpen(false);
-                        }
-                      }} disabled={!canMutateSelectedFolder} title={canMutateSelectedFolder ? undefined : readOnlyFolderTitle}>
-                        <PencilLine size={14} />
-                        <span>{t("folderRename")}</span>
-                      </button>
-                      <button onClick={() => {
-                        onMergeFolder();
-                        setFolderActionsMenuOpen(false);
-                      }} disabled={!canMutateSelectedFolder} title={canMutateSelectedFolder ? undefined : readOnlyFolderTitle}>
-                        <ArrowRightLeft size={14} />
-                        <span>{t("sidebarMergeFolder")}</span>
-                      </button>
-                      <button onClick={() => {
-                        onDeleteFolder();
-                        setFolderActionsMenuOpen(false);
-                      }} disabled={!canMutateSelectedFolder} className="is-danger" title={canMutateSelectedFolder ? undefined : readOnlyFolderTitle}>
-                        <Trash2 size={14} />
-                        <span>{t("sidebarDeleteFolder")}</span>
-                      </button>
-                      {folderViewMode === "tree" ? (
-                        <button onClick={() => {
-                          collapseAllFolders();
-                          setFolderActionsMenuOpen(false);
-                        }}>
-                          <Minimize2 size={14} />
-                          <span>{t("sidebarCollapseAll")}</span>
-                        </button>
-                      ) : null}
-                    </div>
-                  ) : null}
                 </div>
               </div>
             </div>
@@ -965,54 +708,106 @@ export const WorkspaceSidebar = ({
           </div>
         </div>
       )}
+      {folderActionsMenu ? (
+        <FloatingLayerPortal>
+          <div
+            className="ue-sidebar-action-menu"
+            style={{ top: folderActionsMenu.y, left: folderActionsMenu.x }}
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.preventDefault()}
+          >
+            <button onClick={() => runFolderAction(toggleFolderSortMode)}>
+              <ListTree size={14} />
+              <span>{folderSortMode === "modified" ? t("folderSortByName") : t("folderSortByModified")}</span>
+            </button>
+            <button onClick={() => runFolderAction(() => togglePinnedFolder(selectedSubfolder))} disabled={!selectedConcreteFolder}>
+              <Pin size={14} fill={selectedSubfolder && isFolderPinned(selectedSubfolder, pinnedFolderPaths) ? "currentColor" : "none"} />
+              <span>{selectedSubfolder && isFolderPinned(selectedSubfolder, pinnedFolderPaths) ? t("folderUnpin") : t("folderPin")}</span>
+            </button>
+            <button
+              onClick={() => runFolderAction(() => onRenameFolder(selectedSubfolder))}
+              disabled={!canMutateSelectedFolder}
+              title={canMutateSelectedFolder ? undefined : readOnlyFolderTitle}
+            >
+              <PencilLine size={14} />
+              <span>{t("folderRename")}</span>
+            </button>
+            <button
+              onClick={() => runFolderAction(() => onMergeFolder(selectedSubfolder))}
+              disabled={!canMutateSelectedFolder}
+              title={canMutateSelectedFolder ? undefined : readOnlyFolderTitle}
+            >
+              <ArrowRightLeft size={14} />
+              <span>{t("sidebarMergeFolder")}</span>
+            </button>
+            <button
+              onClick={() => runFolderAction(() => onDeleteFolder(selectedSubfolder))}
+              disabled={!canMutateSelectedFolder}
+              className="is-danger"
+              title={canMutateSelectedFolder ? undefined : readOnlyFolderTitle}
+            >
+              <Trash2 size={14} />
+              <span>{t("sidebarDeleteFolder")}</span>
+            </button>
+            {folderViewMode === "tree" ? (
+              <button onClick={() => runFolderAction(collapseAllFolders)}>
+                <Minimize2 size={14} />
+                <span>{t("sidebarCollapseAll")}</span>
+              </button>
+            ) : null}
+          </div>
+        </FloatingLayerPortal>
+      ) : null}
       {folderContextMenu ? (
-        <div
-          className="ue-sidebar-context-menu"
-          style={{ top: folderContextMenu.y, left: folderContextMenu.x }}
-          onClick={(event) => event.stopPropagation()}
-          onContextMenu={(event) => event.preventDefault()}
-        >
-          <button
-            className="ue-sidebar-context-item"
-            onClick={() => {
-              onRenameFolder(folderContextMenu.path);
-              setFolderContextMenu(null);
-            }}
+        <FloatingLayerPortal>
+          <div
+            className="ue-sidebar-context-menu"
+            style={{ top: folderContextMenu.y, left: folderContextMenu.x }}
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.preventDefault()}
           >
-            <PencilLine size={14} />
-            <span>{t("folderRename")}</span>
-          </button>
-          <button
-            className="ue-sidebar-context-item"
-            onClick={() => {
-              togglePinnedFolder(folderContextMenu.path);
-              setFolderContextMenu(null);
-            }}
-          >
-            <Pin size={14} fill={isFolderPinned(folderContextMenu.path, pinnedFolderPaths) ? "currentColor" : "none"} />
-            <span>{isFolderPinned(folderContextMenu.path, pinnedFolderPaths) ? t("folderUnpin") : t("folderPin")}</span>
-          </button>
-          <button
-            className="ue-sidebar-context-item"
-            onClick={() => {
-              onMergeFolder();
-              setFolderContextMenu(null);
-            }}
-          >
-            <ArrowRightLeft size={14} />
-            <span>{t("sidebarMergeFolder")}</span>
-          </button>
-          <button
-            className="ue-sidebar-context-item ue-sidebar-context-item--danger"
-            onClick={() => {
-              onDeleteFolder();
-              setFolderContextMenu(null);
-            }}
-          >
-            <Trash2 size={14} />
-            <span>{t("sidebarDeleteFolder")}</span>
-          </button>
-        </div>
+            <button
+              className="ue-sidebar-context-item"
+              onClick={() => {
+                onRenameFolder(folderContextMenu.path);
+                setFolderContextMenu(null);
+              }}
+            >
+              <PencilLine size={14} />
+              <span>{t("folderRename")}</span>
+            </button>
+            <button
+              className="ue-sidebar-context-item"
+              onClick={() => {
+                togglePinnedFolder(folderContextMenu.path);
+                setFolderContextMenu(null);
+              }}
+            >
+              <Pin size={14} fill={isFolderPinned(folderContextMenu.path, pinnedFolderPaths) ? "currentColor" : "none"} />
+              <span>{isFolderPinned(folderContextMenu.path, pinnedFolderPaths) ? t("folderUnpin") : t("folderPin")}</span>
+            </button>
+            <button
+              className="ue-sidebar-context-item"
+              onClick={() => {
+                onMergeFolder(folderContextMenu.path);
+                setFolderContextMenu(null);
+              }}
+            >
+              <ArrowRightLeft size={14} />
+              <span>{t("sidebarMergeFolder")}</span>
+            </button>
+            <button
+              className="ue-sidebar-context-item ue-sidebar-context-item--danger"
+              onClick={() => {
+                onDeleteFolder(folderContextMenu.path);
+                setFolderContextMenu(null);
+              }}
+            >
+              <Trash2 size={14} />
+              <span>{t("sidebarDeleteFolder")}</span>
+            </button>
+          </div>
+        </FloatingLayerPortal>
       ) : null}
     </aside>
   );

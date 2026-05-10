@@ -1,11 +1,19 @@
 # ComfyUI Universal Extractor
 
+## Maintenance notes
+
+- Full local verification is `powershell -ExecutionPolicy Bypass -File scripts\verify.ps1`; it now includes Python tests, compileall, frontend typecheck/lint/tests/build, dist asset audit, and release metadata checks.
+- Release version metadata is kept in sync across `pyproject.toml`, `gallery_ui/package.json`, and `gallery_ui/package-lock.json`.
+- The Gallery backend keeps `py/gallery/service.py` as the route-facing facade, with source refs and source path hardening split into `py/gallery/refs.py` and `py/gallery/source_security.py`.
+- The frontend sidebar folder logic lives in `gallery_ui/src/components/shared/folderTree.ts`; gallery image prefetch/card loading lives in `gallery_ui/src/components/gallery/galleryImagePrefetch.ts` and `GalleryCardImage.tsx`.
+- Shared frontend menu placement, dismiss handling, and shortcut editable-target guards live in `gallery_ui/src/utils/interaction.ts`.
+
 ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台插件，包含两块核心能力：
 
 - **Universal Extractor 节点**：从 `data/` 里的 JSON 提示词库随机或顺序抽取文本，用于构建动态提示词工作流。
 - **Universal Gallery 图库工作台**：在浏览器中管理 ComfyUI 图片输出、图版、分类、垃圾箱、词库和画师工作台。
 
-前端支持中文和英文界面，图库页面使用轻量、偏工具型的三栏布局：左侧资源栏、中间浏览区、右侧 Inspector。
+前端支持中文和英文界面，图库页面使用轻量、偏工具型的工作台布局：左侧资源栏、中间浏览区，以及不会挤压主图库的覆盖式右侧 Inspector。
 
 ## 功能概览
 
@@ -40,7 +48,8 @@ ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台�
 - **网格/列表模式**：图库、垃圾箱、词库子项目均支持两种常见排列方式；垃圾箱网格使用自适应瀑布流，长文件名和原始路径会限制在卡片内部。
 - **资源栏导航**：快捷入口固定在侧边栏顶部，输出图库和输入图库是独立 source 范围；目录区只显示当前入口对应的目录。目录支持搜索、树形/列表切换、置顶、默认按修改时间排序、名称排序备选和右键管理。
 - **选择交互**：默认关闭选择模式，单击图片打开详情；开启选择模式后支持左键拖选、Shift 连选、右键菜单和悬浮操作。
-- **右侧 Inspector**：普通图库页选中图片后，桌面端显示贴屏右侧详情栏并挤压中间内容；移动端以抽屉展示。
+- **双栏目录整理**：可在图库中开启左右双栏目录视图，两个目录独立搜索选择；支持单击选择、Ctrl/Meta 多选、Shift 连选、双击详情、批量拖拽移动、右键菜单、栏级全选/反选/清空/刷新/移动和键盘快捷键。双栏卡片会展示真实分辨率、文件大小和日期，并尽量保持与普通图库一致的 hover、选中和溢出控制体验。
+- **右侧 Inspector**：普通图库页选中图片后，桌面端以贴屏覆盖层显示，避免改变中间图库宽度和瀑布流列数；移动端以抽屉展示。
 - **图片详情页**：支持左右翻页、键盘导航、缩放、双击背景退出、发送工作流到 ComfyUI；如果 ComfyUI 已打开，会通过消息通道加载到现有页面，避免触发离开页面确认。
 - **Metadata 与提示词**：支持查看图片 Metadata，并可从右键菜单或详情入口一键复制正面提示词。
 - **文件管理**：移动、重命名、批量重命名、创建目录、删除到垃圾箱、恢复和彻底删除。
@@ -128,7 +137,7 @@ ComfyUI-Universal-Extractor/
 
 - `gallery_state.json`：图片状态、分类、图版等持久化数据。
 - `gallery_sources.json`：图库源配置。
-- `gallery_index.sqlite3`：图片分页索引，包含 `gallery_images` 主表、`gallery_index_meta` 元信息、`gallery_images_fts` 搜索表和 `gallery_image_color_family` 色系关系表。数据库使用 `PRAGMA user_version` 管理内部 schema 迁移。
+- `gallery_index.sqlite3`：图片分页索引，包含 `gallery_images` 主表、`gallery_index_meta` 元信息、`gallery_images_fts` 搜索表和 `gallery_image_color_family` 色系关系表。数据库使用 `PRAGMA user_version` 管理内部 schema 迁移，`gallery_images` 也缓存了图片真实宽高以便前端展示。
 - `thumb_cache/`：缩略图缓存。
 - `trash/`：插件内置垃圾箱。
 

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   BookOpen,
   Boxes,
@@ -35,6 +35,7 @@ import { LibraryEntryEditorModal } from "./LibraryEntryEditorModal";
 import { LibraryImportModal } from "./LibraryImportModal";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
+import { FloatingLayerPortal, placeMenuForEvent, useDismissableLayer } from "../../utils/interaction";
 
 interface LibraryWorkspaceProps {
   libraries: LibraryInfo[];
@@ -160,29 +161,11 @@ export const LibraryWorkspace = ({
     window.localStorage.setItem(LIBRARY_VIEW_MODE_STORAGE_KEY, libraryViewMode);
   }, [libraryViewMode]);
 
-  useEffect(() => {
-    if (!contextMenu) {
-      return;
-    }
-    const closeMenu = () => setContextMenu(null);
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
-        setContextMenu(null);
-      }
-    };
-    window.addEventListener("click", closeMenu);
-    window.addEventListener("contextmenu", closeMenu);
-    window.addEventListener("resize", closeMenu);
-    window.addEventListener("scroll", closeMenu, true);
-    window.addEventListener("keydown", handleKeyDown);
-    return () => {
-      window.removeEventListener("click", closeMenu);
-      window.removeEventListener("contextmenu", closeMenu);
-      window.removeEventListener("resize", closeMenu);
-      window.removeEventListener("scroll", closeMenu, true);
-      window.removeEventListener("keydown", handleKeyDown);
-    };
-  }, [contextMenu]);
+  const closeContextMenu = useCallback(() => setContextMenu(null), []);
+  useDismissableLayer(Boolean(contextMenu), closeContextMenu, {
+    closeOnContextMenu: true,
+    closeOnScroll: true,
+  });
 
   const entryTemplates = useMemo<EntryTemplate[]>(
     () => [
@@ -346,13 +329,12 @@ export const LibraryWorkspace = ({
   const handleEntryContextMenu = (event: MouseEvent, entry: LibraryEntry, index: number) => {
     event.preventDefault();
     event.stopPropagation();
-    const menuWidth = 220;
-    const menuHeight = 240;
+    const position = placeMenuForEvent(event, { width: 220, height: 240 }, "pointer");
     setContextMenu({
       entry,
       index,
-      x: Math.min(event.clientX, window.innerWidth - menuWidth - 12),
-      y: Math.min(event.clientY, window.innerHeight - menuHeight - 12),
+      x: position.x,
+      y: position.y,
     });
   };
 
@@ -942,52 +924,55 @@ export const LibraryWorkspace = ({
       />
 
       {contextMenu ? (
-        <div
-          className="ue-context-menu"
-          style={{ top: contextMenu.y, left: contextMenu.x }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button
-            className="ue-context-menu-item"
-            onClick={() => {
-              openEntryEditor(contextMenu.entry, contextMenu.index);
-              setContextMenu(null);
-            }}
+        <FloatingLayerPortal>
+          <div
+            className="ue-context-menu"
+            style={{ top: contextMenu.y, left: contextMenu.x }}
+            onClick={(event) => event.stopPropagation()}
+            onContextMenu={(event) => event.preventDefault()}
           >
-            <PencilLine size={14} />
-            <span>{t("libraryEdit")}</span>
-          </button>
-          <button
-            className="ue-context-menu-item"
-            onClick={() => {
-              void copyText(getPromptCopyValue(contextMenu.entry) || JSON.stringify(contextMenu.entry, null, 2), t("artistCopyResult"));
-              setContextMenu(null);
-            }}
-          >
-            <Copy size={14} />
-            <span>{t("libraryCopyPrompt")}</span>
-          </button>
-          <button
-            className="ue-context-menu-item"
-            onClick={() => {
-              void copyText(JSON.stringify(contextMenu.entry, null, 2), t("libraryCopyJsonSuccess"));
-              setContextMenu(null);
-            }}
-          >
-            <FileJson size={14} />
-            <span>{t("libraryCopyJson")}</span>
-          </button>
-          <button
-            className="ue-context-menu-item ue-context-menu-item--danger"
-            onClick={() => {
-              void handleDeleteEntry(contextMenu.index);
-              setContextMenu(null);
-            }}
-          >
-            <Trash2 size={14} />
-            <span>{t("commonDelete")}</span>
-          </button>
-        </div>
+            <button
+              className="ue-context-menu-item"
+              onClick={() => {
+                openEntryEditor(contextMenu.entry, contextMenu.index);
+                setContextMenu(null);
+              }}
+            >
+              <PencilLine size={14} />
+              <span>{t("libraryEdit")}</span>
+            </button>
+            <button
+              className="ue-context-menu-item"
+              onClick={() => {
+                void copyText(getPromptCopyValue(contextMenu.entry) || JSON.stringify(contextMenu.entry, null, 2), t("artistCopyResult"));
+                setContextMenu(null);
+              }}
+            >
+              <Copy size={14} />
+              <span>{t("libraryCopyPrompt")}</span>
+            </button>
+            <button
+              className="ue-context-menu-item"
+              onClick={() => {
+                void copyText(JSON.stringify(contextMenu.entry, null, 2), t("libraryCopyJsonSuccess"));
+                setContextMenu(null);
+              }}
+            >
+              <FileJson size={14} />
+              <span>{t("libraryCopyJson")}</span>
+            </button>
+            <button
+              className="ue-context-menu-item ue-context-menu-item--danger"
+              onClick={() => {
+                void handleDeleteEntry(contextMenu.index);
+                setContextMenu(null);
+              }}
+            >
+              <Trash2 size={14} />
+              <span>{t("commonDelete")}</span>
+            </button>
+          </div>
+        </FloatingLayerPortal>
       ) : null}
     </>
   );

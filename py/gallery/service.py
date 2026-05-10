@@ -40,6 +40,27 @@ from ..paths import (
     to_posix,
 )
 from .metadata import build_prompt_summary, extract_artist_prompts, read_image_metadata
+from .refs import (
+    DEFAULT_INPUT_SOURCE_ID,
+    DEFAULT_OUTPUT_SOURCE_ID,
+    IMAGE_REF_SEPARATOR,
+    make_folder_ref,
+    make_image_ref,
+    parse_folder_ref,
+    parse_image_ref,
+    sanitize_source_id as _sanitize_source_id,
+)
+from .source_security import (
+    ensure_supported_image_path as _ensure_supported_image_path,
+    ensure_within_directory as _ensure_within_directory,
+    env_flag as _env_flag,
+    external_sources_allowed as _external_sources_allowed,
+    harden_source as _harden_source,
+    path_is_within_any as _path_is_within_any,
+    real_abs as _real_abs,
+    safe_source_roots as _safe_source_roots,
+    validate_source_path as _validate_source_path,
+)
 from .state_store import (
     collect_categories,
     create_board,
@@ -70,12 +91,10 @@ except ImportError:
 
 
 THUMB_SIZE = 480
-IMAGE_REF_SEPARATOR = "::"
-DEFAULT_OUTPUT_SOURCE_ID = "default_output"
-DEFAULT_INPUT_SOURCE_ID = "default_input"
 GALLERY_INDEX_DB_FILE = os.path.join(DATA_DIR, "gallery_index.sqlite3")
-GALLERY_INDEX_SCHEMA_VERSION = 4
+GALLERY_INDEX_SCHEMA_VERSION = 5
 COLOR_INDEX_VERSION = "3"
+DIMENSION_INDEX_VERSION = "1"
 COLOR_FAMILY_MIN_RATIO = 0.25
 IMAGE_FRESHNESS_CACHE_TTL_SECONDS = 3.0
 IMAGE_INDEX_CACHE: dict[str, Any] = {
@@ -119,140 +138,20 @@ COLOR_INDEX_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ue-
 COLOR_INDEX_BACKFILL_LOCK = Lock()
 COLOR_INDEX_BACKFILL_RUNNING = False
 COLOR_INDEX_QUEUED_PATHS: set[str] = set()
+DIMENSION_BACKFILL_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ue-dimensions")
+DIMENSION_BACKFILL_LOCK = Lock()
+DIMENSION_BACKFILL_RUNNING = False
 
 
-def _sanitize_source_id(value: str) -> str:
-    clean = "".join(ch if ch.isalnum() or ch in {"_", "-"} else "_" for ch in str(value or "").strip())
-    clean = clean.strip("_-").lower()
-    return clean or f"source_{uuid.uuid4().hex[:10]}"
-
-
-def _real_abs(path: str) -> str:
-    return os.path.realpath(os.path.abspath(os.path.expanduser(str(path or "").strip())))
-
-
-def _ensure_within_directory(root_dir: str, full_path: str, label: str = "source") -> str:
-    normalized_root = _real_abs(root_dir)
-    normalized_path = _real_abs(full_path)
+def _read_image_dimensions(full_path: str) -> tuple[int, int]:
+    if not HAS_PIL:
+        return 0, 0
     try:
-        common = os.path.commonpath([normalized_root, normalized_path])
-    except ValueError as error:
-        raise ValueError("invalid path") from error
-
-    if common != normalized_root:
-        raise ValueError(f"path must stay within {label} directory")
-    return normalized_path
-
-
-def _env_flag(name: str) -> bool:
-    return str(os.environ.get(name, "")).strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _path_is_within_any(path: str, roots: list[str]) -> bool:
-    normalized_path = _real_abs(path)
-    for root in roots:
-        if not root:
-            continue
-        try:
-            if os.path.commonpath([_real_abs(root), normalized_path]) == _real_abs(root):
-                return True
-        except ValueError:
-            continue
-    return False
-
-
-def _safe_source_roots() -> list[str]:
-    return [path for path in [get_comfy_base_dir(), get_output_dir(), get_input_dir()] if path]
-
-
-def _external_sources_allowed() -> bool:
-    return _env_flag("UNIVERSAL_EXTRACTOR_ALLOW_EXTERNAL_SOURCES")
-
-
-def _validate_source_path(source: dict[str, Any]) -> str:
-    path = source.get("path", "")
-    if not path:
-        raise ValueError("source path required")
-
-    full_path = _real_abs(path)
-    if not os.path.isdir(full_path):
-        raise FileNotFoundError("source directory not found")
-    if not os.access(full_path, os.R_OK):
-        raise ValueError("source directory is not readable")
-    if not _external_sources_allowed() and not _path_is_within_any(full_path, _safe_source_roots()):
-        raise ValueError(
-            "custom source path must stay within the ComfyUI directory; "
-            "set UNIVERSAL_EXTRACTOR_ALLOW_EXTERNAL_SOURCES=1 to allow external read-only sources"
-        )
-    return full_path
-
-
-def _harden_source(source: dict[str, Any]) -> dict[str, Any]:
-    hardened = {**source}
-    try:
-        full_path = _validate_source_path(hardened)
-    except (FileNotFoundError, ValueError) as error:
-        hardened["enabled"] = False
-        hardened["writable"] = False
-        hardened["import_target"] = False
-        hardened["exists"] = bool(hardened.get("path") and os.path.isdir(os.path.expanduser(str(hardened.get("path")))))
-        hardened["security_error"] = str(error)
-        return hardened
-
-    within_safe_root = _path_is_within_any(full_path, _safe_source_roots())
-    requested_writable = bool(hardened.get("writable"))
-    writable = requested_writable and within_safe_root and os.access(full_path, os.W_OK)
-    if requested_writable and not within_safe_root:
-        hardened["security_error"] = "external source directories are read-only"
-    if hardened.get("writable") and not writable:
-        hardened["security_error"] = hardened.get("security_error") or "source directory is not writable"
-    hardened["path"] = full_path
-    hardened["exists"] = True
-    hardened["writable"] = writable
-    if not writable:
-        hardened["import_target"] = False
-    return hardened
-
-
-def _ensure_supported_image_path(path: str):
-    if not path.lower().endswith(SUPPORTED_IMAGE_EXTENSIONS):
-        raise ValueError("path must reference a supported image file")
-    if os.path.exists(path) and not os.path.isfile(path):
-        raise ValueError("path must reference a regular image file")
-
-
-def make_image_ref(source_id: str, relative_path: str) -> str:
-    normalized_path = normalize_relative_path(relative_path)
-    clean_source_id = _sanitize_source_id(source_id)
-    if clean_source_id == DEFAULT_OUTPUT_SOURCE_ID:
-        return normalized_path
-    return f"{clean_source_id}{IMAGE_REF_SEPARATOR}{normalized_path}"
-
-
-def parse_image_ref(image_ref: str) -> tuple[str, str]:
-    value = str(image_ref or "").strip()
-    if IMAGE_REF_SEPARATOR in value:
-        source_id, relative_path = value.split(IMAGE_REF_SEPARATOR, 1)
-        source_id = _sanitize_source_id(source_id)
-        relative_path = normalize_relative_path(relative_path)
-    else:
-        source_id = DEFAULT_OUTPUT_SOURCE_ID
-        relative_path = normalize_relative_path(value)
-    if not relative_path:
-        raise ValueError("relative_path required")
-    return source_id, relative_path
-
-
-def make_folder_ref(source_id: str, subfolder: str = "") -> str:
-    return f"{_sanitize_source_id(source_id)}{IMAGE_REF_SEPARATOR}{normalize_relative_path(subfolder)}"
-
-
-def parse_folder_ref(folder_ref: str) -> tuple[str, str]:
-    value = str(folder_ref or "").strip()
-    if IMAGE_REF_SEPARATOR in value:
-        source_id, subfolder = value.split(IMAGE_REF_SEPARATOR, 1)
-        return _sanitize_source_id(source_id), normalize_relative_path(subfolder)
-    return DEFAULT_OUTPUT_SOURCE_ID, normalize_relative_path(value)
+        with Image.open(full_path) as image:
+            width, height = image.size
+            return int(width or 0), int(height or 0)
+    except Exception:
+        return 0, 0
 
 
 def _default_gallery_sources() -> list[dict[str, Any]]:
@@ -1116,6 +1015,8 @@ def _connect_gallery_index_db() -> sqlite3.Connection:
             subfolder TEXT NOT NULL,
             display_subfolder TEXT NOT NULL,
             size INTEGER NOT NULL,
+            image_width INTEGER NOT NULL DEFAULT 0,
+            image_height INTEGER NOT NULL DEFAULT 0,
             created_at INTEGER NOT NULL,
             modified_at INTEGER NOT NULL,
             title TEXT NOT NULL DEFAULT '',
@@ -1141,6 +1042,8 @@ def _connect_gallery_index_db() -> sqlite3.Connection:
         "notes": "TEXT NOT NULL DEFAULT ''",
         "pinned": "INTEGER NOT NULL DEFAULT 0",
         "boards_text": "TEXT NOT NULL DEFAULT ''",
+        "image_width": "INTEGER NOT NULL DEFAULT 0",
+        "image_height": "INTEGER NOT NULL DEFAULT 0",
         "dominant_color": "TEXT NOT NULL DEFAULT ''",
         "color_family": "TEXT NOT NULL DEFAULT ''",
         "color_families_text": "TEXT NOT NULL DEFAULT ''",
@@ -1309,6 +1212,8 @@ def _image_row_to_payload(row: sqlite3.Row, source: dict[str, Any]) -> dict[str,
         "original_url": original_url,
         "thumb_url": build_thumb_url(relative_path),
         "size": int(row["size"]),
+        "width": int(row["image_width"] or 0),
+        "height": int(row["image_height"] or 0),
         "created_at": int(row["created_at"]),
         "dominant_color": str(row["dominant_color"] or ""),
         "color_family": str(row["color_family"] or ""),
@@ -1335,6 +1240,93 @@ def _color_index_is_current(connection: sqlite3.Connection) -> bool:
         ).fetchone()["total"]
     )
     return missing_count == 0
+
+
+def _schedule_dimension_backfill(sources: list[dict[str, Any]], signature: str):
+    global DIMENSION_BACKFILL_RUNNING
+    if not HAS_PIL:
+        return
+    with DIMENSION_BACKFILL_LOCK:
+        if DIMENSION_BACKFILL_RUNNING:
+            return
+        DIMENSION_BACKFILL_RUNNING = True
+
+    source_snapshot = [
+        {
+            "id": str(source.get("id", "")),
+            "path": str(source.get("path", "")),
+            "enabled": bool(source.get("enabled", True)),
+            "exists": bool(source.get("exists", False)),
+        }
+        for source in sources
+    ]
+
+    def run_backfill():
+        global DIMENSION_BACKFILL_RUNNING
+        try:
+            source_by_id = {
+                source["id"]: source
+                for source in source_snapshot
+                if source["id"] and source["enabled"] and source["exists"] and source["path"]
+            }
+            with _connect_gallery_index_db() as connection:
+                if _index_meta_get(connection, "source_signature") != signature:
+                    return
+                rows = connection.execute(
+                    """
+                    SELECT relative_path, source_id, source_relative_path
+                    FROM gallery_images
+                    WHERE image_width <= 0 OR image_height <= 0
+                    LIMIT 500
+                    """
+                ).fetchall()
+                for row in rows:
+                    source = source_by_id.get(str(row["source_id"]))
+                    if not source:
+                        continue
+                    try:
+                        full_path = _ensure_within_directory(
+                            source["path"],
+                            os.path.join(source["path"], str(row["source_relative_path"])),
+                            str(row["relative_path"]),
+                        )
+                    except ValueError:
+                        continue
+                    width, height = _read_image_dimensions(full_path)
+                    if width > 0 and height > 0:
+                        connection.execute(
+                            """
+                            UPDATE gallery_images
+                            SET image_width = ?, image_height = ?
+                            WHERE relative_path = ?
+                            """,
+                            (width, height, str(row["relative_path"])),
+                        )
+                _index_meta_set(connection, "dimension_index_version", DIMENSION_INDEX_VERSION)
+                connection.commit()
+        finally:
+            with DIMENSION_BACKFILL_LOCK:
+                DIMENSION_BACKFILL_RUNNING = False
+
+    DIMENSION_BACKFILL_EXECUTOR.submit(run_backfill)
+
+
+def _schedule_dimension_backfill_if_needed(connection: sqlite3.Connection, sources: list[dict[str, Any]], signature: str):
+    if _index_meta_get(connection, "dimension_index_version") == DIMENSION_INDEX_VERSION:
+        return
+    missing_count = int(
+        connection.execute(
+            """
+            SELECT COUNT(*) AS total
+            FROM gallery_images
+            WHERE image_width <= 0 OR image_height <= 0
+            """
+        ).fetchone()["total"]
+    )
+    if missing_count > 0:
+        _schedule_dimension_backfill(sources, signature)
+    else:
+        _index_meta_set(connection, "dimension_index_version", DIMENSION_INDEX_VERSION)
 
 
 def _schedule_color_index_backfill(
@@ -1727,10 +1719,11 @@ def _load_image_index_from_db(sources: list[dict[str, Any]], signature: str) -> 
             return None
         if not _color_index_is_current(connection):
             _schedule_color_index_backfill(sources, signature)
+        _schedule_dimension_backfill_if_needed(connection, sources, signature)
         rows = connection.execute(
             """
             SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
-                   subfolder, display_subfolder, size, created_at, modified_at,
+                   subfolder, display_subfolder, size, image_width, image_height, created_at, modified_at,
                    dominant_color, color_family, color_families_text,
                    color_family_scores_json, palette_json, color_saturation, color_luma
             FROM gallery_images
@@ -1829,6 +1822,8 @@ def _save_image_index_to_db(index: dict[str, Any]):
                     image["subfolder"],
                     image["display_subfolder"],
                     int(image["size"]),
+                    int(image.get("image_width", image.get("width", 0)) or 0),
+                    int(image.get("image_height", image.get("height", 0)) or 0),
                     int(image["created_at"]),
                     int(image.get("modified_at", image["created_at"])),
                     str(image_state.get("title", "")),
@@ -1850,13 +1845,13 @@ def _save_image_index_to_db(index: dict[str, Any]):
             """
             INSERT INTO gallery_images(
                 relative_path, source_id, source_relative_path, filename, relative_dir,
-                subfolder, display_subfolder, size, created_at, modified_at,
+                subfolder, display_subfolder, size, image_width, image_height, created_at, modified_at,
                 title, category, notes, pinned, boards_text,
                 dominant_color, color_family, color_families_text,
                 color_family_scores_json, palette_json, color_saturation, color_luma,
                 scanned_at
             )
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             rows,
         )
@@ -1875,6 +1870,7 @@ def _save_image_index_to_db(index: dict[str, Any]):
         _sync_image_state_to_index_db(connection, image_states)
         _index_meta_set(connection, "source_signature", str(index.get("signature") or ""))
         _index_meta_set(connection, "color_index_version", COLOR_INDEX_VERSION if index.get("color_index_complete") else "")
+        _index_meta_set(connection, "dimension_index_version", DIMENSION_INDEX_VERSION)
         _index_meta_set(connection, "built_at", str(index.get("built_at") or scanned_at))
         connection.commit()
 
@@ -1939,6 +1935,7 @@ def _build_image_index(sources: list[dict[str, Any]], include_color_profiles: bo
 
                 original_url, resolved_subfolder = build_view_url(image_ref)
                 color_profile = _extract_image_color_profile(entry.path) if include_color_profiles else dict(COLOR_PROFILE_DEFAULT)
+                image_width, image_height = _read_image_dimensions(entry.path)
                 source_counts[source["id"]] = source_counts.get(source["id"], 0) + 1
                 images.append(
                     {
@@ -1956,6 +1953,8 @@ def _build_image_index(sources: list[dict[str, Any]], include_color_profiles: bo
                         "original_url": original_url,
                         "thumb_url": build_thumb_url(image_ref),
                         "size": stat.st_size,
+                        "image_width": image_width,
+                        "image_height": image_height,
                         "created_at": int(stat.st_ctime),
                         "modified_at": int(stat.st_mtime),
                         "dominant_color": color_profile["dominant_color"],
@@ -1985,7 +1984,7 @@ def _build_image_index(sources: list[dict[str, Any]], include_color_profiles: bo
     return index
 
 
-def _image_record_for_file(source: dict[str, Any], full_path: str, stat: os.stat_result) -> dict[str, Any]:
+def _image_record_for_file(source: dict[str, Any], full_path: str, stat: os.stat_result, include_dimensions: bool = True) -> dict[str, Any]:
     source_root = source.get("path", "")
     relative_path = normalize_relative_path(os.path.relpath(full_path, source_root))
     image_ref = make_image_ref(source["id"], relative_path)
@@ -1995,6 +1994,7 @@ def _image_record_for_file(source: dict[str, Any], full_path: str, stat: os.stat
     if source["id"] != DEFAULT_OUTPUT_SOURCE_ID:
         subfolder_ref = f'{source["id"]}{IMAGE_REF_SEPARATOR}{relative_dir}' if relative_dir else source["id"]
     original_url, resolved_subfolder = build_view_url(image_ref)
+    image_width, image_height = _read_image_dimensions(full_path) if include_dimensions else (0, 0)
     return {
         "filename": os.path.basename(full_path),
         "relative_path": image_ref,
@@ -2004,6 +2004,8 @@ def _image_record_for_file(source: dict[str, Any], full_path: str, stat: os.stat
         "subfolder": subfolder_ref if relative_dir or source["id"] != DEFAULT_OUTPUT_SOURCE_ID else resolved_subfolder,
         "display_subfolder": display_dir,
         "size": stat.st_size,
+        "image_width": image_width,
+        "image_height": image_height,
         "created_at": int(stat.st_ctime),
         "modified_at": int(stat.st_mtime),
         "title": "",
@@ -2054,7 +2056,8 @@ def _scan_index_records_for_scope(sources: list[dict[str, Any]], scope: str = ""
                     stat = entry.stat()
                 except (FileNotFoundError, PermissionError, OSError):
                     continue
-                record = _image_record_for_file(source, entry.path, stat)
+                record = _image_record_for_file(source, entry.path, stat, include_dimensions=False)
+                record["full_path"] = entry.path
                 records[record["relative_path"]] = record
     return records
 
@@ -2111,8 +2114,11 @@ def _sync_image_index_incremental_locked(sources: list[dict[str, Any]], signatur
             ):
                 continue
             image_state = state_map.get(relative_path, default_image_state())
+            image_width, image_height = _read_image_dimensions(str(record.get("full_path", "")))
             record = {
                 **record,
+                "image_width": image_width,
+                "image_height": image_height,
                 "title": str(image_state.get("title", "")),
                 "category": str(image_state.get("category", "")),
                 "notes": str(image_state.get("notes", "")),
@@ -2131,6 +2137,8 @@ def _sync_image_index_incremental_locked(sources: list[dict[str, Any]], signatur
                     record["subfolder"],
                     record["display_subfolder"],
                     int(record["size"]),
+                    int(record.get("image_width", 0) or 0),
+                    int(record.get("image_height", 0) or 0),
                     int(record["created_at"]),
                     int(record["modified_at"]),
                     record["title"],
@@ -2157,13 +2165,13 @@ def _sync_image_index_incremental_locked(sources: list[dict[str, Any]], signatur
                 """
                 INSERT INTO gallery_images(
                     relative_path, source_id, source_relative_path, filename, relative_dir,
-                    subfolder, display_subfolder, size, created_at, modified_at,
+                    subfolder, display_subfolder, size, image_width, image_height, created_at, modified_at,
                     title, category, notes, pinned, boards_text,
                     dominant_color, color_family, color_families_text,
                     color_family_scores_json, palette_json, color_saturation, color_luma,
                     scanned_at
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(relative_path) DO UPDATE SET
                     source_id = excluded.source_id,
                     source_relative_path = excluded.source_relative_path,
@@ -2172,6 +2180,8 @@ def _sync_image_index_incremental_locked(sources: list[dict[str, Any]], signatur
                     subfolder = excluded.subfolder,
                     display_subfolder = excluded.display_subfolder,
                     size = excluded.size,
+                    image_width = excluded.image_width,
+                    image_height = excluded.image_height,
                     created_at = excluded.created_at,
                     modified_at = excluded.modified_at,
                     title = excluded.title,
@@ -2644,6 +2654,7 @@ def list_images_page(
         _ensure_auxiliary_tables_current(connection)
         if not _color_index_is_current(connection):
             _schedule_color_index_backfill(sources, signature)
+        _schedule_dimension_backfill_if_needed(connection, sources, signature)
         _sync_image_state_to_index_db(connection)
         try:
             total = int(
@@ -2652,7 +2663,7 @@ def list_images_page(
             rows = connection.execute(
                 f"""
                 SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
-                       subfolder, display_subfolder, size, created_at, modified_at,
+                       subfolder, display_subfolder, size, image_width, image_height, created_at, modified_at,
                        title, category, notes, pinned, boards_text,
                        dominant_color, color_family, color_families_text,
                        color_family_scores_json, palette_json, color_saturation, color_luma
@@ -2678,7 +2689,7 @@ def list_images_page(
             rows = connection.execute(
                 f"""
                 SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
-                       subfolder, display_subfolder, size, created_at, modified_at,
+                       subfolder, display_subfolder, size, image_width, image_height, created_at, modified_at,
                        title, category, notes, pinned, boards_text,
                        dominant_color, color_family, color_families_text,
                        color_family_scores_json, palette_json, color_saturation, color_luma

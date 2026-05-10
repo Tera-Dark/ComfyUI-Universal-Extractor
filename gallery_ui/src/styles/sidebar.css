@@ -400,10 +400,8 @@
 }
 
 .ue-sidebar-action-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 30;
+  position: fixed;
+  z-index: 1000;
   display: flex;
   min-width: 190px;
   flex-direction: column;
@@ -833,7 +831,7 @@
 
 .ue-sidebar-context-menu {
   position: fixed;
-  z-index: 90;
+  z-index: 1000;
   display: flex;
   min-width: 180px;
   flex-direction: column;

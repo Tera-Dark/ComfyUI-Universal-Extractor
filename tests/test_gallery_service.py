@@ -173,6 +173,52 @@ def test_gallery_index_schema_migration_adds_query_indexes(isolated_gallery_env)
     assert "gallery_image_color_family" in tables
 
 
+def test_gallery_index_records_real_image_dimensions(isolated_gallery_env):
+    pil = pytest.importorskip("PIL.Image")
+    service = isolated_gallery_env.service
+    image_path = isolated_gallery_env.output_dir / "sized.png"
+    pil.new("RGB", (96, 64), color=(255, 0, 0)).save(image_path)
+
+    page = service.list_images_page(force_refresh=True)
+
+    assert page["images"][0]["width"] == 96
+    assert page["images"][0]["height"] == 64
+    with service._connect_gallery_index_db() as connection:
+        row = connection.execute(
+            "SELECT image_width, image_height FROM gallery_images WHERE relative_path = ?",
+            ("sized.png",),
+        ).fetchone()
+    assert row["image_width"] == 96
+    assert row["image_height"] == 64
+
+
+def test_incremental_dimension_read_only_for_changed_files(isolated_gallery_env, monkeypatch):
+    service = isolated_gallery_env.service
+    unchanged = isolated_gallery_env.output_dir / "unchanged.png"
+    changed = isolated_gallery_env.output_dir / "changed.png"
+    unchanged.write_bytes(b"unchanged")
+    changed.write_bytes(b"changed")
+    service.list_images_page(force_refresh=True)
+
+    calls: list[str] = []
+
+    def fake_dimensions(full_path: str):
+        calls.append(os.path.basename(full_path))
+        return (320, 240)
+
+    monkeypatch.setattr(service, "_read_image_dimensions", fake_dimensions)
+    future = time.time() + 10
+    changed.write_bytes(b"changed again")
+    os.utime(changed, (future, future))
+
+    page = service.list_images_page(force_refresh=True)
+
+    assert calls == ["changed.png"]
+    changed_payload = next(image for image in page["images"] if image["relative_path"] == "changed.png")
+    assert changed_payload["width"] == 320
+    assert changed_payload["height"] == 240
+
+
 def test_context_uses_database_aggregates_without_full_index_load(isolated_gallery_env, monkeypatch):
     service = isolated_gallery_env.service
     folder = isolated_gallery_env.output_dir / "month"
@@ -296,6 +342,10 @@ def test_state_sync_skips_unchanged_gallery_state(isolated_gallery_env, monkeypa
 
 def test_force_refresh_incrementally_updates_changed_files(isolated_gallery_env, monkeypatch):
     service = isolated_gallery_env.service
+    monkeypatch.setattr(service, "_schedule_color_index_backfill", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(service, "_schedule_dimension_backfill", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(service, "_read_image_dimensions", lambda *_args, **_kwargs: (0, 0))
+
     first = isolated_gallery_env.output_dir / "first.png"
     removed = isolated_gallery_env.output_dir / "removed.png"
     first.write_bytes(b"first")
@@ -355,3 +405,37 @@ def test_search_and_color_auxiliary_tables_preserve_filters(isolated_gallery_env
     color_result = service.list_images_page(color_family="red")
     assert color_result["total"] == 1
     assert color_result["images"][0]["color_family"] == "red"
+
+
+def test_trash_restore_and_purge_contracts_use_isolated_storage(isolated_gallery_env):
+    service = isolated_gallery_env.service
+    image_path = isolated_gallery_env.output_dir / "trash-me.png"
+    image_path.write_bytes(b"image")
+
+    trashed = service.move_path_to_trash(
+        full_path=str(image_path),
+        kind="image",
+        original_path="trash-me.png",
+        state_snapshot={"trash-me.png": {"title": "Trash Me"}},
+        image_count=1,
+    )
+    assert not image_path.exists()
+    assert service.list_trash_items()[0]["id"] == trashed["id"]
+
+    restored = service.restore_trash_item(trashed["id"])
+    assert restored["ok"] is True
+    assert image_path.exists()
+    assert service.list_trash_items() == []
+
+    second_path = isolated_gallery_env.output_dir / "purge-me.png"
+    second_path.write_bytes(b"image")
+    purged_item = service.move_path_to_trash(
+        full_path=str(second_path),
+        kind="image",
+        original_path="purge-me.png",
+        image_count=1,
+    )
+    purged = service.purge_trash_item(purged_item["id"])
+    assert purged["ok"] is True
+    assert not os.path.exists(purged_item["storage_path"])
+    assert service.list_trash_items() == []

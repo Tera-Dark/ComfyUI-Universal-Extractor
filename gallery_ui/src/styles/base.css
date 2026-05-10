@@ -131,7 +131,7 @@ textarea::placeholder {
 }
 
 .ue-body-shell.has-inspector {
-  grid-template-columns: var(--ue-sidebar-width) minmax(0, 1fr) clamp(360px, 22vw, 440px);
+  grid-template-columns: var(--ue-sidebar-width) minmax(0, 1fr);
 }
 
 .ue-body-shell.is-sidebar-collapsed {
@@ -139,13 +139,14 @@ textarea::placeholder {
 }
 
 .ue-body-shell.is-sidebar-collapsed.has-inspector {
-  grid-template-columns: 0 minmax(0, 1fr) clamp(360px, 22vw, 440px);
+  grid-template-columns: 0 minmax(0, 1fr);
 }
 
 .ue-main-shell {
   min-width: 0;
   padding: clamp(18px, 2vw, 30px) clamp(18px, 2.6vw, 36px) 24px;
   overflow-y: auto;
+  contain: layout paint;
 }
 
 .ue-workspace {

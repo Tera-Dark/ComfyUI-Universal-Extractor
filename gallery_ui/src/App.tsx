@@ -102,6 +102,7 @@ function App() {
     const preferences = getStoredUiPreferences();
     return typeof window !== "undefined" ? window.innerWidth <= 960 || preferences.collapseSidebarOnLaunch : preferences.collapseSidebarOnLaunch;
   });
+  const [gallerySelectionModeActive, setGallerySelectionModeActive] = useState(false);
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [boardDialogOpen, setBoardDialogOpen] = useState(false);
 
@@ -308,7 +309,7 @@ function App() {
         gallery.refresh();
         pushToast(t("folderCreateSuccess"), "success");
       } else if (folderDialog.mode === "merge") {
-        await gallery.mergeFolder(gallery.selectedSubfolder, path);
+        await gallery.mergeFolder(folderDialog.sourcePath ?? gallery.selectedSubfolder, path);
         pushToast(t("folderMergeSuccess"), "success");
       } else if (folderDialog.sourcePath) {
         await gallery.renameFolder(folderDialog.sourcePath, path);
@@ -326,14 +327,14 @@ function App() {
     }
   };
 
-  const handleDeleteFolder = async () => {
-    if (!gallery.selectedSubfolder) {
+  const handleDeleteFolder = async (path = gallery.selectedSubfolder) => {
+    if (!path) {
       return;
     }
     const approved = await confirm({
       title: t("commonDelete"),
-      message: t("folderDeleteConfirm", { name: toFolderDialogValue(gallery.selectedSubfolder) }),
-      tone: gallery.selectedSubfolder.includes("/") ? "warning" : "danger",
+      message: t("folderDeleteConfirm", { name: toFolderDialogValue(path) }),
+      tone: path.includes("/") ? "warning" : "danger",
       confirmLabel: t("commonDelete"),
       cancelLabel: t("libraryCancel"),
     });
@@ -342,18 +343,18 @@ function App() {
     }
 
     try {
-      await gallery.deleteFolder(gallery.selectedSubfolder);
+      await gallery.deleteFolder(path);
       pushToast(t("folderDeleteSuccess"), "success");
     } catch (error) {
       pushToast(error instanceof Error ? error.message : t("folderDeleteError"), "error");
     }
   };
 
-  const handleMergeFolder = () => {
-    if (!gallery.selectedSubfolder) {
+  const handleMergeFolder = (path = gallery.selectedSubfolder) => {
+    if (!path) {
       return;
     }
-    setFolderDialog({ mode: "merge", initialValue: "" });
+    setFolderDialog({ mode: "merge", initialValue: "", sourcePath: path });
   };
 
   const handleRenameFolder = (path: string) => {
@@ -489,6 +490,7 @@ function App() {
 
   const galleryInspectorOpen =
     activeTab === "gallery" &&
+    gallerySelectionModeActive &&
     !gallery.isTrashView &&
     selectedGalleryImages.length > 0;
 
@@ -599,6 +601,7 @@ function App() {
               boards={gallery.boards}
               defaultSelectionMode={uiPreferences.defaultSelectionMode}
               enableImagePrefetch={uiPreferences.enableImagePrefetch}
+              onSelectionModeActiveChange={setGallerySelectionModeActive}
               onOpenDetail={handleOpenGalleryDetail}
               onPageChange={gallery.setPage}
               onCategoryChange={gallery.setSelectedCategory}
@@ -617,6 +620,7 @@ function App() {
               onUpdateBoardPins={gallery.updateBoardPins}
               onDeleteBoard={gallery.deleteBoard}
               onDeleteImages={gallery.deleteImages}
+              onMoveImages={gallery.moveImages}
               onImportFiles={handleImportFiles}
               onApplyPendingLiveRefresh={gallery.refresh}
               onRestoreTrashItem={async (id) => {
@@ -733,34 +737,32 @@ function App() {
         </main>
 
         {galleryInspectorOpen ? (
-          <GalleryInspectorPanel
-            selectedImages={selectedGalleryImages}
-            selectedPaths={selectedGalleryImages.map((image) => image.relative_path)}
-            selectedSubfolder={gallery.selectedSubfolder}
-            selectedBoard={selectedGalleryBoard}
-            boards={gallery.boards}
-            page={gallery.page}
-            targetFolderOptions={gallery.targetFolderOptions}
-            onClose={() => gallery.setSelectedImagePaths([])}
-            onOpenDetail={handleOpenGalleryDetail}
-            onOpenWorkflow={handleOpenImageWorkflow}
-            onUpdateImageState={handleUpdateImageState}
-            onBatchUpdateImages={gallery.batchUpdateImages}
-            onCreateBoard={gallery.createBoard}
-            onUpdateBoardPins={gallery.updateBoardPins}
-            onMoveImages={gallery.moveImages}
-            onBatchRenameImages={async (relativePaths, template, startNumber, padding, currentPage) => {
-              try {
-                const result = await gallery.batchRenameImages(relativePaths, template, startNumber, padding, currentPage);
-                pushToast(t("bulkRenameSuccess", { count: result.renamed.length }), "success");
-                return result;
-              } catch (error) {
-                pushToast(error instanceof Error ? error.message : t("bulkRenameError"), "error");
-                throw error;
-              }
-            }}
-            onDeleteImages={gallery.deleteImages}
-          />
+          <div className="ue-gallery-inspector-layer">
+            <GalleryInspectorPanel
+              selectedPaths={selectedGalleryImages.map((image) => image.relative_path)}
+              selectedSubfolder={gallery.selectedSubfolder}
+              selectedBoard={selectedGalleryBoard}
+              boards={gallery.boards}
+              page={gallery.page}
+              targetFolderOptions={gallery.targetFolderOptions}
+              onClose={() => gallery.setSelectedImagePaths([])}
+              onBatchUpdateImages={gallery.batchUpdateImages}
+              onCreateBoard={gallery.createBoard}
+              onUpdateBoardPins={gallery.updateBoardPins}
+              onMoveImages={gallery.moveImages}
+              onBatchRenameImages={async (relativePaths, template, startNumber, padding, currentPage) => {
+                try {
+                  const result = await gallery.batchRenameImages(relativePaths, template, startNumber, padding, currentPage);
+                  pushToast(t("bulkRenameSuccess", { count: result.renamed.length }), "success");
+                  return result;
+                } catch (error) {
+                  pushToast(error instanceof Error ? error.message : t("bulkRenameError"), "error");
+                  throw error;
+                }
+              }}
+              onDeleteImages={gallery.deleteImages}
+            />
+          </div>
         ) : null}
       </div>
 

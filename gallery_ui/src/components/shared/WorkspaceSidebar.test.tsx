@@ -3,7 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "../../i18n/I18nProvider";
 import type { GalleryContext, GallerySource } from "../../types/universal-gallery";
-import { buildFolderTree, WorkspaceSidebar } from "./WorkspaceSidebar";
+import { buildFolderTree } from "./folderTree";
+import { WorkspaceSidebar } from "./WorkspaceSidebar";
 
 const sources: GallerySource[] = [
   {
@@ -65,6 +66,21 @@ describe("WorkspaceSidebar folder tree", () => {
     expect(tree[0].children[0]).toMatchObject({ path: "default_input::clips/poses", name: "poses" });
   });
 
+  it("keeps nested output folders canonical while scoped to output", () => {
+    const tree = buildFolderTree(
+      ["default_output::Noob杂项合集（按月分）/2025.06"],
+      new Set(),
+      "name",
+      sources,
+      (source) => source?.name ?? "",
+      "default_output",
+    );
+
+    expect(tree[0]).toMatchObject({ path: "default_output::Noob杂项合集（按月分）", name: "Noob杂项合集（按月分）" });
+    expect(tree[0].children[0]).toMatchObject({ path: "default_output::Noob杂项合集（按月分）/2025.06", name: "2025.06" });
+    expect(tree[0].children[0].path).not.toContain("default_output::default_output::");
+  });
+
   it("shows only the selected source folders and disables writes for read-only input", () => {
     const onSubfolderSelect = vi.fn();
     const context: GalleryContext = {
@@ -122,6 +138,76 @@ describe("WorkspaceSidebar folder tree", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "输出图库" }));
     expect(onSubfolderSelect).toHaveBeenCalledWith("default_output::");
+  });
+
+  it("opens folder context menus at the pointer without changing the current folder", () => {
+    const onRenameFolder = vi.fn();
+    const onSubfolderSelect = vi.fn();
+    const onMergeFolder = vi.fn();
+    const context: GalleryContext = {
+      base_dir: "D:/ComfyUI",
+      output_dir_absolute: "D:/ComfyUI/output",
+      output_dir_relative: "./output",
+      import_image_subfolder: "universal_gallery_imports",
+      import_image_target_relative: "./output/universal_gallery_imports",
+      categories: [],
+      subfolders: ["default_output::current", "default_output::outputs"],
+      move_targets: [],
+      sources,
+      active_source_count: 2,
+      pinned_count: 0,
+      boards: [],
+    };
+
+    const { baseElement } = render(
+      <I18nProvider>
+        <WorkspaceSidebar
+          collapsed={false}
+          onToggle={vi.fn()}
+          activeTab="gallery"
+          galleryContext={context}
+          folderViewMode="tree"
+          onFolderViewModeChange={vi.fn()}
+          selectedCategory=""
+          selectedSubfolder="default_output::current"
+          selectedBoardId=""
+          pinnedOnly={false}
+          onCategorySelect={vi.fn()}
+          onSubfolderSelect={onSubfolderSelect}
+          onBoardSelect={vi.fn()}
+          onPinnedOnlySelect={vi.fn()}
+          onCreateBoard={vi.fn()}
+          onCreateFolder={vi.fn()}
+          onDeleteFolder={vi.fn()}
+          onMergeFolder={onMergeFolder}
+          onRenameFolder={onRenameFolder}
+          libraries={[]}
+          activeLibraryName={null}
+          onLibrarySelect={vi.fn()}
+          onLibraryDelete={vi.fn()}
+          draftName=""
+          onDraftNameChange={vi.fn()}
+          onCreateLibrary={vi.fn()}
+        />
+      </I18nProvider>,
+    );
+
+    fireEvent.contextMenu(screen.getByText("outputs"), { clientX: 72, clientY: 96 });
+
+    const menu = baseElement.querySelector(".ue-sidebar-context-menu") as HTMLElement;
+    expect(menu).toBeInTheDocument();
+    expect(menu).toHaveStyle({ left: "72px", top: "96px" });
+    expect(onSubfolderSelect).not.toHaveBeenCalled();
+
+    const menuButtons = menu.querySelectorAll("button");
+    fireEvent.click(menuButtons[2]);
+    expect(onSubfolderSelect).not.toHaveBeenCalled();
+    expect(onMergeFolder).toHaveBeenCalledWith("default_output::outputs");
+
+    fireEvent.contextMenu(screen.getByText("outputs"), { clientX: 72, clientY: 96 });
+    fireEvent.click(screen.getByText("重命名"));
+    expect(onSubfolderSelect).not.toHaveBeenCalled();
+    expect(onRenameFolder).toHaveBeenCalledWith("default_output::outputs");
   });
 
   it("sorts pinned folders first, then modified time by default", () => {

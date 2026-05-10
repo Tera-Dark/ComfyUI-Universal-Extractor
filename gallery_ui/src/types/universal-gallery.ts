@@ -51,6 +51,8 @@ export interface ImageRecord {
   original_url: string;
   thumb_url: string;
   size: number;
+  width?: number;
+  height?: number;
   created_at: number;
   favorite: boolean;
   pinned: boolean;

@@ -393,7 +393,7 @@ const zhCN = {
   inspectorFolderTitle: "当前视图",
   inspectorFolderHint: "未选择图片时，这里显示当前目录、筛选结果和快捷操作。",
   inspectorVisibleCount: "当前页",
-  inspectorSingleHint: "单选图片后可在这里快速查看信息、Pin 图、加入图版或打开详情。",
+  inspectorSingleHint: "这里仅处理已选图片的批量管理：Pin、移动、分类、重命名、加入图版或删除。",
   inspectorFilename: "文件名",
   inspectorCategory: "分类",
   inspectorSource: "来源",

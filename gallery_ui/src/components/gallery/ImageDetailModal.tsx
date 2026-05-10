@@ -31,6 +31,7 @@ import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
 import type { DetailNavigationState, ImageMetadata, ImageRecord } from "../../types/universal-gallery";
 import { formatFileSize, formatLongDateTime } from "../../utils/formatters";
+import { isEditableTarget } from "../../utils/interaction";
 import { getPositivePromptText } from "../../utils/metadata";
 
 interface ImageDetailModalProps {
@@ -85,13 +86,6 @@ const clampPan = (value: number, scale: number, viewportSize: number) => {
 
   const limit = ((scale - 1) * viewportSize) / 2 + 48;
   return clamp(value, -limit, limit);
-};
-
-const isEditableTarget = (target: EventTarget | null) => {
-  if (!(target instanceof HTMLElement)) {
-    return false;
-  }
-  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 };
 
 const makeLightboxVisual = (image: ImageRecord): LightboxVisual => ({

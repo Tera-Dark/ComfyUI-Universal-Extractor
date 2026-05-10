@@ -6,7 +6,7 @@ This document summarizes the runtime architecture that matters for future backen
 
 - ComfyUI serves the committed frontend bundle from `gallery_ui/dist/` at `/gallery/`.
 - Gallery API routes live under `/universal_gallery/api/` in `py/gallery/routes.py`.
-- Most gallery behavior is implemented in `py/gallery/service.py`; persisted image state and boards live in `py/gallery/state_store.py`.
+- Gallery behavior is exposed through the compatibility facade in `py/gallery/service.py`. Low-risk helper domains now live beside it: `refs.py` owns source/image/folder ref normalization, `source_security.py` owns source path hardening and scope checks, and `state_store.py` owns persisted image state and boards.
 - File APIs must stay scoped to registered gallery sources and supported image extensions.
 
 ## Gallery Index Data Model
@@ -21,7 +21,7 @@ Runtime gallery data is stored under `data/`. User state remains JSON-backed, wh
 
 `gallery_index.sqlite3` uses `PRAGMA user_version` for internal schema migration. The important tables are:
 
-- `gallery_images`: primary image index keyed by `relative_path`; stores source, folder, file size, created/modified timestamps, baked state fields, and color profile fields.
+- `gallery_images`: primary image index keyed by `relative_path`; stores source, folder, file size, real image width/height, created/modified timestamps, baked state fields, and color profile fields.
 - `gallery_index_meta`: source signature, built timestamp, color index version, state digest, auxiliary-table version, and FTS availability.
 - `gallery_images_fts`: FTS5 search table for filename/path/title/category/notes text. If FTS5 is unavailable, search falls back to the existing LIKE expression.
 - `gallery_image_color_family`: normalized color-family rows used by color filtering, while legacy color fields remain in `gallery_images` for response compatibility.
@@ -54,9 +54,19 @@ Color indexing is intentionally asynchronous:
 - Failed or unreadable images are marked with a fallback color profile so the background worker does not loop forever.
 - `/universal_gallery/api/color-index/status` reports backfill progress.
 
+Image dimensions are indexed separately from thumbnails. New or changed files read their real Pillow dimensions during full or incremental index sync, and older rows with missing dimensions are filled by a low-priority background pass. List responses expose optional `width` and `height` values; missing dimensions must not block image listing or force the frontend to use thumbnail `naturalWidth`/`naturalHeight`.
+
 ## Frontend Contract
 
 The public response shapes for `ImageListResponse` and `GalleryContext` are preserved. Frontend code should keep using `galleryApi.listImages`, `galleryApi.getContext`, and `galleryApi.getImageFreshness` rather than reaching into backend implementation details.
+
+Large frontend surfaces are split along stable helper boundaries. `WorkspaceSidebar` imports folder-scope and sorting helpers from `components/shared/folderTree.ts`, while `GalleryWorkspace` delegates image prefetch state and card image loading to `components/gallery/galleryImagePrefetch.ts` and `GalleryCardImage.tsx`. These modules are implementation details; UI behavior and public API calls remain unchanged.
+
+Shared interaction primitives live in `gallery_ui/src/utils/interaction.ts`. Context menus in gallery, dual-folder, sidebar, and library surfaces should use the shared placement and dismiss helpers so menus stay near their trigger, flip inside the viewport, and close consistently on Escape, outside click, resize, or scroll. Keyboard shortcuts should use the shared editable-target guard so input fields and folder searches keep normal text-editing behavior.
+
+The main gallery grid is rendered through the `useVirtualMasonry` helper, backed by `@tanstack/react-virtual`. The right Inspector is an overlay layer, not a layout column; opening or closing it should not change the main gallery scroll container width, column count, page, selection, or scroll position.
+
+Dual-folder organization lives in `DualFolderWorkspace`. It is a frontend-only file-management surface over the existing image APIs: folder panes call `galleryApi.listImages`, internal drags use a private `application/x-universal-gallery-image` payload, moves use the existing `/api/images/move` wrapper, and delete/state/board actions reuse the same callbacks as normal gallery selection. It must keep external file drops separate from internal image drags so imports continue to receive the browser-provided `File` objects unchanged. Dual-folder cards should mirror normal-gallery interaction polish: clipped text, real-resolution chips when dimensions are available, hover lift, image scale, and stable selected/focused/drop states.
 
 When the gallery is on page 1 sorted by newest first, live sync may replace the list automatically. In other views, the frontend shows a pending-refresh pill so browsing position is not interrupted.
 
@@ -65,3 +75,9 @@ Sidebar source shortcuts use folder refs as scopes. `default_output::` means the
 The folder panel should render only the active source tree. Pinned folders sort first, then folders sort by modified time descending unless the user switches to name sorting. Legacy pinned output paths without the `default_output::` prefix should still be treated as aliases for their canonical source refs.
 
 Trash grid mode is presentation-only and remains backed by `/api/trash`. It uses a responsive masonry-style card layout, keeps restore/purge actions local to the trash page, and clips long names and original paths inside the card bounds.
+
+## Release Guardrails
+
+`scripts/verify.ps1` remains the preferred full local check. It runs Python tests, backend compileall, frontend typecheck/lint/tests/build, dist asset audit, and release metadata checks. `scripts/check-release.ps1` verifies `pyproject.toml`, `gallery_ui/package.json`, and `package-lock.json` versions match and that tracked dist compatibility assets share the latest CSS/JS content.
+
+The manual Comfy registry workflow reads the package version, checks the registry for an existing active version, and skips the publish action with a notice when the version is already present. Real publish failures should still fail the workflow.
