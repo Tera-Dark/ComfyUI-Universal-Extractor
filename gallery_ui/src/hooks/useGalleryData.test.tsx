@@ -15,6 +15,7 @@ vi.mock("../services/galleryApi", () => ({
     listTrash: vi.fn(),
     prewarmThumbnails: vi.fn(),
     getColorIndexStatus: vi.fn(),
+    updateImageState: vi.fn(),
   },
 }));
 
@@ -75,6 +76,16 @@ const flushAsyncEffects = async () => {
     await Promise.resolve();
     await Promise.resolve();
   });
+};
+
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
 };
 
 describe("useGalleryData live refresh", () => {
@@ -221,5 +232,43 @@ describe("useGalleryData live refresh", () => {
     await flushAsyncEffects();
 
     expect(galleryApi.getImageFreshness).not.toHaveBeenCalled();
+  });
+
+  it("applies pin changes immediately without forcing a list reload", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
+    const update = deferred<Awaited<ReturnType<typeof galleryApi.updateImageState>>>();
+    vi.mocked(galleryApi.updateImageState).mockReturnValue(update.promise);
+
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: false }), { wrapper });
+    await flushAsyncEffects();
+    const callsBeforePin = vi.mocked(galleryApi.listImages).mock.calls.length;
+
+    let updatePromise: Promise<void>;
+    await act(async () => {
+      updatePromise = result.current.updateImageState("image-initial.png", { pinned: true });
+      await Promise.resolve();
+    });
+
+    expect(result.current.images[0]?.pinned).toBe(true);
+
+    update.resolve({
+      ok: true,
+      state: {
+        favorite: true,
+        pinned: true,
+        boards: [],
+        category: "",
+        title: "",
+        notes: "",
+        updated_at: 2,
+      },
+      categories: [],
+    });
+    await act(async () => {
+      await updatePromise;
+    });
+
+    expect(result.current.images[0]?.pinned).toBe(true);
+    expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforePin);
   });
 });
