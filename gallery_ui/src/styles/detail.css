@@ -181,6 +181,13 @@
   transform: translate3d(var(--ue-pan-x), var(--ue-pan-y), 0) scale(var(--ue-zoom));
 }
 
+.ue-lightbox-media.is-transitioning .ue-lightbox-image--active {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate3d(-50%, -50%, 0) scale(var(--ue-zoom));
+}
+
 .ue-lightbox-image--active.is-sliding-out {
   pointer-events: none;
 }
@@ -211,6 +218,14 @@
 
 .ue-lightbox-image--incoming.is-visible {
   transform: translate3d(-50%, -50%, 0) scale(var(--ue-zoom));
+}
+
+.ue-lightbox-media.is-transitioning .ue-lightbox-image--active.is-sliding-out.slide-next {
+  transform: translate3d(calc(-50% - var(--ue-slide-distance)), -50%, 0) scale(var(--ue-zoom));
+}
+
+.ue-lightbox-media.is-transitioning .ue-lightbox-image--active.is-sliding-out.slide-prev {
+  transform: translate3d(calc(-50% + var(--ue-slide-distance)), -50%, 0) scale(var(--ue-zoom));
 }
 
 .ue-lightbox-media.is-expanded img {
