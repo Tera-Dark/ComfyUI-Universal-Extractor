@@ -72,8 +72,6 @@ interface LightboxVisual {
   alt: string;
 }
 
-type SlideDirection = "next" | "prev";
-
 const MIN_ZOOM = 1;
 const MAX_ZOOM = 5;
 
@@ -148,14 +146,7 @@ export const ImageDetailModal = ({
   const mediaRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const previousOverflowRef = useRef<string>("");
-  const visualPathRef = useRef(image.relative_path);
-  const previousNavigationIndexRef = useRef(navigation?.currentIndex ?? 0);
-  const visualTransitionTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const visualTransitionTokenRef = useRef(0);
   const [activeVisual, setActiveVisual] = useState<LightboxVisual>(() => makeLightboxVisual(image));
-  const [incomingVisual, setIncomingVisual] = useState<LightboxVisual | null>(null);
-  const [incomingReady, setIncomingReady] = useState(false);
-  const [slideDirection, setSlideDirection] = useState<SlideDirection>("next");
 
   useEffect(() => {
     setDraftTitle(image.title || "");
@@ -170,62 +161,9 @@ export const ImageDetailModal = ({
     dragStateRef.current = null;
   }, [image.relative_path, image.title, image.category, image.notes, image.pinned, image.favorite, image.filename]);
 
-  // Keep the current image visible until the next image is decoded, then slide layers.
   useEffect(() => {
-    const nextVisual = makeLightboxVisual(image);
-    const nextIndex = navigation?.currentIndex ?? previousNavigationIndexRef.current;
-    const direction: SlideDirection = nextIndex < previousNavigationIndexRef.current ? "prev" : "next";
-    previousNavigationIndexRef.current = nextIndex;
-
-    if (image.relative_path === visualPathRef.current) {
-      setActiveVisual(nextVisual);
-      return;
-    }
-
-    visualPathRef.current = image.relative_path;
-    visualTransitionTokenRef.current += 1;
-    const token = visualTransitionTokenRef.current;
-    let cancelled = false;
-
-    if (visualTransitionTimerRef.current) {
-      clearTimeout(visualTransitionTimerRef.current);
-    }
-    setSlideDirection(direction);
-    setIncomingReady(false);
-    setIncomingVisual(null);
-
-    const runTransition = async () => {
-      await preloadLightboxImage(nextVisual.src);
-      if (cancelled || token !== visualTransitionTokenRef.current) {
-        return;
-      }
-
-      setIncomingVisual(nextVisual);
-      requestAnimationFrame(() => {
-        if (!cancelled && token === visualTransitionTokenRef.current) {
-          setIncomingReady(true);
-        }
-      });
-
-      visualTransitionTimerRef.current = setTimeout(() => {
-        if (cancelled || token !== visualTransitionTokenRef.current) {
-          return;
-        }
-        setActiveVisual(nextVisual);
-        setIncomingVisual(null);
-        setIncomingReady(false);
-      }, 360);
-    };
-
-    void runTransition();
-
-    return () => {
-      cancelled = true;
-      if (visualTransitionTimerRef.current) {
-        clearTimeout(visualTransitionTimerRef.current);
-      }
-    };
-  }, [image, navigation?.currentIndex]);
+    setActiveVisual(makeLightboxVisual(image));
+  }, [image]);
 
   useEffect(() => {
     const items = navigation?.items ?? [];
@@ -553,12 +491,6 @@ export const ImageDetailModal = ({
       >
         <div className="ue-lightbox-backdrop-stack">
           <div className="ue-lightbox-backdrop" style={{ backgroundImage: `url(${activeVisual.bg})` }} />
-          {incomingVisual ? (
-            <div
-              className={`ue-lightbox-backdrop ue-lightbox-backdrop--incoming ${incomingReady ? "is-visible" : ""}`}
-              style={{ backgroundImage: `url(${incomingVisual.bg})` }}
-            />
-          ) : null}
         </div>
 
         <button
@@ -593,7 +525,7 @@ export const ImageDetailModal = ({
         <div className={`ue-lightbox-stage ${showInspector ? "has-inspector" : ""}`}>
           <div
             ref={mediaRef}
-            className={`ue-lightbox-media ${incomingVisual ? "is-transitioning" : ""} ${isExpandedView ? "is-expanded" : "is-fit"} ${isZoomed ? "is-zoomed" : ""} ${isDragging ? "is-dragging" : ""}`}
+            className={`ue-lightbox-media ${isExpandedView ? "is-expanded" : "is-fit"} ${isZoomed ? "is-zoomed" : ""} ${isDragging ? "is-dragging" : ""}`}
             onWheel={handleWheelZoom}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -604,7 +536,7 @@ export const ImageDetailModal = ({
             <div className="ue-lightbox-gesture-hint">{t("modalGestureHint")}</div>
             <img
               key={activeVisual.key}
-              className={`ue-lightbox-image ue-lightbox-image--active ${incomingReady ? "is-sliding-out" : ""} slide-${slideDirection}`}
+              className="ue-lightbox-image ue-lightbox-image--active"
               src={activeVisual.src}
               alt={activeVisual.alt}
               draggable={false}
@@ -614,18 +546,6 @@ export const ImageDetailModal = ({
                 "--ue-zoom": zoomScale,
               } as CSSProperties}
             />
-            {incomingVisual ? (
-              <img
-                key={incomingVisual.key}
-                className={`ue-lightbox-image ue-lightbox-image--incoming slide-${slideDirection} ${incomingReady ? "is-visible" : ""}`}
-                src={incomingVisual.src}
-                alt={incomingVisual.alt}
-                draggable={false}
-                style={{
-                  "--ue-zoom": zoomScale,
-                } as CSSProperties}
-              />
-            ) : null}
           </div>
 
           <aside className={`ue-lightbox-inspector ${showInspector ? "is-open" : ""}`}>
