@@ -24,6 +24,7 @@ from .service import (
     enqueue_thumbnail_prewarm,
     get_import_target_for_filename,
     get_gallery_context,
+    get_image_freshness,
     get_color_index_status,
     get_image_metadata,
     get_thumbnail_prewarm_status,
@@ -207,6 +208,15 @@ async def api_list_images(request: web.Request) -> web.Response:
         return _bad_request(str(error))
 
     return web.json_response(page_result)
+
+
+async def api_image_freshness(request: web.Request) -> web.Response:
+    subfolder = request.query.get("subfolder", "")
+    known = request.query.get("known", "")
+    try:
+        return web.json_response(get_image_freshness(subfolder=subfolder, known=known))
+    except ValueError as error:
+        return _bad_request(str(error))
 
 
 async def api_image_metadata(request: web.Request) -> web.Response:
@@ -894,6 +904,7 @@ async def api_diagnose_gallery_sources(_request: web.Request) -> web.Response:
 def register_routes(app):
     _safe_add_route(app.router, "get", "/universal_gallery/api/context", api_gallery_context)
     _safe_add_route(app.router, "get", "/universal_gallery/api/images", api_list_images)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/images/freshness", api_image_freshness)
     _safe_add_route(app.router, "get", "/universal_gallery/api/metadata", api_image_metadata)
     _safe_add_route(app.router, "get", "/universal_gallery/api/thumb", api_thumbnail)
     _safe_add_route(app.router, "post", "/universal_gallery/api/thumb/prewarm", api_prewarm_thumbnails)

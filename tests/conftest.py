@@ -60,6 +60,7 @@ def isolated_gallery_env(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "GALLERY_INDEX_DB_FILE", str(data_dir / "gallery_index.sqlite3"))
 
     service.LIBRARY_CACHE.clear()
+    service.IMAGE_FRESHNESS_CACHE.clear()
     service.IMAGE_INDEX_CACHE.update(
         {
             "signature": None,

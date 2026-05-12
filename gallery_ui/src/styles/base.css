@@ -131,7 +131,7 @@ textarea::placeholder {
 }
 
 .ue-body-shell.has-inspector {
-  grid-template-columns: var(--ue-sidebar-width) minmax(0, 1fr) clamp(360px, 22vw, 440px);
+  grid-template-columns: var(--ue-sidebar-width) minmax(0, 1fr);
 }
 
 .ue-body-shell.is-sidebar-collapsed {
@@ -139,13 +139,14 @@ textarea::placeholder {
 }
 
 .ue-body-shell.is-sidebar-collapsed.has-inspector {
-  grid-template-columns: 0 minmax(0, 1fr) clamp(360px, 22vw, 440px);
+  grid-template-columns: 0 minmax(0, 1fr);
 }
 
 .ue-main-shell {
   min-width: 0;
   padding: clamp(18px, 2vw, 30px) clamp(18px, 2.6vw, 36px) 24px;
   overflow-y: auto;
+  contain: layout paint;
 }
 
 .ue-workspace {
@@ -433,6 +434,131 @@ textarea::placeholder {
 .ue-toast-close:hover {
   background: var(--ue-surface-alt);
   color: var(--ue-ink);
+}
+
+.ue-operation-status-center {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 82;
+  display: flex;
+  width: min(390px, calc(100vw - 24px));
+  max-height: min(520px, calc(100vh - 36px));
+  flex-direction: column;
+  gap: 10px;
+  overflow: hidden auto;
+  pointer-events: none;
+}
+
+.ue-operation-card {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr) 24px;
+  align-items: start;
+  gap: 11px;
+  overflow: hidden;
+  padding: 13px 12px 13px 14px;
+  border: 1px solid rgba(24, 24, 27, 0.08);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 18px 44px rgba(15, 23, 42, 0.14);
+  color: var(--ue-ink);
+  pointer-events: auto;
+  animation: ue-scale-in var(--ue-duration-fast) var(--ue-ease) both;
+}
+
+.ue-operation-card::before {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 3px;
+  background: #64748b;
+  content: "";
+}
+
+.ue-operation-card--pending::before {
+  background: #2563eb;
+}
+
+.ue-operation-card--success::before {
+  background: var(--ue-green);
+}
+
+.ue-operation-card--error::before {
+  background: var(--ue-red);
+}
+
+.ue-operation-card--info::before {
+  background: #64748b;
+}
+
+.ue-operation-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  color: #64748b;
+}
+
+.ue-operation-card--pending .ue-operation-icon {
+  color: #2563eb;
+}
+
+.ue-operation-card--success .ue-operation-icon {
+  color: var(--ue-green);
+}
+
+.ue-operation-card--error .ue-operation-icon {
+  color: var(--ue-red);
+}
+
+.ue-operation-spinner {
+  animation: ue-spin 0.85s linear infinite;
+}
+
+.ue-operation-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.ue-operation-copy strong {
+  overflow-wrap: anywhere;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.35;
+}
+
+.ue-operation-copy span {
+  overflow-wrap: anywhere;
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.ue-operation-dismiss {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  color: var(--ue-ink-ghost);
+  cursor: pointer;
+}
+
+.ue-operation-dismiss:hover {
+  background: var(--ue-surface-alt);
+  color: var(--ue-ink);
+}
+
+@media (max-width: 720px) {
+  .ue-operation-status-center {
+    right: 12px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+    max-height: min(420px, calc(100vh - 24px));
+  }
 }
 
 .ue-confirm-modal {

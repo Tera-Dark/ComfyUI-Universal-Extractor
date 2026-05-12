@@ -10,10 +10,12 @@ import { useGalleryData } from "./useGalleryData";
 vi.mock("../services/galleryApi", () => ({
   galleryApi: {
     getContext: vi.fn(),
+    getImageFreshness: vi.fn(),
     listImages: vi.fn(),
     listTrash: vi.fn(),
     prewarmThumbnails: vi.fn(),
     getColorIndexStatus: vi.fn(),
+    updateImageState: vi.fn(),
   },
 }));
 
@@ -76,10 +78,30 @@ const flushAsyncEffects = async () => {
   });
 };
 
+const deferred = <T,>() => {
+  let resolve!: (value: T) => void;
+  let reject!: (reason?: unknown) => void;
+  const promise = new Promise<T>((promiseResolve, promiseReject) => {
+    resolve = promiseResolve;
+    reject = promiseReject;
+  });
+  return { promise, resolve, reject };
+};
+
 describe("useGalleryData live refresh", () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    vi.clearAllMocks();
     vi.mocked(galleryApi.getContext).mockResolvedValue(contextResponse);
+    vi.mocked(galleryApi.getImageFreshness).mockResolvedValue({
+      fingerprint: "initial",
+      changed: false,
+      image_count: 1,
+      latest_created_at: 100,
+      latest_relative_path: "image-initial.png",
+      checked_at: 1,
+      subfolder: "",
+    });
     vi.mocked(galleryApi.prewarmThumbnails).mockResolvedValue({
       ok: true,
       queued: [],
@@ -105,6 +127,15 @@ describe("useGalleryData live refresh", () => {
     vi.mocked(galleryApi.listImages)
       .mockResolvedValueOnce(imagePage("initial", 1))
       .mockResolvedValue(imagePage("refresh", 2));
+    vi.mocked(galleryApi.getImageFreshness).mockResolvedValue({
+      fingerprint: "refresh",
+      changed: true,
+      image_count: 2,
+      latest_created_at: 101,
+      latest_relative_path: "image-refresh.png",
+      checked_at: 2,
+      subfolder: "",
+    });
 
     const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: true }), { wrapper });
 
@@ -113,14 +144,62 @@ describe("useGalleryData live refresh", () => {
     const callsBeforeInterval = vi.mocked(galleryApi.listImages).mock.calls.length;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(12_000);
+      await vi.advanceTimersByTimeAsync(6_000);
     });
     await flushAsyncEffects();
 
+    expect(galleryApi.getImageFreshness).toHaveBeenCalledWith("default_output::", "");
     expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforeInterval + 1);
     expect(result.current.images[0]?.filename).toBe("image-refresh.png");
     expect(result.current.total).toBe(2);
     expect(vi.mocked(galleryApi.listImages).mock.calls.at(-1)?.at(-1)).toBe(true);
+  });
+
+  it("does not force a list refresh when freshness is unchanged", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
+
+    renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: true }), { wrapper });
+
+    await flushAsyncEffects();
+    const callsBeforeInterval = vi.mocked(galleryApi.listImages).mock.calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    await flushAsyncEffects();
+
+    expect(galleryApi.getImageFreshness).toHaveBeenCalled();
+    expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforeInterval);
+  });
+
+  it("keeps browsing position and marks pending refresh away from the newest first page", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 2));
+    vi.mocked(galleryApi.getImageFreshness).mockResolvedValue({
+      fingerprint: "refresh",
+      changed: true,
+      image_count: 3,
+      latest_created_at: 101,
+      latest_relative_path: "image-refresh.png",
+      checked_at: 2,
+      subfolder: "",
+    });
+
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: true }), { wrapper });
+    await flushAsyncEffects();
+    await act(async () => {
+      result.current.setPage(2);
+    });
+    await flushAsyncEffects();
+    const callsBeforeInterval = vi.mocked(galleryApi.listImages).mock.calls.length;
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    await flushAsyncEffects();
+
+    expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforeInterval);
+    expect(result.current.hasPendingLiveRefresh).toBe(true);
+    expect(result.current.images[0]?.filename).toBe("image-initial.png");
   });
 
   it("does not schedule live refresh when the preference is disabled", async () => {
@@ -137,5 +216,59 @@ describe("useGalleryData live refresh", () => {
     await flushAsyncEffects();
 
     expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforeInterval);
+    expect(galleryApi.getImageFreshness).not.toHaveBeenCalled();
+  });
+
+  it("does not poll freshness while the page is hidden", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
+    vi.spyOn(document, "visibilityState", "get").mockReturnValue("hidden");
+
+    renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: true }), { wrapper });
+
+    await flushAsyncEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(12_000);
+    });
+    await flushAsyncEffects();
+
+    expect(galleryApi.getImageFreshness).not.toHaveBeenCalled();
+  });
+
+  it("applies pin changes immediately without forcing a list reload", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
+    const update = deferred<Awaited<ReturnType<typeof galleryApi.updateImageState>>>();
+    vi.mocked(galleryApi.updateImageState).mockReturnValue(update.promise);
+
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: false }), { wrapper });
+    await flushAsyncEffects();
+    const callsBeforePin = vi.mocked(galleryApi.listImages).mock.calls.length;
+
+    let updatePromise: Promise<void>;
+    await act(async () => {
+      updatePromise = result.current.updateImageState("image-initial.png", { pinned: true });
+      await Promise.resolve();
+    });
+
+    expect(result.current.images[0]?.pinned).toBe(true);
+
+    update.resolve({
+      ok: true,
+      state: {
+        favorite: true,
+        pinned: true,
+        boards: [],
+        category: "",
+        title: "",
+        notes: "",
+        updated_at: 2,
+      },
+      categories: [],
+    });
+    await act(async () => {
+      await updatePromise;
+    });
+
+    expect(result.current.images[0]?.pinned).toBe(true);
+    expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforePin);
   });
 });

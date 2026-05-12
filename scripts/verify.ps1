@@ -31,6 +31,17 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cmd /c npm run build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    cmd /c npm run audit:dist
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+}
+finally {
+    Pop-Location
+}
+
+Push-Location $Root
+try {
+    powershell -ExecutionPolicy Bypass -File scripts\check-release.ps1
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 finally {
     Pop-Location

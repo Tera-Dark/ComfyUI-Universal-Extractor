@@ -5,6 +5,7 @@ import type {
   DeleteImagesResult,
   FolderMutationResult,
   GalleryContext,
+  ImageFreshness,
   GallerySource,
   GallerySourceDiagnostic,
   ImageListResponse,
@@ -121,6 +122,18 @@ export const galleryApi = {
     }
 
     return requestJson<ImageListResponse>(`/universal_gallery/api/images?${params}`);
+  },
+
+  async getImageFreshness(subfolder = "", known = "") {
+    const params = new URLSearchParams();
+    if (subfolder.trim()) {
+      params.set("subfolder", subfolder.trim());
+    }
+    if (known.trim()) {
+      params.set("known", known.trim());
+    }
+    const query = params.size ? `?${params}` : "";
+    return requestJson<ImageFreshness>(`/universal_gallery/api/images/freshness${query}`);
   },
 
   async getImageMetadata(relativePath: string) {

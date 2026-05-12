@@ -51,6 +51,8 @@ export interface ImageRecord {
   original_url: string;
   thumb_url: string;
   size: number;
+  width?: number;
+  height?: number;
   created_at: number;
   favorite: boolean;
   pinned: boolean;
@@ -149,6 +151,16 @@ export interface ImageListResponse {
   color_index_status?: ColorIndexStatus;
 }
 
+export interface ImageFreshness {
+  fingerprint: string;
+  changed: boolean;
+  image_count: number;
+  latest_created_at: number;
+  latest_relative_path: string;
+  checked_at: number;
+  subfolder: string;
+}
+
 export interface ColorIndexStatus {
   running: boolean;
   queued: number;
@@ -195,6 +207,12 @@ export interface GalleryContext {
   import_image_target_relative: string;
   categories: string[];
   subfolders: string[];
+  subfolder_details?: Array<{
+    path: string;
+    source_id: string;
+    relative_path: string;
+    modified_at: number;
+  }>;
   move_targets: MoveTargetOption[];
   sources: GallerySource[];
   active_source_count: number;

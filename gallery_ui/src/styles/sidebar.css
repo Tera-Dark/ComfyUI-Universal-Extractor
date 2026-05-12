@@ -1,6 +1,7 @@
 .ue-sidebar {
   position: sticky;
   top: 48px;
+  z-index: 32;
   display: flex;
   width: var(--ue-sidebar-width);
   flex-direction: column;
@@ -17,6 +18,7 @@
 
 .ue-sidebar.is-collapsed {
   border-right-color: transparent;
+  pointer-events: none;
   transform: translateX(calc(-1 * var(--ue-sidebar-width)));
 }
 
@@ -24,7 +26,7 @@
   position: absolute;
   top: 50%;
   right: -11px;
-  z-index: 66;
+  z-index: 33;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -36,6 +38,7 @@
   color: var(--ue-ink-soft);
   box-shadow: 0 12px 30px rgba(24, 24, 27, 0.12);
   cursor: pointer;
+  pointer-events: auto;
   transform: translateY(-50%);
   transition:
     background-color var(--ue-duration-fast) var(--ue-ease),
@@ -120,13 +123,20 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
+  padding: 2px;
+  border-radius: 999px;
+  background: rgba(244, 244, 245, 0.72);
 }
 
 .ue-sidebar-viewmodes button {
-  width: 26px;
-  height: 26px;
+  display: inline-flex;
+  width: 28px;
+  height: 28px;
+  align-items: center;
+  justify-content: center;
   border-radius: 999px;
   color: var(--ue-ink-ghost);
+  line-height: 0;
   cursor: pointer;
 }
 
@@ -220,7 +230,14 @@
   backdrop-filter: blur(14px);
 }
 
-.ue-sidebar-group-toggle {
+.ue-sidebar-group-header--folders {
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px;
+}
+
+.ue-sidebar-group-toggle,
+.ue-sidebar-group-title {
   display: inline-flex;
   align-items: center;
   gap: 7px;
@@ -229,6 +246,51 @@
   color: var(--ue-ink-soft);
   text-align: left;
   cursor: pointer;
+}
+
+.ue-sidebar-group-title {
+  min-height: 32px;
+}
+
+.ue-sidebar-group-chevron,
+.ue-sidebar-group-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  line-height: 0;
+}
+
+.ue-sidebar-group-icon {
+  color: var(--ue-ink-muted);
+  background: rgba(244, 244, 245, 0.82);
+}
+
+.ue-sidebar-group-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.ue-sidebar-group-copy strong {
+  overflow: hidden;
+  color: var(--ue-ink);
+  font-size: 13px;
+  font-weight: 760;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ue-sidebar-group-copy em {
+  color: var(--ue-ink-ghost);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 650;
+  line-height: 1.15;
 }
 
 .ue-sidebar-group-toggle span {
@@ -247,7 +309,8 @@
   font-weight: 600;
 }
 
-.ue-sidebar-group-toggle:hover {
+.ue-sidebar-group-toggle:hover,
+.ue-sidebar-group-title:hover {
   color: var(--ue-ink);
 }
 
@@ -279,7 +342,7 @@
 .ue-sidebar-subactions {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 5px;
   flex: 0 0 auto;
 }
 
@@ -298,10 +361,11 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 24px;
-  height: 24px;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
   color: var(--ue-ink-ghost);
+  line-height: 0;
   cursor: pointer;
   transition:
     background-color var(--ue-duration-fast) var(--ue-ease),
@@ -325,17 +389,27 @@
 
 .ue-sidebar-more {
   position: relative;
+  line-height: 0;
+}
+
+.ue-sidebar-subaction svg,
+.ue-sidebar-viewmodes svg,
+.ue-sidebar-group-title svg,
+.ue-sidebar-group-toggle svg,
+.ue-tree-toggle svg,
+.ue-tree-item svg,
+.ue-tree-label svg {
+  display: block;
 }
 
 .ue-sidebar-action-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  z-index: 30;
+  position: fixed;
+  z-index: 1000;
   display: flex;
   min-width: 190px;
   flex-direction: column;
   gap: 4px;
+  line-height: 1.2;
   padding: 6px;
   border: 1px solid rgba(228, 228, 231, 0.92);
   border-radius: 12px;
@@ -346,14 +420,22 @@
 
 .ue-sidebar-action-menu button {
   display: flex;
+  width: 100%;
   min-height: 34px;
   align-items: center;
   gap: 9px;
   padding: 0 9px;
   border-radius: 9px;
   color: var(--ue-ink-soft);
+  font-size: 12px;
+  font-weight: 650;
+  line-height: 1.2;
   text-align: left;
   cursor: pointer;
+}
+
+.ue-sidebar-action-menu button svg {
+  flex: 0 0 auto;
 }
 
 .ue-sidebar-action-menu button:hover:not(:disabled) {
@@ -376,6 +458,7 @@
 }
 
 .ue-sidebar-action-menu span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -751,7 +834,7 @@
 
 .ue-sidebar-context-menu {
   position: fixed;
-  z-index: 90;
+  z-index: 1000;
   display: flex;
   min-width: 180px;
   flex-direction: column;

@@ -16,7 +16,7 @@ import {
 } from "lucide-react";
 
 import { useConfirm } from "../shared/ConfirmDialog";
-import { useToast } from "../shared/ToastViewport";
+import { useOperationStatus } from "../shared/OperationStatusCenter";
 import { useI18n } from "../../i18n/I18nProvider";
 import { galleryApi } from "../../services/galleryApi";
 import { formatFileSize } from "../../utils/formatters";
@@ -96,8 +96,8 @@ const preferenceItems = [
 
 export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, onSourcesChange }: SettingsWorkspaceProps) => {
   const { t } = useI18n();
-  const { pushToast } = useToast();
   const { confirm } = useConfirm();
+  const { runOperation } = useOperationStatus();
   const [localSources, setLocalSources] = useState<GallerySource[]>(sources);
   const [selectedId, setSelectedId] = useState<string>(sources[0]?.id ?? "new");
   const [draft, setDraft] = useState<DraftSource>(() => emptyDraft());
@@ -136,11 +136,14 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
   const handleDiagnose = async () => {
     setIsBusy(true);
     try {
-      const result = await galleryApi.diagnoseGallerySources();
+      const result = await runOperation(() => galleryApi.diagnoseGallerySources(), {
+        pending: t("operationRunDiagnostics"),
+        success: t("settingsDiagnosticsDone"),
+        error: (error) => (error instanceof Error ? error.message : t("settingsDiagnosticsError")),
+      });
       setDiagnostics(result);
-      pushToast(t("settingsDiagnosticsDone"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("settingsDiagnosticsError"), "error");
+    } catch {
+      setDiagnostics([]);
     } finally {
       setIsBusy(false);
     }
@@ -159,13 +162,15 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
   const handleTestPath = async () => {
     setIsBusy(true);
     try {
-      const result = await galleryApi.testGallerySourcePath(draft.path);
+      const result = await runOperation(() => galleryApi.testGallerySourcePath(draft.path), {
+        pending: t("operationTestPath"),
+        success: (value) => (value.ok ? t("settingsPathOk", { count: value.image_count }) : t("settingsPathMissing")),
+        error: (error) => (error instanceof Error ? error.message : t("settingsPathError")),
+      });
       setTestResult(result.ok ? t("settingsPathOk", { count: result.image_count }) : t("settingsPathMissing"));
-      pushToast(result.ok ? t("settingsPathOk", { count: result.image_count }) : t("settingsPathMissing"), result.ok ? "success" : "info");
     } catch (error) {
       const message = error instanceof Error ? error.message : t("settingsPathError");
       setTestResult(message);
-      pushToast(message, "error");
     } finally {
       setIsBusy(false);
     }
@@ -174,13 +179,16 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
   const handleSave = async () => {
     setIsBusy(true);
     try {
-      const result = await galleryApi.saveGallerySource(draft);
+      const result = await runOperation(() => galleryApi.saveGallerySource(draft), {
+        pending: t("operationSaveSource"),
+        success: t("settingsSourceSaved"),
+        error: (error) => (error instanceof Error ? error.message : t("settingsSourceSaveError")),
+      });
       setLocalSources(result.sources);
       setSelectedId(result.source.id);
       onSourcesChange();
-      pushToast(t("settingsSourceSaved"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("settingsSourceSaveError"), "error");
+    } catch {
+      // Status center already surfaces the failure.
     } finally {
       setIsBusy(false);
     }
@@ -199,13 +207,16 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
 
     setIsBusy(true);
     try {
-      const result = await galleryApi.deleteGallerySource(selectedSource.id);
+      const result = await runOperation(() => galleryApi.deleteGallerySource(selectedSource.id), {
+        pending: t("operationDeleteSource"),
+        success: t("settingsSourceDeleted"),
+        error: (error) => (error instanceof Error ? error.message : t("settingsSourceDeleteError")),
+      });
       setLocalSources(result.sources);
       setSelectedId(result.sources[0]?.id ?? "new");
       onSourcesChange();
-      pushToast(t("settingsSourceDeleted"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("settingsSourceDeleteError"), "error");
+    } catch {
+      // Status center already surfaces the failure.
     } finally {
       setIsBusy(false);
     }

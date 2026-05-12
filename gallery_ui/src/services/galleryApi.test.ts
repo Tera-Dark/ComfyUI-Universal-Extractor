@@ -47,6 +47,30 @@ describe("galleryApi", () => {
     await expect(galleryApi.getContext()).resolves.toMatchObject({ base_dir: "D:/ComfyUI" });
   });
 
+  it("requests image freshness with scoped subfolder and known fingerprint", async () => {
+    const fetchMock = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            fingerprint: "next",
+            changed: true,
+            image_count: 2,
+            latest_created_at: 10,
+            latest_relative_path: "current/new.png",
+            checked_at: 12,
+            subfolder: "current",
+          }),
+        ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await expect(galleryApi.getImageFreshness("current", "known")).resolves.toMatchObject({
+      fingerprint: "next",
+      changed: true,
+    });
+    expect(fetchMock).toHaveBeenCalledWith("/universal_gallery/api/images/freshness?subfolder=current&known=known", undefined);
+  });
+
   it("keeps ApiRequestError available for callers that need status checks", () => {
     const error = new ApiRequestError("failed", 500, { error: "failed" });
     expect(error.status).toBe(500);

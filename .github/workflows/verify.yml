@@ -55,3 +55,10 @@ jobs:
       - name: Build frontend
         working-directory: gallery_ui
         run: npm run build
+
+      - name: Audit frontend dist assets
+        working-directory: gallery_ui
+        run: npm run audit:dist
+
+      - name: Check release metadata
+        run: powershell -ExecutionPolicy Bypass -File scripts\check-release.ps1

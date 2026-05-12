@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { copyFileSync, existsSync, readdirSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -37,6 +37,34 @@ const getTrackedCompatAssets = (extension) => {
   }
 };
 
+const wait = (ms) => {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+};
+
+const copyWithRetry = (source, target, attempts = 4) => {
+  let lastError = null;
+
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      copyFileSync(source, target);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+
+    try {
+      writeFileSync(target, readFileSync(source));
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+
+    wait(75 * attempt);
+  }
+
+  throw lastError;
+};
+
 const syncAssetType = (extension) => {
   const latest = getLatestAsset(extension);
   if (!latest) {
@@ -48,7 +76,7 @@ const syncAssetType = (extension) => {
     if (!existsSync(target) || resolve(target) === resolve(latest.path)) {
       continue;
     }
-    copyFileSync(latest.path, target);
+    copyWithRetry(latest.path, target);
     copied += 1;
   }
 

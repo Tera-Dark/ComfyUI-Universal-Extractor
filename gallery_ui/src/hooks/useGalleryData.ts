@@ -6,13 +6,22 @@ import type { BoardSummary, ColorIndexStatus, DetailNavigationState, GalleryCont
 import { PAGE_SIZE } from "../utils/formatters";
 
 const TRASH_SUBFOLDER_KEY = "__trash__";
-const LIVE_GALLERY_REFRESH_INTERVAL_MS = 12_000;
+const DEFAULT_OUTPUT_SOURCE_ROOT = "default_output::";
+const FOLDER_REF_SEPARATOR = "::";
+const LIVE_GALLERY_REFRESH_INTERVAL_MS = 6_000;
 const LIVE_GALLERY_REFRESH_FOCUS_DEBOUNCE_MS = 4_000;
 
 interface UseGalleryDataOptions {
   isActive?: boolean;
   liveRefreshEnabled?: boolean;
 }
+
+const getSourceRootRef = (folderRef: string) => {
+  if (folderRef.includes(FOLDER_REF_SEPARATOR)) {
+    return `${folderRef.split(FOLDER_REF_SEPARATOR, 1)[0]}${FOLDER_REF_SEPARATOR}`;
+  }
+  return DEFAULT_OUTPUT_SOURCE_ROOT;
+};
 
 export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const isActive = options.isActive ?? true;
@@ -25,7 +34,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [page, setPage] = useState(1);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
-  const [selectedSubfolder, setSelectedSubfolder] = useState("");
+  const [selectedSubfolder, setSelectedSubfolder] = useState(DEFAULT_OUTPUT_SOURCE_ROOT);
   const [selectedBoardId, setSelectedBoardId] = useState("");
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
@@ -41,6 +50,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [hasPendingLiveRefresh, setHasPendingLiveRefresh] = useState(false);
   const [selectedImage, setSelectedImage] = useState<ImageRecord | null>(null);
   const [detailNavigation, setDetailNavigation] = useState<DetailNavigationState | null>(null);
   const [selectedImagePaths, setSelectedImagePaths] = useState<string[]>([]);
@@ -48,10 +58,12 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [importMessage, setImportMessage] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const hasLoadedImagesRef = useRef(false);
+  const hasLoadedTrashRef = useRef(false);
   const consumedContextRefreshKeyRef = useRef(0);
   const consumedImagesRefreshKeyRef = useRef(0);
   const liveRefreshRunningRef = useRef(false);
   const lastLiveRefreshAtRef = useRef(0);
+  const liveRefreshFingerprintRef = useRef("");
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const isTrashView = selectedSubfolder === TRASH_SUBFOLDER_KEY;
 
@@ -96,7 +108,9 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       consumedImagesRefreshKeyRef.current = refreshKey;
     }
 
-    if (hasLoadedImagesRef.current) {
+    const hasLoadedCurrentView = isTrashView ? hasLoadedTrashRef.current : hasLoadedImagesRef.current;
+
+    if (hasLoadedCurrentView) {
       setIsRefreshing(true);
     } else {
       setIsLoading(true);
@@ -111,7 +125,6 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
             return;
           }
           setTrashItems(items);
-          setImages([]);
           setTotal(items.length);
           return;
         }
@@ -156,7 +169,11 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
         }
       } finally {
         if (!isCancelled) {
-          hasLoadedImagesRef.current = true;
+          if (isTrashView) {
+            hasLoadedTrashRef.current = true;
+          } else {
+            hasLoadedImagesRef.current = true;
+          }
           setIsLoading(false);
           setIsRefreshing(false);
         }
@@ -188,6 +205,18 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       liveRefreshRunningRef.current = true;
       lastLiveRefreshAtRef.current = now;
       try {
+        const freshness = await galleryApi.getImageFreshness(selectedSubfolder, liveRefreshFingerprintRef.current);
+        liveRefreshFingerprintRef.current = freshness.fingerprint;
+        if (!freshness.changed) {
+          return;
+        }
+
+        const canReplaceCurrentPage = page === 1 && sortBy === "created_at" && sortOrder === "desc";
+        if (!canReplaceCurrentPage) {
+          setHasPendingLiveRefresh(true);
+          return;
+        }
+
         const imageResponse = await galleryApi.listImages(
           page,
           PAGE_SIZE,
@@ -204,16 +233,14 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
           true,
         );
         const nextImages = imageResponse.images ?? [];
-        const canReplaceCurrentPage = page === 1 && sortBy === "created_at" && sortOrder === "desc";
 
         setTotal(imageResponse.total ?? 0);
         setColorIndexStatus(imageResponse.color_index_status ?? null);
-        if (canReplaceCurrentPage) {
-          setImages(nextImages);
-          void galleryApi
-            .prewarmThumbnails(nextImages.map((image) => image.relative_path), PAGE_SIZE)
-            .catch(() => undefined);
-        }
+        setHasPendingLiveRefresh(false);
+        setImages(nextImages);
+        void galleryApi
+          .prewarmThumbnails(nextImages.map((image) => image.relative_path), PAGE_SIZE)
+          .catch(() => undefined);
 
         const contextResponse = await galleryApi.getContext(false);
         setContext(contextResponse);
@@ -260,6 +287,11 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   ]);
 
   useEffect(() => {
+    liveRefreshFingerprintRef.current = "";
+    setHasPendingLiveRefresh(false);
+  }, [selectedSubfolder]);
+
+  useEffect(() => {
     if (!colorIndexStatus || colorIndexStatus.complete || isTrashView) {
       return;
     }
@@ -280,7 +312,10 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     setRefreshKey((value) => value + 1);
   }, [liveRefreshEnabled, isActive, isTrashView]);
 
-  const refresh = () => setRefreshKey((value) => value + 1);
+  const refresh = () => {
+    setHasPendingLiveRefresh(false);
+    setRefreshKey((value) => value + 1);
+  };
 
   const applyContextPatch = (
     updater: (current: GalleryContext) => GalleryContext,
@@ -289,12 +324,59 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   };
 
   const updateImageState = async (relativePath: string, updates: Record<string, unknown>) => {
-    const response = await galleryApi.updateImageState(relativePath, updates);
-    applyContextPatch((current) => ({
-      ...current,
-      categories: response.categories ?? current.categories,
-      boards: response.boards ?? current.boards,
-    }));
+    const shouldOptimisticallyPatchPin = "pinned" in updates || "favorite" in updates;
+    let previousImage: ImageRecord | null = null;
+    let previousSelectedImage: ImageRecord | null = null;
+    if (shouldOptimisticallyPatchPin) {
+      const nextPinned = Boolean(updates.pinned ?? updates.favorite);
+      setImages((current) =>
+        current.map((image) => {
+          if (image.relative_path !== relativePath) {
+            return image;
+          }
+          previousImage = image;
+          return { ...image, favorite: nextPinned, pinned: nextPinned };
+        }),
+      );
+      setSelectedImage((current) => {
+        if (!current || current.relative_path !== relativePath) {
+          return current;
+        }
+        previousSelectedImage = current;
+        return { ...current, favorite: nextPinned, pinned: nextPinned };
+      });
+    }
+
+    let response: Awaited<ReturnType<typeof galleryApi.updateImageState>>;
+    try {
+      response = await galleryApi.updateImageState(relativePath, updates);
+    } catch (error) {
+      if (previousImage) {
+        const rollbackImage = previousImage;
+        setImages((current) =>
+          current.map((image) => (image.relative_path === relativePath ? rollbackImage : image)),
+        );
+      }
+      if (previousSelectedImage) {
+        const rollbackSelectedImage = previousSelectedImage;
+        setSelectedImage((current) =>
+          current && current.relative_path === relativePath ? rollbackSelectedImage : current,
+        );
+      }
+      throw error;
+    }
+
+    applyContextPatch((current) => {
+      const pinnedDelta = shouldOptimisticallyPatchPin && previousImage && typeof response.state.pinned === "boolean"
+        ? (response.state.pinned ? 1 : 0) - (previousImage.pinned ? 1 : 0)
+        : 0;
+      return {
+        ...current,
+        categories: response.categories ?? current.categories,
+        boards: response.boards ?? current.boards,
+        pinned_count: Math.max(0, current.pinned_count + pinnedDelta),
+      };
+    });
     setImages((current) =>
       current.map((image) =>
         image.relative_path === relativePath ? { ...image, ...response.state } : image,
@@ -303,17 +385,63 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     setSelectedImage((current) =>
       current && current.relative_path === relativePath ? { ...current, ...response.state } : current,
     );
-    if ("pinned" in updates || "favorite" in updates) {
+    if (!shouldOptimisticallyPatchPin && (deferredSearchTerm.trim() || selectedCategory || selectedBoardId)) {
       refresh();
     }
   };
 
   const batchUpdateImages = async (relativePaths: string[], updates: Record<string, unknown>) => {
-    const response = await galleryApi.batchUpdateImages(relativePaths, updates);
+    const shouldOptimisticallyPatchPin = "pinned" in updates || "favorite" in updates;
+    const relativePathSet = new Set(relativePaths);
+    const previousImages = new Map<string, ImageRecord>();
+    const previousSelectedImage = selectedImage;
+    if (shouldOptimisticallyPatchPin) {
+      const nextPinned = Boolean(updates.pinned ?? updates.favorite);
+      setImages((current) =>
+        current.map((image) => {
+          if (!relativePathSet.has(image.relative_path)) {
+            return image;
+          }
+          previousImages.set(image.relative_path, image);
+          return { ...image, favorite: nextPinned, pinned: nextPinned };
+        }),
+      );
+      setSelectedImage((current) =>
+        current && relativePathSet.has(current.relative_path)
+          ? { ...current, favorite: nextPinned, pinned: nextPinned }
+          : current,
+      );
+    }
+
+    let response: Awaited<ReturnType<typeof galleryApi.batchUpdateImages>>;
+    try {
+      response = await galleryApi.batchUpdateImages(relativePaths, updates);
+    } catch (error) {
+      if (previousImages.size > 0) {
+        setImages((current) =>
+          current.map((image) => previousImages.get(image.relative_path) ?? image),
+        );
+      }
+      setSelectedImage(previousSelectedImage);
+      throw error;
+    }
     applyContextPatch((current) => ({
       ...current,
       categories: response.categories ?? current.categories,
       boards: response.boards ?? current.boards,
+      pinned_count: shouldOptimisticallyPatchPin
+        ? Math.max(
+            0,
+            current.pinned_count +
+              (response.updated ?? relativePaths).reduce((delta, path) => {
+                const previous = previousImages.get(path);
+                if (!previous || !response.last_state || typeof response.last_state.pinned !== "boolean") {
+                  return delta;
+                }
+                return delta + (response.last_state.pinned ? 1 : 0) - (previous.pinned ? 1 : 0);
+              }, 0),
+          )
+        : current.pinned_count,
     }));
     const updatedPaths = new Set(response.updated ?? relativePaths);
     const imagePatch = response.last_state
@@ -332,7 +460,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     setSelectedImage((current) =>
       current && updatedPaths.has(current.relative_path) ? { ...current, ...imagePatch } : current,
     );
-    if (deferredSearchTerm.trim() || selectedCategory || selectedBoardId || favoritesOnly || "pinned" in updates || "favorite" in updates) {
+    if (deferredSearchTerm.trim() || selectedCategory || selectedBoardId || favoritesOnly) {
       refresh();
     }
     return response;
@@ -413,7 +541,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       categories: response.categories ?? current.categories,
     }));
     if (selectedSubfolder === path || selectedSubfolder.startsWith(`${path}/`)) {
-      setSelectedSubfolder("");
+      setSelectedSubfolder(getSourceRootRef(path));
     }
     refresh();
     return response;
@@ -427,7 +555,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       categories: response.categories ?? current.categories,
     }));
     if (selectedSubfolder === sourcePath || selectedSubfolder.startsWith(`${sourcePath}/`)) {
-      setSelectedSubfolder(targetPath);
+      setSelectedSubfolder(response.target_path ?? targetPath);
     }
     refresh();
     return response;
@@ -442,7 +570,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     }));
     if (selectedSubfolder === sourcePath || selectedSubfolder.startsWith(`${sourcePath}/`)) {
       const suffix = selectedSubfolder.slice(sourcePath.length);
-      setSelectedSubfolder(`${targetPath}${suffix}`);
+      setSelectedSubfolder(`${response.target_path ?? targetPath}${suffix}`);
     }
     refresh();
     return response;
@@ -557,6 +685,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     setGridColumns,
     isLoading,
     isRefreshing,
+    hasPendingLiveRefresh,
     error,
     selectedImage,
     setSelectedImage,

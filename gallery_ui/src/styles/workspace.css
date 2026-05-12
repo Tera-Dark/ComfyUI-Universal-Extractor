@@ -72,6 +72,26 @@
   font-style: normal;
 }
 
+.ue-live-refresh-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 0 9px;
+  border: 1px solid rgba(22, 163, 74, 0.2);
+  border-radius: 999px;
+  background: var(--ue-green-soft);
+  color: #15803d;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.ue-live-refresh-pill:hover {
+  background: #dcfce7;
+  color: #166534;
+}
+
 .ue-filter-controls,
 .ue-library-actions {
   display: flex;
@@ -417,9 +437,9 @@
 }
 
 .ue-trash-list--grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-  align-items: stretch;
+  display: block;
+  column-width: clamp(190px, 14vw, 280px);
+  column-gap: 12px;
 }
 
 .ue-trash-card {
@@ -496,6 +516,7 @@
   align-items: center;
   gap: 12px;
   min-width: 0;
+  max-width: 100%;
 }
 
 .ue-trash-card-main img,
@@ -517,16 +538,22 @@
 
 .ue-trash-card-copy {
   display: flex;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
   flex-direction: column;
   gap: 5px;
+  overflow: hidden;
 }
 
 .ue-trash-card-title-row {
   display: flex;
   align-items: center;
   gap: 8px;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
 }
 
 .ue-trash-card-title-row h4,
@@ -537,7 +564,10 @@
 }
 
 .ue-trash-card-title-row h4 {
+  display: block;
+  width: 100%;
   min-width: 0;
+  max-width: 100%;
   color: var(--ue-ink);
   font-size: 13px;
   font-weight: 650;
@@ -592,21 +622,33 @@
 }
 
 .ue-trash-list--grid .ue-trash-card {
+  display: inline-grid;
+  width: 100%;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
-  min-height: 238px;
+  min-height: 0;
+  margin: 0 0 12px;
+  break-inside: avoid;
 }
 
 .ue-trash-list--grid .ue-trash-card-main {
   grid-column: 1 / -1;
   flex-direction: column;
   align-items: stretch;
+  width: 100%;
+  overflow: hidden;
 }
 
 .ue-trash-list--grid .ue-trash-card-main img,
 .ue-trash-list--grid .ue-trash-card-icon {
   width: 100%;
   height: auto;
+  max-height: min(420px, 34vh);
+  object-fit: contain;
+  background: var(--ue-surface);
+}
+
+.ue-trash-list--grid .ue-trash-card-icon {
   aspect-ratio: 4 / 3;
 }
 
@@ -620,6 +662,12 @@
   align-items: flex-start;
   flex-direction: column;
   gap: 5px;
+}
+
+.ue-trash-list--grid .ue-trash-card-title-row h4,
+.ue-trash-list--grid .ue-trash-card-main p {
+  width: 100%;
+  max-width: 100%;
 }
 
 .ue-pagination {
@@ -962,16 +1010,36 @@
   display: none;
 }
 
+.ue-gallery-inspector-layer {
+  position: fixed;
+  inset: 48px 0 0 auto;
+  z-index: 36;
+  width: clamp(360px, 22vw, 440px);
+  pointer-events: none;
+  contain: layout paint;
+}
+
 .ue-gallery-inspector {
-  position: sticky;
-  top: 0;
-  align-self: stretch;
-  height: calc(100vh - 48px);
+  position: relative;
+  width: 100%;
+  height: 100%;
   min-width: 0;
   overflow-y: auto;
   border-left: 1px solid var(--ue-line-soft);
   background: rgba(255, 255, 255, 0.98);
   box-shadow: -18px 0 40px rgba(24, 24, 27, 0.07);
+  contain: layout paint;
+  pointer-events: auto;
+}
+
+@media (min-width: 1280px) {
+  .ue-body-shell.has-inspector .ue-main-shell {
+    padding-right: calc(clamp(18px, 2.6vw, 36px) + clamp(360px, 22vw, 440px) + 18px);
+  }
+
+  .ue-body-shell.is-sidebar-collapsed.has-inspector .ue-main-shell {
+    padding-right: calc(clamp(18px, 2.6vw, 36px) + clamp(360px, 22vw, 440px) + 18px);
+  }
 }
 
 .ue-gallery-inspector-head {
@@ -2713,14 +2781,11 @@
     cursor: default;
   }
 
-  .ue-gallery-inspector {
-    position: fixed;
-    top: 48px;
-    right: 0;
-    bottom: 0;
-    z-index: 36;
+  .ue-gallery-inspector-layer {
     width: min(420px, 92vw);
-    height: auto;
+  }
+
+  .ue-gallery-inspector {
     border-left: 1px solid var(--ue-line-soft);
     box-shadow: -24px 0 60px rgba(24, 24, 27, 0.2);
   }

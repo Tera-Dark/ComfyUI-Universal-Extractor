@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 
 import { useToast } from "../shared/ToastViewport";
+import { useOperationStatus } from "../shared/OperationStatusCenter";
 import { useI18n } from "../../i18n/I18nProvider";
 import { galleryApi } from "../../services/galleryApi";
 import type { LibraryInfo } from "../../types/universal-gallery";
@@ -223,6 +224,7 @@ export const WorkbenchWorkspace = ({
 }: WorkbenchWorkspaceProps) => {
   const { t } = useI18n();
   const { pushToast } = useToast();
+  const { runOperation } = useOperationStatus();
 
   const [activeTool, setActiveTool] = useState<WorkbenchTool>("artist");
   const [selectedLibrary, setSelectedLibrary] = useState<string>("");
@@ -459,7 +461,7 @@ export const WorkbenchWorkspace = ({
     }
 
     try {
-      const response = await galleryApi.generateArtistString({
+      const response = await runOperation(() => galleryApi.generateArtistString({
         name: selectedLibrary,
         query,
         count: artistCount,
@@ -475,16 +477,18 @@ export const WorkbenchWorkspace = ({
         nai_weight_max: naiWeightMax,
         enable_custom_format: enableCustomFormat,
         custom_format_string: customFormatString,
+      }), {
+        pending: t("operationGenerateArtists"),
+        success: t("workbenchGenerateSuccess"),
+        error: (error) => (error instanceof Error ? error.message : t("artistNoLibraries")),
       });
 
       setFinalResult(response.formatted);
       if (response.names.length < artistCount) {
         pushToast(`${t("artistGenerate")} ${response.names.length}/${artistCount}`, "info");
-      } else {
-        pushToast(t("workbenchGenerateSuccess"), "success");
       }
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("artistNoLibraries"), "error");
+    } catch {
+      // Status center already surfaces the failure.
     }
   };
 

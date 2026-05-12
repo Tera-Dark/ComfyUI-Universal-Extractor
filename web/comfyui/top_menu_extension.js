@@ -12,6 +12,9 @@ const PENDING_WORKFLOW_KEY = "universal-extractor:pending-workflow";
 const WORKFLOW_CHANNEL_NAME = "universal-extractor-workflow";
 const COMFY_WINDOW_NAME = "comfyui-main";
 const WORKFLOW_MESSAGE_TYPE = "universal-extractor:workflow-message";
+const WORKFLOW_PROBE_TYPE = "universal-extractor:workflow-probe";
+const WORKFLOW_ACK_TYPE = "universal-extractor:workflow-ack";
+const WORKFLOW_DELIVERED_TYPE = "universal-extractor:workflow-delivered";
 
 const MIN_VERSION_FOR_ACTION_BAR = [1, 33, 9];
 
@@ -227,6 +230,41 @@ const createExtensionObject = (useActionBar) => {
         async setup() {
             window.name = COMFY_WINDOW_NAME;
             let lastHandledWorkflowId = null;
+            let workflowChannel = null;
+            const instanceId = window.sessionStorage.getItem("universal-extractor:comfy-instance-id") ||
+                `comfy-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+            window.sessionStorage.setItem("universal-extractor:comfy-instance-id", instanceId);
+
+            const postWorkflowChannelMessage = (message) => {
+                try {
+                    workflowChannel?.postMessage(message);
+                } catch (error) {
+                    console.warn("Universal Extractor: failed to post workflow channel message:", error);
+                }
+            };
+
+            const acknowledgeWorkflowProbe = (data = {}) => {
+                postWorkflowChannelMessage({
+                    type: WORKFLOW_ACK_TYPE,
+                    instanceId,
+                    probeId: data.probeId || null,
+                    payloadId: data.payloadId || null,
+                    visibilityState: document.visibilityState,
+                    focused: document.hasFocus(),
+                    href: window.location.href,
+                    ts: Date.now(),
+                });
+            };
+
+            const notifyWorkflowDelivered = (payload) => {
+                postWorkflowChannelMessage({
+                    type: WORKFLOW_DELIVERED_TYPE,
+                    instanceId,
+                    payloadId: payload?.id || null,
+                    href: window.location.href,
+                    ts: Date.now(),
+                });
+            };
 
             const applyWorkflowPayload = async (payload) => {
                 try {
@@ -235,17 +273,20 @@ const createExtensionObject = (useActionBar) => {
                     }
 
                     if (payload.id && payload.id === lastHandledWorkflowId) {
+                        notifyWorkflowDelivered(payload);
                         return;
                     }
                     lastHandledWorkflowId = payload.id || null;
 
                     if (payload.workflow && typeof app.loadGraphData === "function") {
                         await app.loadGraphData(payload.workflow, true, true, payload.image || null);
+                        notifyWorkflowDelivered(payload);
                         return;
                     }
 
                     if (payload.prompt && typeof app.loadApiJson === "function") {
                         await app.loadApiJson(payload.prompt, payload.image || "gallery-image");
+                        notifyWorkflowDelivered(payload);
                         return;
                     }
 
@@ -301,10 +342,27 @@ const createExtensionObject = (useActionBar) => {
                 observeActionBarButtons();
             }
 
+            const handleWorkflowMessage = (data) => {
+                if (data?.type === WORKFLOW_PROBE_TYPE) {
+                    acknowledgeWorkflowProbe(data);
+                    return;
+                }
+
+                if (data?.type === WORKFLOW_MESSAGE_TYPE && data.payload) {
+                    if (data.targetInstanceId && data.targetInstanceId !== instanceId) {
+                        return;
+                    }
+                    void applyWorkflowPayload(data.payload);
+                    return;
+                }
+
+                void applyWorkflowPayload(data);
+            };
+
             if ("BroadcastChannel" in window) {
-                const channel = new BroadcastChannel(WORKFLOW_CHANNEL_NAME);
-                channel.onmessage = (event) => {
-                    void applyWorkflowPayload(event.data);
+                workflowChannel = new BroadcastChannel(WORKFLOW_CHANNEL_NAME);
+                workflowChannel.onmessage = (event) => {
+                    handleWorkflowMessage(event.data);
                 };
             }
 
@@ -313,9 +371,7 @@ const createExtensionObject = (useActionBar) => {
                     return;
                 }
 
-                if (event.data?.type === WORKFLOW_MESSAGE_TYPE && event.data.payload) {
-                    void applyWorkflowPayload(event.data.payload);
-                }
+                handleWorkflowMessage(event.data);
             });
 
             window.addEventListener("storage", (event) => {
