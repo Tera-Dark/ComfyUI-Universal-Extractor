@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest";
 import { I18nProvider } from "../../i18n/I18nProvider";
 import type { GalleryContext, TrashItem } from "../../types/universal-gallery";
 import { ConfirmProvider } from "../shared/ConfirmDialog";
+import { OperationStatusProvider } from "../shared/OperationStatusCenter";
 import { ToastProvider } from "../shared/ToastViewport";
 import { GalleryWorkspace } from "./GalleryWorkspace";
 
@@ -50,6 +51,15 @@ const galleryImage = {
   category: "",
   title: "",
   notes: "",
+};
+
+const secondGalleryImage = {
+  ...galleryImage,
+  filename: "sample-2.png",
+  relative_path: "default_output::sample-2.png",
+  url: "/view?filename=sample-2.png&type=output",
+  original_url: "/view?filename=sample-2.png&type=output",
+  thumb_url: "/thumb-2.png",
 };
 
 const renderWorkspace = (overrides: Partial<Parameters<typeof GalleryWorkspace>[0]> = {}) => {
@@ -112,11 +122,13 @@ const renderWorkspace = (overrides: Partial<Parameters<typeof GalleryWorkspace>[
 
   return render(
     <I18nProvider>
-      <ToastProvider>
-        <ConfirmProvider>
+      <ConfirmProvider>
+        <OperationStatusProvider>
+          <ToastProvider>
           <GalleryWorkspace {...props} />
-        </ConfirmProvider>
-      </ToastProvider>
+          </ToastProvider>
+        </OperationStatusProvider>
+      </ConfirmProvider>
     </I18nProvider>,
   );
 };
@@ -217,8 +229,9 @@ describe("GalleryWorkspace smoke", () => {
 
     rerender(
       <I18nProvider>
-        <ToastProvider>
-          <ConfirmProvider>
+        <ConfirmProvider>
+          <OperationStatusProvider>
+            <ToastProvider>
             <GalleryWorkspace
               {...({
                 images: [galleryImage],
@@ -275,14 +288,56 @@ describe("GalleryWorkspace smoke", () => {
                 onPurgeTrashItems: vi.fn().mockResolvedValue(undefined),
               } satisfies Parameters<typeof GalleryWorkspace>[0])}
             />
-          </ConfirmProvider>
-        </ToastProvider>
+            </ToastProvider>
+          </OperationStatusProvider>
+        </ConfirmProvider>
       </I18nProvider>,
     );
 
     fireEvent.keyDown(window, { key: "Enter" });
 
     expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample.png" }));
+  });
+
+  it("starts box selection in the normal gallery while keeping normal click-to-open detail", async () => {
+    const onSelectionChange = vi.fn();
+    const onOpenDetail = vi.fn();
+    const onSelectionModeActiveChange = vi.fn();
+    window.localStorage.setItem("universal-extractor:gallery-view-mode", "list");
+    const { container } = renderWorkspace({
+      isTrashView: false,
+      selectedSubfolder: "default_output::",
+      total: 2,
+      images: [galleryImage, secondGalleryImage],
+      onOpenDetail,
+      onSelectionChange,
+      onSelectionModeActiveChange,
+    });
+
+    const list = container.querySelector(".ue-gallery-list") as HTMLElement;
+    const rows = Array.from(container.querySelectorAll(".ue-gallery-list-row")) as HTMLElement[];
+    expect(list).toBeInTheDocument();
+    expect(rows).toHaveLength(2);
+
+    rows[0].getBoundingClientRect = () =>
+      ({ left: 20, right: 220, top: 20, bottom: 90, width: 200, height: 70, x: 20, y: 20, toJSON: () => ({}) }) as DOMRect;
+    rows[1].getBoundingClientRect = () =>
+      ({ left: 20, right: 220, top: 104, bottom: 174, width: 200, height: 70, x: 20, y: 104, toJSON: () => ({}) }) as DOMRect;
+    onSelectionChange.mockClear();
+    onSelectionModeActiveChange.mockClear();
+
+    fireEvent.pointerDown(list, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(list, { pointerId: 1, pointerType: "mouse", clientX: 240, clientY: 98 });
+    fireEvent.pointerUp(list, { pointerId: 1, pointerType: "mouse", clientX: 240, clientY: 98 });
+
+    expect(onOpenDetail).not.toHaveBeenCalled();
+    expect(onSelectionChange).toHaveBeenLastCalledWith([galleryImage.relative_path]);
+    expect(onSelectionModeActiveChange).not.toHaveBeenCalledWith(true);
+
+    await new Promise((resolve) => window.setTimeout(resolve, 180));
+    fireEvent.click(rows[1]);
+
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample-2.png" }));
   });
 
   it("only treats real external file drops as imports", async () => {

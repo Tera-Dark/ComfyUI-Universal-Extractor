@@ -15,7 +15,7 @@ import {
 
 import { useI18n } from "../../i18n/I18nProvider";
 import { useConfirm } from "../shared/ConfirmDialog";
-import { useToast } from "../shared/ToastViewport";
+import { useOperationStatus } from "../shared/OperationStatusCenter";
 import type { BoardMutationResult, BoardSummary, MoveTargetOption } from "../../types/universal-gallery";
 import { BoardPickerModal } from "./BoardPickerModal";
 
@@ -58,7 +58,7 @@ export const GalleryInspectorPanel = ({
 }: GalleryInspectorPanelProps) => {
   const { t } = useI18n();
   const { confirm } = useConfirm();
-  const { pushToast } = useToast();
+  const { runOperation } = useOperationStatus();
   const [boardPickerPaths, setBoardPickerPaths] = useState<string[]>([]);
   const [bulkCategory, setBulkCategory] = useState("");
   const [bulkTargetSubfolder, setBulkTargetSubfolder] = useState("");
@@ -77,8 +77,10 @@ export const GalleryInspectorPanel = ({
     if (!boardPickerPaths.length) {
       return;
     }
-    await onUpdateBoardPins(boardId, boardPickerPaths, true);
-    pushToast(t("boardAddSuccess", { count: boardPickerPaths.length }), "success");
+    await runOperation(() => onUpdateBoardPins(boardId, boardPickerPaths, true), {
+      pending: t("operationAddToBoard"),
+      success: t("boardAddSuccess", { count: boardPickerPaths.length }),
+    });
     setBoardPickerPaths([]);
   };
 
@@ -101,7 +103,11 @@ export const GalleryInspectorPanel = ({
       return;
     }
 
-    await onDeleteImages(selectedPaths);
+    await runOperation(() => onDeleteImages(selectedPaths), {
+      pending: t("operationDeleteImages"),
+      success: t("imageDelete"),
+      error: (error) => (error instanceof Error ? error.message : t("imageDeleteError")),
+    });
     onClose();
   };
 
@@ -109,7 +115,10 @@ export const GalleryInspectorPanel = ({
     if (!selectedBoard || !selectedPaths.length) {
       return;
     }
-    await onUpdateBoardPins(selectedBoard.id, selectedPaths, false);
+    await runOperation(() => onUpdateBoardPins(selectedBoard.id, selectedPaths, false), {
+      pending: t("operationRemoveFromBoard"),
+      success: t("bulkRemoveFromBoard"),
+    });
     onClose();
   };
 
@@ -119,7 +128,11 @@ export const GalleryInspectorPanel = ({
     }
 
     const target = targetFolderOptions.find((option) => option.value === bulkTargetSubfolder);
-    await onMoveImages(selectedPaths, bulkTargetSubfolder, target?.source_id);
+    await runOperation(() => onMoveImages(selectedPaths, bulkTargetSubfolder, target?.source_id), {
+      pending: t("operationMoveImages"),
+      success: t("operationMoveImagesSuccess"),
+      error: (error) => (error instanceof Error ? error.message : t("operationMoveImages")),
+    });
     onClose();
   };
 
@@ -165,10 +178,16 @@ export const GalleryInspectorPanel = ({
           <button className="ue-icon-action" onClick={onClose} aria-label={t("bulkClear")} title={t("bulkClear")}>
             <Square size={14} />
           </button>
-          <button className="ue-icon-action" onClick={() => void onBatchUpdateImages(selectedPaths, { pinned: true })} aria-label={t("bulkPin")} title={t("bulkPin")}>
+          <button className="ue-icon-action" onClick={() => void runOperation(() => onBatchUpdateImages(selectedPaths, { pinned: true }), {
+            pending: t("operationUpdateImages"),
+            success: t("operationUpdateImagesSuccess"),
+          })} aria-label={t("bulkPin")} title={t("bulkPin")}>
             <Pin size={14} />
           </button>
-          <button className="ue-icon-action" onClick={() => void onBatchUpdateImages(selectedPaths, { pinned: false })} aria-label={t("bulkUnpin")} title={t("bulkUnpin")}>
+          <button className="ue-icon-action" onClick={() => void runOperation(() => onBatchUpdateImages(selectedPaths, { pinned: false }), {
+            pending: t("operationUpdateImages"),
+            success: t("operationUpdateImagesSuccess"),
+          })} aria-label={t("bulkUnpin")} title={t("bulkUnpin")}>
             <Pin size={14} />
           </button>
           <button className="ue-icon-action" onClick={() => setBoardPickerPaths(selectedPaths)} aria-label={t("bulkAddToBoard")} title={t("bulkAddToBoard")}>
@@ -194,7 +213,10 @@ export const GalleryInspectorPanel = ({
               <label className="ue-select-field ue-select-field--input">
                 <input value={bulkCategory} onChange={(event) => setBulkCategory(event.target.value)} placeholder={t("galleryCategoryPlaceholder")} />
               </label>
-              <button className="ue-icon-action ue-icon-action--filled" onClick={() => void onBatchUpdateImages(selectedPaths, { category: bulkCategory })} aria-label={t("bulkSetCategory")} title={t("bulkSetCategory")} disabled={!bulkCategory.trim()}>
+              <button className="ue-icon-action ue-icon-action--filled" onClick={() => void runOperation(() => onBatchUpdateImages(selectedPaths, { category: bulkCategory }), {
+                pending: t("operationUpdateImages"),
+                success: t("operationUpdateImagesSuccess"),
+              })} aria-label={t("bulkSetCategory")} title={t("bulkSetCategory")} disabled={!bulkCategory.trim()}>
                 <Check size={14} />
               </button>
             </div>

@@ -76,6 +76,12 @@ The folder panel should render only the active source tree. Pinned folders sort 
 
 Trash grid mode is presentation-only and remains backed by `/api/trash`. It uses a responsive masonry-style card layout, keeps restore/purge actions local to the trash page, and clips long names and original paths inside the card bounds.
 
+## ComfyUI Workflow Handoff
+
+The image detail action for opening a workflow in ComfyUI is a same-origin handoff, not a window-creation path. `gallery_ui/src/App.tsx` sends a `universal-extractor:workflow-probe` over the `universal-extractor-workflow` `BroadcastChannel`. `web/comfyui/top_menu_extension.js` responds with an `instanceId`, visibility state, and focus state. The gallery then sends one targeted `universal-extractor:workflow-message` to a single acknowledged ComfyUI instance and waits for `universal-extractor:workflow-delivered`.
+
+The gallery must not call `window.open()` as a fallback for workflow handoff. If no refreshed ComfyUI page responds, the gallery stores the payload under `universal-extractor:pending-workflow` and shows a refresh/retry error so the user can refresh an existing ComfyUI tab. This avoids one click opening multiple ComfyUI tabs or broadcasting the same workflow into every open ComfyUI page.
+
 ## Release Guardrails
 
 `scripts/verify.ps1` remains the preferred full local check. It runs Python tests, backend compileall, frontend typecheck/lint/tests/build, dist asset audit, and release metadata checks. `scripts/check-release.ps1` verifies `pyproject.toml`, `gallery_ui/package.json`, and `package-lock.json` versions match and that tracked dist compatibility assets share the latest CSS/JS content.

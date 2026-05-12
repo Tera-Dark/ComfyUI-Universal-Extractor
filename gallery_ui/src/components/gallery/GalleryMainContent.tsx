@@ -1,4 +1,5 @@
-import type { FormEvent, MouseEvent, MutableRefObject, PointerEvent, RefObject } from "react";
+import type { FormEvent, MouseEvent, MutableRefObject, RefObject } from "react";
+import { createPortal } from "react-dom";
 import {
   CheckSquare,
   ChevronLeft,
@@ -51,16 +52,17 @@ interface GalleryMainContentProps {
     event?: Pick<MouseEvent, "shiftKey" | "ctrlKey" | "metaKey">,
   ) => void;
   onOpenContextMenu: (event: MouseEvent, image: ImageRecord) => void;
-  onSelectionPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
-  onSelectionPointerMove: (event: PointerEvent<HTMLDivElement>) => void;
-  onSelectionPointerEnd: () => void;
   onSelectAllVisible: () => void;
   onPageChange: (page: number) => void;
   onPageJump: (formData: FormData) => void;
 }
 
-const SelectionBoxOverlay = ({ selectionEnabled, selectionBox }: { selectionEnabled: boolean; selectionBox: SelectionBoxState | null }) =>
-  selectionEnabled && selectionBox ? (
+const SelectionBoxOverlay = ({ selectionEnabled, selectionBox }: { selectionEnabled: boolean; selectionBox: SelectionBoxState | null }) => {
+  if (!selectionEnabled || !selectionBox || typeof document === "undefined") {
+    return null;
+  }
+
+  return createPortal(
     <div
       className="ue-selection-box"
       style={{
@@ -69,8 +71,10 @@ const SelectionBoxOverlay = ({ selectionEnabled, selectionBox }: { selectionEnab
         width: Math.abs(selectionBox.currentX - selectionBox.startX),
         height: Math.abs(selectionBox.currentY - selectionBox.startY),
       }}
-    />
-  ) : null;
+    />,
+    document.body,
+  );
+};
 
 export const GalleryMainContent = ({
   images,
@@ -93,9 +97,6 @@ export const GalleryMainContent = ({
   onBoardPickerPathsChange,
   onImageSelectionClick,
   onOpenContextMenu,
-  onSelectionPointerDown,
-  onSelectionPointerMove,
-  onSelectionPointerEnd,
   onSelectAllVisible,
   onPageChange,
   onPageJump,
@@ -131,150 +132,149 @@ export const GalleryMainContent = ({
     <>
       {galleryViewMode === "list" ? (
         <div
-          ref={gridRef}
-          className="ue-gallery-list ue-gallery-list--selectable"
-          onPointerDown={onSelectionPointerDown}
-          onPointerMove={onSelectionPointerMove}
-          onPointerUp={onSelectionPointerEnd}
-          onPointerCancel={onSelectionPointerEnd}
+          className="ue-gallery-selection-surface"
         >
-          {images.map((image) => {
-            const selected = pageSelectedPaths.includes(image.relative_path);
+          <div
+            ref={gridRef}
+            className="ue-gallery-list ue-gallery-list--selectable"
+          >
+            {images.map((image) => {
+              const selected = pageSelectedPaths.includes(image.relative_path);
 
-            return (
-              <article
-                key={image.relative_path}
-                ref={(element) => {
-                  cardRefs.current[image.relative_path] = element;
-                }}
-                className={`ue-gallery-list-row ${selected ? "is-selected" : ""}`}
-                onContextMenu={(event) => onOpenContextMenu(event, image)}
-                onClick={(event) => {
-                  if (selectionMode) {
-                    onImageSelectionClick(image.relative_path, event);
-                    return;
-                  }
-                  if (isDraggingSelectionRef.current) {
-                    return;
-                  }
-                  onOpenDetail(image);
-                }}
-              >
-                <button
-                  className={`ue-trash-card-check ${selected ? "active" : ""}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onImageSelectionClick(image.relative_path, event);
+              return (
+                <article
+                  key={image.relative_path}
+                  ref={(element) => {
+                    cardRefs.current[image.relative_path] = element;
                   }}
-                  aria-label={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
-                  title={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
-                >
-                  {selected ? <CheckSquare size={14} /> : <Square size={14} />}
-                </button>
-                <button
-                  className="ue-gallery-list-thumb"
+                  className={`ue-gallery-list-row ${selected ? "is-selected" : ""}`}
+                  onContextMenu={(event) => onOpenContextMenu(event, image)}
                   onClick={(event) => {
-                    event.stopPropagation();
                     if (selectionMode) {
                       onImageSelectionClick(image.relative_path, event);
                       return;
                     }
+                    if (isDraggingSelectionRef.current) {
+                      return;
+                    }
                     onOpenDetail(image);
                   }}
-                  aria-label={t("galleryInspect")}
-                  title={t("galleryInspect")}
                 >
-                  <img src={getGalleryImageUrl(image)} alt={image.title || image.filename} loading="lazy" decoding="async" />
-                </button>
-                <div className="ue-gallery-list-main">
-                  <div className="ue-gallery-list-heading">
-                    <h3 title={image.title || image.filename}>{image.title || image.filename}</h3>
-                    {image.category ? <span>{image.category}</span> : null}
-                  </div>
-                  <p title={image.relative_path}>{image.relative_path}</p>
-                  <div className="ue-gallery-list-meta">
-                    <span>{formatCompactDate(image.created_at)}</span>
-                    <span>{formatFileSize(image.size)}</span>
-                    {image.pinned ? <span>{t("galleryPin")}</span> : null}
-                  </div>
-                </div>
-                <div className="ue-gallery-list-actions">
                   <button
-                    className="ue-icon-action"
+                    className={`ue-trash-card-check ${selected ? "active" : ""}`}
                     onClick={(event) => {
                       event.stopPropagation();
-                      void onOpenWorkflow(image);
+                      onImageSelectionClick(image.relative_path, event);
                     }}
-                    aria-label={t("modalOpenWorkflow")}
-                    title={t("modalOpenWorkflow")}
+                    aria-label={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
+                    title={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
                   >
-                    <Send size={14} />
+                    {selected ? <CheckSquare size={14} /> : <Square size={14} />}
                   </button>
                   <button
-                    className="ue-icon-action"
+                    className="ue-gallery-list-thumb"
                     onClick={(event) => {
                       event.stopPropagation();
+                      if (selectionMode) {
+                        onImageSelectionClick(image.relative_path, event);
+                        return;
+                      }
                       onOpenDetail(image);
                     }}
                     aria-label={t("galleryInspect")}
                     title={t("galleryInspect")}
                   >
-                    <Eye size={14} />
+                    <img src={getGalleryImageUrl(image)} alt={image.title || image.filename} loading="lazy" decoding="async" />
                   </button>
-                  <button
-                    className="ue-icon-action"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      openBoardPickerForImage(image, selected);
-                    }}
-                    aria-label={t("bulkAddToBoard")}
-                    title={t("bulkAddToBoard")}
-                  >
-                    <FolderPlus size={14} />
-                  </button>
-                  <button
-                    className={`ue-icon-action ${image.pinned ? "ue-icon-action--accent" : ""}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      void onUpdateImageState(image.relative_path, { pinned: !image.pinned });
-                    }}
-                    aria-label={image.pinned ? t("galleryUnpin") : t("galleryPin")}
-                    title={image.pinned ? t("galleryUnpin") : t("galleryPin")}
-                  >
-                    <Pin size={14} fill={image.pinned ? "currentColor" : "none"} />
-                  </button>
-                </div>
-              </article>
-            );
-          })}
+                  <div className="ue-gallery-list-main">
+                    <div className="ue-gallery-list-heading">
+                      <h3 title={image.title || image.filename}>{image.title || image.filename}</h3>
+                      {image.category ? <span>{image.category}</span> : null}
+                    </div>
+                    <p title={image.relative_path}>{image.relative_path}</p>
+                    <div className="ue-gallery-list-meta">
+                      <span>{formatCompactDate(image.created_at)}</span>
+                      <span>{formatFileSize(image.size)}</span>
+                      {image.pinned ? <span>{t("galleryPin")}</span> : null}
+                    </div>
+                  </div>
+                  <div className="ue-gallery-list-actions">
+                    <button
+                      className="ue-icon-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onOpenWorkflow(image);
+                      }}
+                      aria-label={t("modalOpenWorkflow")}
+                      title={t("modalOpenWorkflow")}
+                    >
+                      <Send size={14} />
+                    </button>
+                    <button
+                      className="ue-icon-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onOpenDetail(image);
+                      }}
+                      aria-label={t("galleryInspect")}
+                      title={t("galleryInspect")}
+                    >
+                      <Eye size={14} />
+                    </button>
+                    <button
+                      className="ue-icon-action"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        openBoardPickerForImage(image, selected);
+                      }}
+                      aria-label={t("bulkAddToBoard")}
+                      title={t("bulkAddToBoard")}
+                    >
+                      <FolderPlus size={14} />
+                    </button>
+                    <button
+                      className={`ue-icon-action ${image.pinned ? "ue-icon-action--accent" : ""}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        void onUpdateImageState(image.relative_path, { pinned: !image.pinned });
+                      }}
+                      aria-label={image.pinned ? t("galleryUnpin") : t("galleryPin")}
+                      title={image.pinned ? t("galleryUnpin") : t("galleryPin")}
+                    >
+                      <Pin size={14} fill={image.pinned ? "currentColor" : "none"} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
           <SelectionBoxOverlay selectionEnabled={selectionEnabled} selectionBox={selectionBox} />
         </div>
       ) : (
         <div
-          ref={gridRef}
-          className="ue-gallery-grid ue-gallery-grid--virtual"
-          style={{ height: `${masonryLayout.totalHeight}px` }}
-          onPointerDown={onSelectionPointerDown}
-          onPointerMove={onSelectionPointerMove}
-          onPointerUp={onSelectionPointerEnd}
-          onPointerCancel={onSelectionPointerEnd}
+          className="ue-gallery-selection-surface"
         >
-          {masonryLayout.items.map(({ image, index, top, left, width, lane }) => {
-            const selected = pageSelectedPaths.includes(image.relative_path);
+          <div
+            ref={gridRef}
+            className="ue-gallery-grid ue-gallery-grid--virtual"
+            style={{ height: `${masonryLayout.totalHeight}px` }}
+          >
+            {masonryLayout.items.map(({ image, index, top, left, width, lane }) => {
+              const selected = pageSelectedPaths.includes(image.relative_path);
 
-            return (
-              <article
-                key={image.relative_path}
-                className={`ue-gallery-card ${selected ? "is-selected" : ""}`}
-                data-index={index}
-                data-lane={lane}
-                style={{ top: `${top}px`, left: `${left}px`, width: `${width}px` }}
-                onContextMenu={(event) => onOpenContextMenu(event, image)}
-                ref={(element) => {
-                  cardRefs.current[image.relative_path] = element;
-                  masonryLayout.measureElement(element);
-                }}
-              >
+              return (
+                <article
+                  key={image.relative_path}
+                  className={`ue-gallery-card ${selected ? "is-selected" : ""}`}
+                  data-index={index}
+                  data-lane={lane}
+                  style={{ top: `${top}px`, left: `${left}px`, width: `${width}px` }}
+                  onContextMenu={(event) => onOpenContextMenu(event, image)}
+                  ref={(element) => {
+                    cardRefs.current[image.relative_path] = element;
+                    masonryLayout.measureElement(element);
+                  }}
+                >
                 <div className="ue-gallery-media">
                   <GalleryCardImage
                     image={image}
@@ -387,9 +387,10 @@ export const GalleryMainContent = ({
                     ) : null}
                   </span>
                 </button>
-              </article>
-            );
-          })}
+                </article>
+              );
+            })}
+          </div>
           <SelectionBoxOverlay selectionEnabled={selectionEnabled} selectionBox={selectionBox} />
         </div>
       )}

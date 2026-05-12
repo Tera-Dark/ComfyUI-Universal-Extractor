@@ -29,7 +29,7 @@ interface TrashWorkspaceViewProps {
   onImageSelectionClick: (id: string, event: Pick<React.MouseEvent, "shiftKey" | "ctrlKey" | "metaKey">) => void;
   onSelectionPointerDown: (event: PointerEvent<HTMLDivElement>) => void;
   onSelectionPointerMove: (event: PointerEvent<HTMLDivElement>) => void;
-  onSelectionPointerEnd: () => void;
+  onSelectionPointerEnd: (event?: PointerEvent<HTMLDivElement>) => void;
 }
 
 export const TrashWorkspaceView = ({

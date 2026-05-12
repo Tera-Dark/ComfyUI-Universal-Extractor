@@ -31,6 +31,7 @@ export const GalleryCardImage = ({
         alt={image.title || image.filename}
         loading={priority ? "eager" : "lazy"}
         decoding="async"
+        draggable={false}
         onLoad={markLoaded}
         onError={markLoaded}
         onClick={(event) => onOpenDetail(image, event)}

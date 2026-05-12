@@ -8,6 +8,13 @@
   align-items: start;
 }
 
+.ue-gallery-selection-surface {
+  position: relative;
+  min-height: 220px;
+  cursor: default;
+  user-select: none;
+}
+
 .ue-gallery-grid--virtual {
   position: relative;
   display: block;

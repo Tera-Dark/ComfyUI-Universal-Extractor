@@ -5,6 +5,7 @@ import { I18nProvider } from "../../i18n/I18nProvider";
 import { galleryApi } from "../../services/galleryApi";
 import type { GalleryContext, ImageListResponse } from "../../types/universal-gallery";
 import { ConfirmProvider } from "../shared/ConfirmDialog";
+import { OperationStatusProvider } from "../shared/OperationStatusCenter";
 import { ToastProvider } from "../shared/ToastViewport";
 import { DualFolderWorkspace } from "./DualFolderWorkspace";
 
@@ -150,11 +151,13 @@ const renderDual = (overrides: Partial<Parameters<typeof DualFolderWorkspace>[0]
 
   return render(
     <I18nProvider>
-      <ToastProvider>
-        <ConfirmProvider>
+      <ConfirmProvider>
+        <OperationStatusProvider>
+          <ToastProvider>
           <DualFolderWorkspace {...props} />
-        </ConfirmProvider>
-      </ToastProvider>
+          </ToastProvider>
+        </OperationStatusProvider>
+      </ConfirmProvider>
     </I18nProvider>,
   );
 };

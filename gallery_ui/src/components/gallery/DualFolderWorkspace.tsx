@@ -26,6 +26,7 @@ import { formatFileSize } from "../../utils/formatters";
 import { getPositivePromptText } from "../../utils/metadata";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
+import { useOperationStatus } from "../shared/OperationStatusCenter";
 import { DEFAULT_OUTPUT_SOURCE_ID, formatFolderLabel, makeSourceRootRef, parseFolderRef } from "../shared/folderTree";
 import { FloatingLayerPortal, isEditableTarget, placeMenuForEvent, useDismissableLayer } from "../../utils/interaction";
 import { BoardPickerModal } from "./BoardPickerModal";
@@ -291,9 +292,10 @@ export const DualFolderWorkspace = ({
   onCreateBoard,
   onUpdateBoardPins,
 }: DualFolderWorkspaceProps) => {
-  const { locale } = useI18n();
+  const { t, locale } = useI18n();
   const { confirm } = useConfirm();
   const { pushToast } = useToast();
+  const { runOperation } = useOperationStatus();
   const text = useMemo(() => locale === "en"
     ? ({
         title: "Dual folder mode",
@@ -602,9 +604,13 @@ export const DualFolderWorkspace = ({
       return;
     }
     const { targetSourceId, targetSubfolder } = getTargetFolderPayload(targetFolder);
-    setMovingMessage(text.moving);
     try {
-      await onMoveImages(relativePaths, targetSubfolder, targetSourceId);
+      await runOperation(() => onMoveImages(relativePaths, targetSubfolder, targetSourceId), {
+        pending: t("operationMoveImages"),
+        success: t("operationMoveImagesSuccess"),
+        error: (error) => (error instanceof Error ? error.message : text.moveError),
+      });
+      setMovingMessage("");
       setTimedMessage(text.moved);
       clearPaneSelection(targetPane === "left" ? "right" : "left");
       clearPaneSelection(targetPane);
@@ -612,7 +618,7 @@ export const DualFolderWorkspace = ({
     } catch {
       setTimedMessage(text.moveError);
     }
-  }, [clearPaneSelection, context, getPaneFolder, onMoveImages, reloadBothPanes, setTimedMessage, text.moved, text.moveError, text.moving, text.readOnly, text.sameFolder]);
+  }, [clearPaneSelection, context, getPaneFolder, onMoveImages, reloadBothPanes, runOperation, setTimedMessage, t, text.moveError, text.moved, text.readOnly, text.sameFolder]);
 
   const moveActiveSelectionToOtherPane = useCallback(async (pane: PaneId) => {
     const selection = getPaneSelection(pane);
@@ -693,15 +699,18 @@ export const DualFolderWorkspace = ({
       return;
     }
     try {
-      await onDeleteImages(paths);
+      await runOperation(() => onDeleteImages(paths), {
+        pending: t("operationDeleteImages"),
+        success: text.deleteSuccess,
+        error: (error) => (error instanceof Error ? error.message : text.deleteError),
+      });
       clearPaneSelection("left");
       clearPaneSelection("right");
-      pushToast(text.deleteSuccess, "success");
       await reloadBothPanes(true);
     } catch (error) {
-      pushToast(error instanceof Error ? error.message : text.deleteError, "error");
+      setTimedMessage(error instanceof Error ? error.message : text.deleteError);
     }
-  }, [clearPaneSelection, confirm, locale, onDeleteImages, pushToast, reloadBothPanes, text]);
+  }, [clearPaneSelection, confirm, locale, onDeleteImages, reloadBothPanes, runOperation, setTimedMessage, t, text]);
 
   const handleOpenContextMenu = (event: React.MouseEvent, pane: PaneId, image: ImageRecord) => {
     event.preventDefault();
@@ -770,8 +779,10 @@ export const DualFolderWorkspace = ({
     if (!boardPickerPaths.length) {
       return;
     }
-    await onUpdateBoardPins(boardId, boardPickerPaths, true);
-    pushToast(locale === "en" ? "Added to board" : "已加入图版", "success");
+    await runOperation(() => onUpdateBoardPins(boardId, boardPickerPaths, true), {
+      pending: t("operationAddToBoard"),
+      success: t("boardAddSuccess", { count: boardPickerPaths.length }),
+    });
     setBoardPickerPaths([]);
   };
 

@@ -1,6 +1,7 @@
 .ue-sidebar {
   position: sticky;
   top: 48px;
+  z-index: 32;
   display: flex;
   width: var(--ue-sidebar-width);
   flex-direction: column;
@@ -17,6 +18,7 @@
 
 .ue-sidebar.is-collapsed {
   border-right-color: transparent;
+  pointer-events: none;
   transform: translateX(calc(-1 * var(--ue-sidebar-width)));
 }
 
@@ -24,7 +26,7 @@
   position: absolute;
   top: 50%;
   right: -11px;
-  z-index: 66;
+  z-index: 33;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -36,6 +38,7 @@
   color: var(--ue-ink-soft);
   box-shadow: 0 12px 30px rgba(24, 24, 27, 0.12);
   cursor: pointer;
+  pointer-events: auto;
   transform: translateY(-50%);
   transition:
     background-color var(--ue-duration-fast) var(--ue-ease),

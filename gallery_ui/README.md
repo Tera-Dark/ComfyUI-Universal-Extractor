@@ -6,6 +6,7 @@
 - The repository-level `scripts\verify.ps1` runs frontend build, dist audit, and release metadata checks after Python verification.
 - `WorkspaceSidebar` keeps folder source scoping and sorting helpers in `src/components/shared/folderTree.ts`.
 - `GalleryWorkspace` keeps image prefetch state and card image loading in `src/components/gallery/galleryImagePrefetch.ts` and `GalleryCardImage.tsx`.
+- Global pending/success/error feedback is centralized in `src/components/shared/OperationStatusCenter.tsx`; `src/components/shared/ToastViewport.tsx` is a compatibility wrapper around the same right-bottom status center, not a separate toast surface.
 - Floating menu placement, dismiss behavior, and editable-target shortcut guards are centralized in `src/utils/interaction.ts`.
 
 这是 ComfyUI Universal Extractor 的图库前端，使用 React、TypeScript 和 Vite 构建。构建产物位于 `gallery_ui/dist/`，由后端以 `/gallery/` 路径挂载到 ComfyUI。
@@ -106,7 +107,7 @@ powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 - 双栏模式快捷键：Ctrl/Meta+A 全选当前栏，Escape 关闭菜单或清空选择，Delete 删除所选，Enter 打开聚焦图片详情，Ctrl/Meta+M 移动到另一栏，Ctrl/Meta+R 刷新左右栏，Tab 切换左右栏焦点；输入框和目录搜索框聚焦时不触发这些快捷键。
 - 网格/列表切换要覆盖图库、垃圾箱和词库子项目；垃圾箱网格模式保持瀑布流自适应，不使用固定拉伸列。
 - 小型子页面和弹窗使用统一的标题、说明、输入区、操作区排版。
-- “在 ComfyUI 中打开工作流”优先通过 `BroadcastChannel`、`postMessage` 和 `localStorage` 把工作流发送到已打开的 ComfyUI 页面；只有没有可复用窗口时才打开新的 ComfyUI 页面，避免已有工作流触发浏览器离开确认。
+- “在 ComfyUI 中打开工作流”通过 `BroadcastChannel` 探测已打开的 ComfyUI 页面，并只向一个回传 `instanceId` 的接收页发送工作流；不会自动创建新的 ComfyUI 窗口。没有可接收页面时，会保留 pending payload 并提示刷新现有 ComfyUI 页面后重试。
 
 ## 设置偏好
 

@@ -19,6 +19,7 @@ import {
 import { useI18n } from "../../i18n/I18nProvider";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
+import { useOperationStatus } from "../shared/OperationStatusCenter";
 import type { BoardMutationResult, BoardSummary, ColorIndexStatus, GalleryContext, ImageRecord, MoveImagesResult, TrashItem } from "../../types/universal-gallery";
 import { formatFileSize } from "../../utils/formatters";
 import { getPositivePromptText } from "../../utils/metadata";
@@ -165,6 +166,7 @@ export const GalleryWorkspace = ({
   const { t } = useI18n();
   const { confirm } = useConfirm();
   const { pushToast } = useToast();
+  const { runOperation } = useOperationStatus();
   const [dragActive, setDragActive] = useState(false);
   const [importTargetSourceId, setImportTargetSourceId] = useState("");
   const [boardPickerPaths, setBoardPickerPaths] = useState<string[]>([]);
@@ -187,8 +189,12 @@ export const GalleryWorkspace = ({
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const dragDepthRef = useRef(0);
   const gridRef = useRef<HTMLDivElement | null>(null);
+  const galleryWorkspaceRef = useRef<HTMLElement | null>(null);
   const cardRefs = useRef<Record<string, HTMLElement | null>>({});
   const isDraggingSelectionRef = useRef(false);
+  const selectionDragResetTimerRef = useRef<number | null>(null);
+  const selectionBoxBasePathsRef = useRef<string[]>([]);
+  const selectionBoxAppendRef = useRef(false);
   const lastSelectedPathRef = useRef<string>("");
   const scrollContainerRef = useRef<HTMLElement | null>(null);
 
@@ -204,8 +210,8 @@ export const GalleryWorkspace = ({
   );
   const selectedCount = pageSelectedPaths.length;
   const hasSelection = selectedCount > 0;
-  const selectionEnabled = selectionMode || isTrashView;
-  const inspectorSelectionActive = selectionMode && !isTrashView;
+  const selectionEnabled = !dualFolderMode;
+  const inspectorSelectionActive = !isTrashView && (selectionMode || selectedCount > 0);
   const selectedTrashItems = useMemo(
     () => (isTrashView ? trashItems.filter((item) => selectedImagePathSet.has(item.id)) : []),
     [isTrashView, selectedImagePathSet, trashItems],
@@ -307,6 +313,12 @@ export const GalleryWorkspace = ({
     setSelectionBox(null);
     isDraggingSelectionRef.current = false;
   }, [selectionEnabled]);
+
+  useEffect(() => () => {
+    if (selectionDragResetTimerRef.current !== null) {
+      window.clearTimeout(selectionDragResetTimerRef.current);
+    }
+  }, []);
 
   useEffect(() => {
     const scrollContainer = gridRef.current?.closest(".ue-main-shell") as HTMLElement | null;
@@ -539,7 +551,11 @@ export const GalleryWorkspace = ({
       return;
     }
 
-    await onDeleteImages(pageSelectedPaths);
+    await runOperation(() => onDeleteImages(pageSelectedPaths), {
+      pending: t("operationDeleteImages"),
+      success: t("imageDelete"),
+      error: (error) => (error instanceof Error ? error.message : t("imageDeleteError")),
+    });
     clearSelection();
   };
 
@@ -547,8 +563,10 @@ export const GalleryWorkspace = ({
     if (!boardPickerPaths.length) {
       return;
     }
-    await onUpdateBoardPins(boardId, boardPickerPaths, true);
-    pushToast(t("boardAddSuccess", { count: boardPickerPaths.length }), "success");
+    await runOperation(() => onUpdateBoardPins(boardId, boardPickerPaths, true), {
+      pending: t("operationAddToBoard"),
+      success: t("boardAddSuccess", { count: boardPickerPaths.length }),
+    });
     setBoardPickerPaths([]);
   };
 
@@ -566,9 +584,11 @@ export const GalleryWorkspace = ({
     if (!approved) {
       return;
     }
-    await onDeleteBoard(selectedBoard.id);
+    await runOperation(() => onDeleteBoard(selectedBoard.id), {
+      pending: t("operationDeleteBoard"),
+      success: t("boardDeleteSuccess"),
+    });
     onBoardChange("");
-    pushToast(t("boardDeleteSuccess"), "success");
   };
 
   const handleRestoreSelectedTrash = async () => {
@@ -588,7 +608,6 @@ export const GalleryWorkspace = ({
     }
 
     await onRestoreTrashItems(selectedTrashItems.map((item) => item.id));
-    pushToast(t("trashRestoreSelectedSuccess", { count: selectedTrashItems.length }), "success");
     clearSelection();
   };
 
@@ -609,7 +628,6 @@ export const GalleryWorkspace = ({
     }
 
     await onPurgeTrashItems(selectedTrashItems.map((item) => item.id));
-    pushToast(t("trashDeleteSelectedSuccess", { count: selectedTrashItems.length }), "success");
     clearSelection();
   };
 
@@ -628,7 +646,7 @@ export const GalleryWorkspace = ({
   const getAbsoluteImageUrl = (image: ImageRecord) =>
     new URL(image.original_url || image.url, window.location.origin).toString();
 
-  const updateSelectionFromBox = (box: SelectionBoxState) => {
+  const updateSelectionFromBox = useCallback((box: SelectionBoxState) => {
     const selectionRect = getSelectionBoxRect(box);
 
     const selectionItems = isTrashView
@@ -645,11 +663,15 @@ export const GalleryWorkspace = ({
       })
       .map((item) => item.key);
 
-    setSelection(intersectedPaths);
-  };
+    setSelection(
+      selectionBoxAppendRef.current
+        ? dedupeVisibleSelection([...selectionBoxBasePathsRef.current, ...intersectedPaths], visibleSelectionPaths)
+        : intersectedPaths,
+    );
+  }, [images, isTrashView, setSelection, trashItems, visibleSelectionPaths]);
 
-  const handleSelectionPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!selectionEnabled || event.button !== 0) {
+  const handleSelectionPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
+    if (!selectionEnabled || event.button !== 0 || event.pointerType === "touch") {
       return;
     }
 
@@ -659,15 +681,21 @@ export const GalleryWorkspace = ({
     }
 
     isDraggingSelectionRef.current = false;
+    if (selectionDragResetTimerRef.current !== null) {
+      window.clearTimeout(selectionDragResetTimerRef.current);
+      selectionDragResetTimerRef.current = null;
+    }
+    selectionBoxBasePathsRef.current = pageSelectedPaths;
+    selectionBoxAppendRef.current = event.ctrlKey || event.metaKey;
     setSelectionBox({
       startX: event.clientX,
       startY: event.clientY,
       currentX: event.clientX,
       currentY: event.clientY,
     });
-  };
+  }, [pageSelectedPaths, selectionEnabled]);
 
-  const handleSelectionPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+  const handleSelectionPointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (!selectionEnabled || !selectionBox) {
       return;
     }
@@ -677,33 +705,84 @@ export const GalleryWorkspace = ({
       currentX: event.clientX,
       currentY: event.clientY,
     };
-    if (
+    const shouldStartDrag =
       Math.abs(nextBox.currentX - nextBox.startX) > 6 ||
-      Math.abs(nextBox.currentY - nextBox.startY) > 6
-    ) {
+      Math.abs(nextBox.currentY - nextBox.startY) > 6;
+
+    if (shouldStartDrag && !isDraggingSelectionRef.current) {
       isDraggingSelectionRef.current = true;
+      if (typeof event.currentTarget.setPointerCapture === "function") {
+        event.currentTarget.setPointerCapture(event.pointerId);
+      }
     }
     setSelectionBox(nextBox);
     if (isDraggingSelectionRef.current) {
       updateSelectionFromBox(nextBox);
     }
-  };
+  }, [selectionBox, selectionEnabled, updateSelectionFromBox]);
 
-  const handleSelectionPointerEnd = () => {
+  const handleSelectionPointerEnd = useCallback((event?: React.PointerEvent<HTMLElement>) => {
     if (!selectionBox) {
       return;
     }
 
+    if (
+      typeof event?.currentTarget.hasPointerCapture === "function" &&
+      typeof event.currentTarget.releasePointerCapture === "function" &&
+      event.currentTarget.hasPointerCapture(event.pointerId)
+    ) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+
     if (!isDraggingSelectionRef.current) {
       setSelectionBox(null);
+      selectionBoxBasePathsRef.current = [];
+      selectionBoxAppendRef.current = false;
       return;
     }
 
     setSelectionBox(null);
-    window.setTimeout(() => {
+    selectionBoxBasePathsRef.current = [];
+    selectionBoxAppendRef.current = false;
+    selectionDragResetTimerRef.current = window.setTimeout(() => {
       isDraggingSelectionRef.current = false;
-    }, 0);
-  };
+      selectionDragResetTimerRef.current = null;
+    }, 160);
+  }, [selectionBox]);
+
+  useEffect(() => {
+    if (!selectionEnabled || !scrollElement) {
+      return;
+    }
+
+    const handleMainPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && galleryWorkspaceRef.current?.contains(target)) {
+        return;
+      }
+      handleSelectionPointerDown(event as unknown as React.PointerEvent<HTMLElement>);
+    };
+
+    const handleMainPointerMove = (event: PointerEvent) => {
+      handleSelectionPointerMove(event as unknown as React.PointerEvent<HTMLElement>);
+    };
+
+    const handleMainPointerEnd = (event: PointerEvent) => {
+      handleSelectionPointerEnd(event as unknown as React.PointerEvent<HTMLElement>);
+    };
+
+    scrollElement.addEventListener("pointerdown", handleMainPointerDown);
+    scrollElement.addEventListener("pointermove", handleMainPointerMove);
+    scrollElement.addEventListener("pointerup", handleMainPointerEnd);
+    scrollElement.addEventListener("pointercancel", handleMainPointerEnd);
+
+    return () => {
+      scrollElement.removeEventListener("pointerdown", handleMainPointerDown);
+      scrollElement.removeEventListener("pointermove", handleMainPointerMove);
+      scrollElement.removeEventListener("pointerup", handleMainPointerEnd);
+      scrollElement.removeEventListener("pointercancel", handleMainPointerEnd);
+    };
+  }, [handleSelectionPointerDown, handleSelectionPointerEnd, handleSelectionPointerMove, scrollElement, selectionEnabled]);
 
   const copyText = async (value: string, successMessage: string) => {
     try {
@@ -760,12 +839,11 @@ export const GalleryWorkspace = ({
       return;
     }
 
-    try {
-      await onDeleteImages([image.relative_path]);
-      pushToast(t("imageDelete"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("imageDeleteError"), "error");
-    }
+    await runOperation(() => onDeleteImages([image.relative_path]), {
+      pending: t("operationDeleteImage"),
+      success: t("imageDelete"),
+      error: (error) => (error instanceof Error ? error.message : t("imageDeleteError")),
+    }).catch(() => undefined);
   };
 
   const handleOpenContextMenu = (event: React.MouseEvent, image: ImageRecord) => {
@@ -804,7 +882,14 @@ export const GalleryWorkspace = ({
       onDragOver={(event) => event.preventDefault()}
       onDrop={handleDrop}
     >
-      <section className="ue-workspace ue-workspace--gallery ue-animate-in">
+      <section
+        ref={galleryWorkspaceRef}
+        className="ue-workspace ue-workspace--gallery ue-animate-in"
+        onPointerDown={handleSelectionPointerDown}
+        onPointerMove={handleSelectionPointerMove}
+        onPointerUp={handleSelectionPointerEnd}
+        onPointerCancel={handleSelectionPointerEnd}
+      >
         <GalleryToolbar
           isTrashView={isTrashView}
           selectedBoard={selectedBoard}
@@ -925,9 +1010,6 @@ export const GalleryWorkspace = ({
             onBoardPickerPathsChange={setBoardPickerPaths}
             onImageSelectionClick={handleImageSelectionClick}
             onOpenContextMenu={handleOpenContextMenu}
-            onSelectionPointerDown={handleSelectionPointerDown}
-            onSelectionPointerMove={handleSelectionPointerMove}
-            onSelectionPointerEnd={handleSelectionPointerEnd}
             onSelectAllVisible={selectAllVisible}
             onPageChange={onPageChange}
             onPageJump={handlePageJump}

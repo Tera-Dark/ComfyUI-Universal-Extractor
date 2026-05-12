@@ -15,14 +15,18 @@ import { useLibraryData } from "./hooks/useLibraryData";
 import { galleryApi } from "./services/galleryApi";
 import { useConfirm } from "./components/shared/ConfirmDialog";
 import { useToast } from "./components/shared/ToastViewport";
+import { useOperationStatus } from "./components/shared/OperationStatusCenter";
 import type { ImageRecord, LibraryInfo, UiPreferences, WorkspaceTab } from "./types/universal-gallery";
 import "./App.css";
 
 const PENDING_WORKFLOW_KEY = "universal-extractor:pending-workflow";
 const WORKFLOW_CHANNEL_NAME = "universal-extractor-workflow";
-const COMFY_WINDOW_NAME = "comfyui-main";
 const WORKFLOW_MESSAGE_TYPE = "universal-extractor:workflow-message";
-const MAX_STORAGE_WORKFLOW_BYTES = 1_500_000;
+const WORKFLOW_PROBE_TYPE = "universal-extractor:workflow-probe";
+const WORKFLOW_ACK_TYPE = "universal-extractor:workflow-ack";
+const WORKFLOW_DELIVERED_TYPE = "universal-extractor:workflow-delivered";
+const EXISTING_COMFY_PROBE_TIMEOUT_MS = 450;
+const WORKFLOW_DELIVERY_TIMEOUT_MS = 900;
 const UI_PREFERENCES_KEY = "universal-extractor:ui-preferences";
 const DEFAULT_OUTPUT_SOURCE_ROOT = "default_output::";
 const FOLDER_REF_SEPARATOR = "::";
@@ -57,21 +61,105 @@ const matchesLibrarySearch = (library: LibraryInfo, searchTerm: string) => {
   return library.filename.toLowerCase().includes(query);
 };
 
-const getOrOpenComfyWindow = () => {
-  const comfyWindow = window.open("", COMFY_WINDOW_NAME);
-  if (!comfyWindow) {
-    return null;
-  }
+type WorkflowPayload = {
+  id: string;
+  workflow: Record<string, unknown> | null;
+  prompt: unknown;
+  image: string;
+  imageUrl: string | null;
+  ts: number;
+};
 
-  try {
-    if (comfyWindow.location.href === "about:blank") {
-      comfyWindow.location.replace(`${window.location.origin}/`);
+type WorkflowAck = {
+  instanceId: string;
+  visibilityState?: DocumentVisibilityState;
+  focused?: boolean;
+  ts?: number;
+};
+
+const trySendWorkflowToExistingComfyPage = (payload: WorkflowPayload) =>
+  new Promise<boolean>((resolve) => {
+    if (!("BroadcastChannel" in window)) {
+      resolve(false);
+      return;
     }
-  } catch {
-    // If the browser denies location access, still try the message channels below.
-  }
 
-  return comfyWindow;
+    let resolved = false;
+    const probeId = `${payload.id}-probe`;
+    const channel = new BroadcastChannel(WORKFLOW_CHANNEL_NAME);
+    const candidates: WorkflowAck[] = [];
+    let deliveryTimer = 0;
+    let probeTimer = 0;
+
+    const cleanup = () => {
+      window.clearTimeout(deliveryTimer);
+      window.clearTimeout(probeTimer);
+      channel.close();
+    };
+
+    const finish = (value: boolean) => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      cleanup();
+      resolve(value);
+    };
+
+    channel.addEventListener("message", (event) => {
+      const data = event.data;
+      if (!data || typeof data !== "object") {
+        return;
+      }
+      if (data.type === WORKFLOW_ACK_TYPE && data.probeId === probeId && typeof data.instanceId === "string") {
+        candidates.push(data as WorkflowAck);
+        return;
+      }
+      if (data.type === WORKFLOW_DELIVERED_TYPE && data.payloadId === payload.id) {
+        finish(true);
+      }
+    });
+
+    const selectTarget = () => {
+      if (resolved) {
+        return;
+      }
+      const target =
+        candidates.find((candidate) => candidate.focused) ??
+        candidates.find((candidate) => candidate.visibilityState === "visible") ??
+        candidates[0];
+
+      if (!target) {
+        finish(false);
+        return;
+      }
+
+      channel.postMessage({
+        type: WORKFLOW_MESSAGE_TYPE,
+        targetInstanceId: target.instanceId,
+        payload,
+      });
+      deliveryTimer = window.setTimeout(() => finish(false), WORKFLOW_DELIVERY_TIMEOUT_MS);
+    };
+
+    channel.postMessage({ type: WORKFLOW_PROBE_TYPE, probeId, payloadId: payload.id });
+    probeTimer = window.setTimeout(selectTarget, EXISTING_COMFY_PROBE_TIMEOUT_MS);
+  });
+
+const clearPendingWorkflowPayload = () => {
+  try {
+    window.localStorage.removeItem(PENDING_WORKFLOW_KEY);
+  } catch {
+    // Best effort cleanup; a stale pending payload must not force a new page.
+  }
+};
+
+const storeUndeliveredWorkflowPayload = (payload: WorkflowPayload) => {
+  try {
+    window.localStorage.setItem(PENDING_WORKFLOW_KEY, JSON.stringify(payload));
+  } catch {
+    clearPendingWorkflowPayload();
+  }
 };
 
 const getStoredUiPreferences = (): UiPreferences => {
@@ -94,6 +182,7 @@ function App() {
   const { t } = useI18n();
   const { confirm } = useConfirm();
   const { pushToast } = useToast();
+  const { runOperation } = useOperationStatus();
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("gallery");
   const [librarySearchTerm, setLibrarySearchTerm] = useState("");
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(() => getStoredUiPreferences());
@@ -186,17 +275,18 @@ function App() {
   };
 
   const handleCreateLibrary = async () => {
-    try {
+    await runOperation(async () => {
       const result = await library.createLibrary();
       if (!result.ok && result.message) {
-        pushToast(result.message, "error");
-      } else {
-        pushToast(t("libraryCreateSuccess"), "success");
+        throw new Error(result.message);
       }
       gallery.refresh();
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("errorCreateLibrary"), "error");
-    }
+      return result;
+    }, {
+      pending: t("operationCreateLibrary"),
+      success: t("libraryCreateSuccess"),
+      error: (error) => (error instanceof Error ? error.message : t("errorCreateLibrary")),
+    }).catch(() => undefined);
   };
 
   const handleDeleteLibrary = async (name: string) => {
@@ -213,25 +303,25 @@ function App() {
     if (!approved) {
       return;
     }
-    try {
-      await library.deleteLibrary(name);
-      pushToast(t("commonDelete"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("errorDeleteLibrary"), "error");
-    }
+    await runOperation(() => library.deleteLibrary(name), {
+      pending: t("operationDeleteLibrary"),
+      success: t("commonDelete"),
+      error: (error) => (error instanceof Error ? error.message : t("errorDeleteLibrary")),
+    }).catch(() => undefined);
   };
 
   const handleSaveLibrary = async () => {
-    try {
+    await runOperation(async () => {
       const result = await library.saveLibrary();
       if (!result.ok && result.message) {
-        pushToast(result.message, "error");
-      } else {
-        pushToast(t("librarySaveSuccess", { count: library.entryTotal }), "success");
+        throw new Error(result.message);
       }
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("errorSaveLibrary"), "error");
-    }
+      return result;
+    }, {
+      pending: t("operationSaveLibrary"),
+      success: t("librarySaveSuccess", { count: library.entryTotal }),
+      error: (error) => (error instanceof Error ? error.message : t("errorSaveLibrary")),
+    }).catch(() => undefined);
   };
 
   const handleRefresh = async () => {
@@ -239,17 +329,25 @@ function App() {
       return;
     }
     if (activeTab === "gallery") {
-      gallery.refresh();
+      await runOperation(async () => gallery.refresh(), {
+        pending: t("operationRefresh"),
+      });
       return;
     }
     if (activeTab === "settings") {
-      gallery.refresh();
+      await runOperation(async () => gallery.refresh(), {
+        pending: t("operationRefresh"),
+      });
       return;
     }
-    await library.refreshLibraries();
-    if (library.activeLibraryName) {
-      await library.refreshActiveLibrary();
-    }
+    await runOperation(async () => {
+      await library.refreshLibraries();
+      if (library.activeLibraryName) {
+        await library.refreshActiveLibrary();
+      }
+    }, {
+      pending: t("operationRefresh"),
+    });
   };
 
   const handleExportLibrary = () => {
@@ -283,18 +381,16 @@ function App() {
   };
 
   const handleSubmitBoardDialog = async (name: string) => {
-    try {
-      const result = await gallery.createBoard(name);
-      if (result.board?.id) {
-        gallery.setSelectedBoardId(result.board.id);
-        gallery.setSelectedSubfolder("");
-        gallery.setFavoritesOnly(false);
-        gallery.setPage(1);
-      }
-      pushToast(t("boardCreateSuccess"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("boardCreateError"), "error");
-      throw error;
+    const result = await runOperation(() => gallery.createBoard(name), {
+      pending: t("operationCreateBoard"),
+      success: t("boardCreateSuccess"),
+      error: (error) => (error instanceof Error ? error.message : t("boardCreateError")),
+    });
+    if (result.board?.id) {
+      gallery.setSelectedBoardId(result.board.id);
+      gallery.setSelectedSubfolder("");
+      gallery.setFavoritesOnly(false);
+      gallery.setPage(1);
     }
   };
 
@@ -303,27 +399,26 @@ function App() {
       return;
     }
 
-    try {
-      if (folderDialog.mode === "create") {
-        await gallery.createFolder(path);
-        gallery.refresh();
-        pushToast(t("folderCreateSuccess"), "success");
-      } else if (folderDialog.mode === "merge") {
-        await gallery.mergeFolder(folderDialog.sourcePath ?? gallery.selectedSubfolder, path);
-        pushToast(t("folderMergeSuccess"), "success");
-      } else if (folderDialog.sourcePath) {
-        await gallery.renameFolder(folderDialog.sourcePath, path);
-        pushToast(t("folderRenameSuccess"), "success");
-      }
-    } catch (error) {
-      const fallback =
-        folderDialog.mode === "create"
-          ? t("folderCreateError")
-          : folderDialog.mode === "merge"
-            ? t("folderMergeError")
-            : t("folderRenameError");
-      pushToast(error instanceof Error ? error.message : fallback, "error");
-      throw error;
+    if (folderDialog.mode === "create") {
+      await runOperation(() => gallery.createFolder(path), {
+        pending: t("operationCreateFolder"),
+        success: t("folderCreateSuccess"),
+        error: (error) => (error instanceof Error ? error.message : t("folderCreateError")),
+      });
+      gallery.refresh();
+    } else if (folderDialog.mode === "merge") {
+      await runOperation(() => gallery.mergeFolder(folderDialog.sourcePath ?? gallery.selectedSubfolder, path), {
+        pending: t("operationMergeFolder"),
+        success: t("folderMergeSuccess"),
+        error: (error) => (error instanceof Error ? error.message : t("folderMergeError")),
+      });
+    } else if (folderDialog.sourcePath) {
+      const sourcePath = folderDialog.sourcePath;
+      await runOperation(() => gallery.renameFolder(sourcePath, path), {
+        pending: t("operationRenameFolder"),
+        success: t("folderRenameSuccess"),
+        error: (error) => (error instanceof Error ? error.message : t("folderRenameError")),
+      });
     }
   };
 
@@ -342,12 +437,11 @@ function App() {
       return;
     }
 
-    try {
-      await gallery.deleteFolder(path);
-      pushToast(t("folderDeleteSuccess"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("folderDeleteError"), "error");
-    }
+    await runOperation(() => gallery.deleteFolder(path), {
+      pending: t("operationDeleteFolder"),
+      success: t("folderDeleteSuccess"),
+      error: (error) => (error instanceof Error ? error.message : t("folderDeleteError")),
+    }).catch(() => undefined);
   };
 
   const handleMergeFolder = (path = gallery.selectedSubfolder) => {
@@ -373,12 +467,12 @@ function App() {
   };
 
   const handleImportFiles = async (files: File[], targetSourceId = "") => {
-    const response = await gallery.importFiles(files, targetSourceId);
+    const response = await runOperation(() => gallery.importFiles(files, targetSourceId), {
+      pending: t("operationImportFiles"),
+      success: (result) => t("galleryImportSuccess", { count: result.imported_images.length + result.imported_libraries.length }),
+      error: (error) => (error instanceof Error ? error.message : t("errorImportLibrary")),
+    });
     await library.refreshLibraries();
-    const importedCount = response.imported_images.length + response.imported_libraries.length;
-    if (importedCount > 0) {
-      pushToast(t("galleryImportSuccess", { count: importedCount }), "success");
-    }
     if (response.skipped.length > 0) {
       pushToast(t("galleryImportSkipped", { count: response.skipped.length }), "info");
     }
@@ -392,21 +486,19 @@ function App() {
   };
 
   const handleRenameImage = async (relativePath: string, newFilename: string) => {
-    try {
-      await gallery.renameImage(relativePath, newFilename);
-      pushToast(t("modalRenameFile"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("imageRenameError"), "error");
-    }
+    await runOperation(() => gallery.renameImage(relativePath, newFilename), {
+      pending: t("operationRenameImage"),
+      success: t("modalRenameFile"),
+      error: (error) => (error instanceof Error ? error.message : t("imageRenameError")),
+    }).catch(() => undefined);
   };
 
   const handleDeleteSingleImage = async (relativePath: string) => {
-    try {
-      await gallery.deleteImages([relativePath]);
-      pushToast(t("imageDelete"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("imageDeleteError"), "error");
-    }
+    await runOperation(() => gallery.deleteImages([relativePath]), {
+      pending: t("operationDeleteImage"),
+      success: t("imageDelete"),
+      error: (error) => (error instanceof Error ? error.message : t("imageDeleteError")),
+    }).catch(() => undefined);
   };
 
   const handleOpenImageWorkflow = async (image: { relative_path: string; original_url?: string; url?: string }) => {
@@ -415,7 +507,7 @@ function App() {
         title: t("modalOpenWorkflow"),
         message: t("workflowSendConfirm", { name: image.relative_path }),
         tone: "info",
-        confirmLabel: t("commonCreate"),
+        confirmLabel: t("commonSend"),
         cancelLabel: t("libraryCancel"),
       });
       if (!approved) {
@@ -423,7 +515,7 @@ function App() {
       }
     }
 
-    try {
+    await runOperation(async () => {
       const metadata = await galleryApi.getImageMetadata(image.relative_path);
       const payload = {
         id: `wf-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
@@ -435,47 +527,23 @@ function App() {
       };
 
       if (!payload.workflow && !payload.prompt) {
-        pushToast(t("modalNoMetadata"), "error");
-        return;
+        throw new Error(t("modalNoMetadata"));
       }
 
-      const comfyWindow = getOrOpenComfyWindow();
-      const message = {
-        type: WORKFLOW_MESSAGE_TYPE,
-        payload,
-      };
-      const dispatchPayload = () => {
-        if (comfyWindow && !comfyWindow.closed) {
-          comfyWindow.postMessage(message, window.location.origin);
-        }
+      clearPendingWorkflowPayload();
+      const sentToExistingPage = await trySendWorkflowToExistingComfyPage(payload);
 
-        if ("BroadcastChannel" in window) {
-          const channel = new BroadcastChannel(WORKFLOW_CHANNEL_NAME);
-          channel.postMessage(payload);
-          channel.close();
-        }
-      };
-
-      dispatchPayload();
-      [180, 520, 1200, 2200].forEach((delay) => {
-        window.setTimeout(dispatchPayload, delay);
-      });
-
-      try {
-        const serializedPayload = JSON.stringify(payload);
-        if (serializedPayload.length <= MAX_STORAGE_WORKFLOW_BYTES) {
-          window.localStorage.setItem(PENDING_WORKFLOW_KEY, serializedPayload);
-        } else {
-          window.localStorage.removeItem(PENDING_WORKFLOW_KEY);
-        }
-      } catch {
-        window.localStorage.removeItem(PENDING_WORKFLOW_KEY);
+      if (!sentToExistingPage) {
+        storeUndeliveredWorkflowPayload(payload);
+        throw new Error(t("workflowNoComfyPage"));
       }
+      clearPendingWorkflowPayload();
 
-      pushToast(t("workflowSendSuccess"), "success");
-    } catch (error) {
-      pushToast(error instanceof Error ? error.message : t("modalNoMetadata"), "error");
-    }
+    }, {
+      pending: t("operationSendWorkflow"),
+      success: t("workflowSendSuccess"),
+      error: (error) => (error instanceof Error ? error.message : t("modalNoMetadata")),
+    }).catch(() => undefined);
   };
 
   const selectedGalleryImages = useMemo(() => {
@@ -624,13 +692,20 @@ function App() {
               onImportFiles={handleImportFiles}
               onApplyPendingLiveRefresh={gallery.refresh}
               onRestoreTrashItem={async (id) => {
-                await gallery.restoreTrashItem(id);
-                pushToast(t("trashRestore"), "success");
+                await runOperation(() => gallery.restoreTrashItem(id), {
+                  pending: t("operationRestoreTrash"),
+                  success: t("trashRestore"),
+                });
               }}
               onRestoreTrashItems={async (ids) => {
-                for (const id of ids) {
-                  await gallery.restoreTrashItem(id);
-                }
+                await runOperation(async () => {
+                  for (const id of ids) {
+                    await gallery.restoreTrashItem(id);
+                  }
+                }, {
+                  pending: t("operationRestoreTrash"),
+                  success: t("trashRestoreSelectedSuccess", { count: ids.length }),
+                });
               }}
               onPurgeTrashItem={async (id) => {
                 const approved = await confirm({
@@ -641,13 +716,20 @@ function App() {
                   cancelLabel: t("libraryCancel"),
                 });
                 if (!approved) return;
-                await gallery.purgeTrashItem(id);
-                pushToast(t("trashDeleteForever"), "success");
+                await runOperation(() => gallery.purgeTrashItem(id), {
+                  pending: t("operationPurgeTrash"),
+                  success: t("trashDeleteForever"),
+                });
               }}
               onPurgeTrashItems={async (ids) => {
-                for (const id of ids) {
-                  await gallery.purgeTrashItem(id);
-                }
+                await runOperation(async () => {
+                  for (const id of ids) {
+                    await gallery.purgeTrashItem(id);
+                  }
+                }, {
+                  pending: t("operationPurgeTrash"),
+                  success: t("trashDeleteSelectedSuccess", { count: ids.length }),
+                });
               }}
             />
           ) : activeTab === "library" ? (
@@ -693,30 +775,45 @@ function App() {
               onRefresh={handleRefresh}
               onExportLibrary={handleExportLibrary}
               onImportLibrary={async (file, mode, targetName, newName) => {
-                const result = await library.importLibrary(file, mode, targetName, newName);
-                if (!result.ok && result.message) {
-                  pushToast(result.message, "error");
-                } else {
-                  pushToast(t("libraryImportSuccess", { count: library.entryTotal, name: targetName || newName || file.name }), "success");
-                }
+                const result = await runOperation(async () => {
+                  const value = await library.importLibrary(file, mode, targetName, newName);
+                  if (!value.ok && value.message) {
+                    throw new Error(value.message);
+                  }
+                  return value;
+                }, {
+                  pending: t("operationImportLibrary"),
+                  success: t("libraryImportSuccess", { count: library.entryTotal, name: targetName || newName || file.name }),
+                  error: (error) => (error instanceof Error ? error.message : t("errorImportLibrary")),
+                }).catch(() => ({ ok: false, message: "" }));
                 return result.ok;
               }}
               onSaveEntry={async (index, entry) => {
-                const result = await library.saveEntry(index, entry);
-                if (!result.ok && result.message) {
-                  pushToast(result.message, "error");
-                } else {
-                  pushToast(t("librarySaveSuccess", { count: library.entryTotal }), "success");
-                }
+                const result = await runOperation(async () => {
+                  const value = await library.saveEntry(index, entry);
+                  if (!value.ok && value.message) {
+                    throw new Error(value.message);
+                  }
+                  return value;
+                }, {
+                  pending: t("operationSaveLibrary"),
+                  success: t("librarySaveSuccess", { count: library.entryTotal }),
+                  error: (error) => (error instanceof Error ? error.message : t("errorSaveLibrary")),
+                }).catch(() => ({ ok: false, message: "" }));
                 return result.ok;
               }}
               onDeleteEntry={async (index) => {
-                const result = await library.removeEntry(index);
-                if (!result.ok && result.message) {
-                  pushToast(result.message, "error");
-                } else {
-                  pushToast(t("commonDelete"), "success");
-                }
+                const result = await runOperation(async () => {
+                  const value = await library.removeEntry(index);
+                  if (!value.ok && value.message) {
+                    throw new Error(value.message);
+                  }
+                  return value;
+                }, {
+                  pending: t("operationDeleteLibrary"),
+                  success: t("commonDelete"),
+                  error: (error) => (error instanceof Error ? error.message : t("errorDeleteLibrary")),
+                }).catch(() => ({ ok: false, message: "" }));
                 return result.ok;
               }}
             />
@@ -751,14 +848,11 @@ function App() {
               onUpdateBoardPins={gallery.updateBoardPins}
               onMoveImages={gallery.moveImages}
               onBatchRenameImages={async (relativePaths, template, startNumber, padding, currentPage) => {
-                try {
-                  const result = await gallery.batchRenameImages(relativePaths, template, startNumber, padding, currentPage);
-                  pushToast(t("bulkRenameSuccess", { count: result.renamed.length }), "success");
-                  return result;
-                } catch (error) {
-                  pushToast(error instanceof Error ? error.message : t("bulkRenameError"), "error");
-                  throw error;
-                }
+                return runOperation(() => gallery.batchRenameImages(relativePaths, template, startNumber, padding, currentPage), {
+                  pending: t("operationRenameImages"),
+                  success: (result) => t("bulkRenameSuccess", { count: result.renamed.length }),
+                  error: (error) => (error instanceof Error ? error.message : t("bulkRenameError")),
+                });
               }}
               onDeleteImages={gallery.deleteImages}
             />

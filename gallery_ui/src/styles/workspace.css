@@ -1032,6 +1032,16 @@
   pointer-events: auto;
 }
 
+@media (min-width: 1280px) {
+  .ue-body-shell.has-inspector .ue-main-shell {
+    padding-right: calc(clamp(18px, 2.6vw, 36px) + clamp(360px, 22vw, 440px) + 18px);
+  }
+
+  .ue-body-shell.is-sidebar-collapsed.has-inspector .ue-main-shell {
+    padding-right: calc(clamp(18px, 2.6vw, 36px) + clamp(360px, 22vw, 440px) + 18px);
+  }
+}
+
 .ue-gallery-inspector-head {
   position: sticky;
   top: 0;

@@ -48,9 +48,10 @@ Before manually publishing to the Comfy registry, make sure the version in `pypr
 - The filter popover is compact: fixed header, scrollable body, fixed footer, current-filter chips, compact sorting controls, compact color palette, date range, and Pin state.
 - Color filtering is backed by the backend index. A color family must meet the 25% threshold to match.
 - Live gallery refresh is a two-step flow: `galleryApi.getImageFreshness` checks the current view first, then `listImages(..., forceRefresh=true)` refreshes only when the fingerprint changes. Page 1 newest view may auto-replace; other views should show the pending-refresh control.
-- Opening a workflow in ComfyUI should first try the existing ComfyUI page through `BroadcastChannel`, `postMessage`, and `localStorage` before opening a new page.
+- Opening a workflow in ComfyUI must not auto-create new ComfyUI windows. The gallery probes existing ComfyUI pages over `BroadcastChannel`, targets one acknowledged `instanceId`, and only stores a pending payload plus shows a refresh/retry message when no refreshed receiver is available.
 - Right-click and detail actions include copying the positive prompt and viewing Metadata.
 - Shared interaction helpers live in `gallery_ui/src/utils/interaction.ts`. Use them for floating menu placement, dismiss-on-Escape/click/scroll behavior, and editable-target keyboard guards instead of adding component-local variants.
+- Global operation feedback lives in `gallery_ui/src/components/shared/OperationStatusCenter.tsx`. Keep `useToast().pushToast(...)` as the compatibility API for lightweight messages, but do not reintroduce a separate top-right toast viewport; long or failure-prone async actions should use `useOperationStatus().runOperation(...)` so pending, success, and error states appear in the right-bottom status center.
 
 ## Backend Index Notes
 
