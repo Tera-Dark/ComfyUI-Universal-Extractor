@@ -43,7 +43,7 @@ export const parseFolderRef = (folderRef: string) => {
 
 export const makeSourceRootRef = (sourceId: string) => `${sourceId || DEFAULT_OUTPUT_SOURCE_ID}${FOLDER_REF_SEPARATOR}`;
 
-const makeFolderRef = (sourceId: string, relativePath: string) => {
+export const makeFolderRef = (sourceId: string, relativePath: string) => {
   const normalizedPath = relativePath.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
   if (!normalizedPath) {
     return makeSourceRootRef(sourceId);
@@ -51,11 +51,35 @@ const makeFolderRef = (sourceId: string, relativePath: string) => {
   return `${sourceId || DEFAULT_OUTPUT_SOURCE_ID}${FOLDER_REF_SEPARATOR}${normalizedPath}`;
 };
 
+export const getFolderBaseName = (folderRef: string) => {
+  const { relativePath } = parseFolderRef(folderRef);
+  const segments = splitFolderPath(relativePath);
+  return segments.at(-1) ?? "";
+};
+
+export const makeChildFolderRef = (parentFolderRef: string, childName: string) => {
+  const { sourceId, relativePath } = parseFolderRef(parentFolderRef);
+  const normalizedChild = childName.replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+  return makeFolderRef(sourceId, relativePath ? `${relativePath}/${normalizedChild}` : normalizedChild);
+};
+
 export const getFolderSourceId = (folderRef: string) => parseFolderRef(folderRef).sourceId;
 
 export const isSourceRootRef = (folderRef: string) => {
   const { relativePath } = parseFolderRef(folderRef);
   return !relativePath;
+};
+
+export const isSameFolderSource = (left: string, right: string) =>
+  parseFolderRef(left).sourceId === parseFolderRef(right).sourceId;
+
+export const isFolderDescendant = (folderRef: string, possibleAncestorRef: string) => {
+  const folder = parseFolderRef(folderRef);
+  const ancestor = parseFolderRef(possibleAncestorRef);
+  if (folder.sourceId !== ancestor.sourceId || !ancestor.relativePath) {
+    return false;
+  }
+  return folder.relativePath.startsWith(`${ancestor.relativePath}/`);
 };
 
 export const getFolderPinAliases = (folderRef: string) => {

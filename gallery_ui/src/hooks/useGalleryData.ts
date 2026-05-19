@@ -1,4 +1,4 @@
-import { startTransition, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "../i18n/I18nProvider";
 import { galleryApi } from "../services/galleryApi";
@@ -10,6 +10,7 @@ const DEFAULT_OUTPUT_SOURCE_ROOT = "default_output::";
 const FOLDER_REF_SEPARATOR = "::";
 const LIVE_GALLERY_REFRESH_INTERVAL_MS = 6_000;
 const LIVE_GALLERY_REFRESH_FOCUS_DEBOUNCE_MS = 4_000;
+const INITIAL_THUMBNAIL_PREWARM_LIMIT = 24;
 
 interface UseGalleryDataOptions {
   isActive?: boolean;
@@ -63,9 +64,66 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const consumedImagesRefreshKeyRef = useRef(0);
   const liveRefreshRunningRef = useRef(false);
   const lastLiveRefreshAtRef = useRef(0);
-  const liveRefreshFingerprintRef = useRef("");
+  const liveRefreshFingerprintsRef = useRef<Map<string, string>>(new Map());
+  const thumbnailPrewarmTimerRef = useRef<number | null>(null);
+  const thumbnailPrewarmIdleRef = useRef<number | null>(null);
   const deferredSearchTerm = useDeferredValue(searchTerm);
   const isTrashView = selectedSubfolder === TRASH_SUBFOLDER_KEY;
+  const liveRefreshViewKey = useMemo(
+    () =>
+      JSON.stringify({
+        subfolder: selectedSubfolder,
+        search: deferredSearchTerm.trim(),
+        category: selectedCategory,
+        board: selectedBoardId,
+        dateFrom,
+        dateTo,
+        favoritesOnly,
+        color: selectedColorFamily,
+        sortBy,
+        sortOrder,
+        page,
+      }),
+    [dateFrom, dateTo, deferredSearchTerm, favoritesOnly, page, selectedBoardId, selectedCategory, selectedColorFamily, selectedSubfolder, sortBy, sortOrder],
+  );
+
+  const clearScheduledThumbnailPrewarm = useCallback(() => {
+    const idleWindow = window as Window & typeof globalThis & {
+      cancelIdleCallback?: (handle: number) => void;
+    };
+    if (thumbnailPrewarmIdleRef.current !== null) {
+      idleWindow.cancelIdleCallback?.(thumbnailPrewarmIdleRef.current);
+      thumbnailPrewarmIdleRef.current = null;
+    }
+    if (thumbnailPrewarmTimerRef.current !== null) {
+      window.clearTimeout(thumbnailPrewarmTimerRef.current);
+      thumbnailPrewarmTimerRef.current = null;
+    }
+  }, []);
+
+  const scheduleThumbnailPrewarm = useCallback((nextImages: ImageRecord[]) => {
+    const relativePaths = nextImages.slice(0, INITIAL_THUMBNAIL_PREWARM_LIMIT).map((image) => image.relative_path);
+    if (!relativePaths.length) {
+      return;
+    }
+
+    clearScheduledThumbnailPrewarm();
+    const task = () => {
+      thumbnailPrewarmIdleRef.current = null;
+      thumbnailPrewarmTimerRef.current = null;
+      void galleryApi.prewarmThumbnails(relativePaths, INITIAL_THUMBNAIL_PREWARM_LIMIT).catch(() => undefined);
+    };
+    const idleWindow = window as Window & typeof globalThis & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout?: number }) => number;
+    };
+    if (typeof idleWindow.requestIdleCallback === "function") {
+      thumbnailPrewarmIdleRef.current = idleWindow.requestIdleCallback(task, { timeout: 1500 });
+      return;
+    }
+    thumbnailPrewarmTimerRef.current = window.setTimeout(task, 250);
+  }, [clearScheduledThumbnailPrewarm]);
+
+  useEffect(() => () => clearScheduledThumbnailPrewarm(), [clearScheduledThumbnailPrewarm]);
 
   useEffect(() => {
     window.localStorage.setItem("universal-extractor:grid-columns", String(gridColumns));
@@ -102,8 +160,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
 
   useEffect(() => {
     let isCancelled = false;
-    const shouldForceRefresh =
-      !hasLoadedImagesRef.current || (refreshKey > 0 && consumedImagesRefreshKeyRef.current !== refreshKey);
+    const shouldForceRefresh = refreshKey > 0 && consumedImagesRefreshKeyRef.current !== refreshKey;
     if (shouldForceRefresh) {
       consumedImagesRefreshKeyRef.current = refreshKey;
     }
@@ -160,9 +217,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
             setColorIndexStatus(contextResponse.color_index_status ?? imageResponse.color_index_status ?? null);
           }
         }
-        void galleryApi
-          .prewarmThumbnails((imageResponse.images ?? []).map((image) => image.relative_path), PAGE_SIZE)
-          .catch(() => undefined);
+        scheduleThumbnailPrewarm(imageResponse.images ?? []);
       } catch (fetchError) {
         if (!isCancelled) {
           setError(fetchError instanceof Error ? fetchError.message : t("galleryLoading"));
@@ -185,7 +240,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     return () => {
       isCancelled = true;
     };
-  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, t, isTrashView]);
+  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, t, isTrashView, scheduleThumbnailPrewarm]);
 
   useEffect(() => {
     if (!liveRefreshEnabled || !isActive || isTrashView) {
@@ -205,8 +260,9 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       liveRefreshRunningRef.current = true;
       lastLiveRefreshAtRef.current = now;
       try {
-        const freshness = await galleryApi.getImageFreshness(selectedSubfolder, liveRefreshFingerprintRef.current);
-        liveRefreshFingerprintRef.current = freshness.fingerprint;
+        const knownFingerprint = liveRefreshFingerprintsRef.current.get(liveRefreshViewKey) ?? "";
+        const freshness = await galleryApi.getImageFreshness(selectedSubfolder, knownFingerprint);
+        liveRefreshFingerprintsRef.current.set(liveRefreshViewKey, freshness.fingerprint);
         if (!freshness.changed) {
           return;
         }
@@ -238,9 +294,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
         setColorIndexStatus(imageResponse.color_index_status ?? null);
         setHasPendingLiveRefresh(false);
         setImages(nextImages);
-        void galleryApi
-          .prewarmThumbnails(nextImages.map((image) => image.relative_path), PAGE_SIZE)
-          .catch(() => undefined);
+        scheduleThumbnailPrewarm(nextImages);
 
         const contextResponse = await galleryApi.getContext(false);
         setContext(contextResponse);
@@ -284,12 +338,13 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     selectedColorFamily,
     sortBy,
     sortOrder,
+    liveRefreshViewKey,
+    scheduleThumbnailPrewarm,
   ]);
 
   useEffect(() => {
-    liveRefreshFingerprintRef.current = "";
     setHasPendingLiveRefresh(false);
-  }, [selectedSubfolder]);
+  }, [liveRefreshViewKey]);
 
   useEffect(() => {
     if (!colorIndexStatus || colorIndexStatus.complete || isTrashView) {

@@ -21,6 +21,7 @@ import { useI18n } from "../../i18n/I18nProvider";
 import { galleryApi } from "../../services/galleryApi";
 import { formatFileSize } from "../../utils/formatters";
 import type { GallerySource, GallerySourceDiagnostic, UiPreferences } from "../../types/universal-gallery";
+import "../../styles/settings.css";
 
 interface SettingsWorkspaceProps {
   sources: GallerySource[];
@@ -61,12 +62,6 @@ const preferenceItems = [
     icon: MousePointer2,
     titleKey: "settingsPrefDefaultSelection",
     descriptionKey: "settingsPrefDefaultSelectionHint",
-  },
-  {
-    key: "confirmWorkflowSend",
-    icon: ShieldCheck,
-    titleKey: "settingsPrefConfirmWorkflow",
-    descriptionKey: "settingsPrefConfirmWorkflowHint",
   },
   {
     key: "collapseSidebarOnLaunch",
@@ -177,6 +172,19 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
   };
 
   const handleSave = async () => {
+    const approved = await confirm({
+      title: t("settingsSourceSave"),
+      message: selectedSource
+        ? t("settingsSourceSaveConfirm", { name: selectedSource.name })
+        : t("settingsSourceCreateConfirm", { name: draft.name || draft.path }),
+      tone: "warning",
+      confirmLabel: t("settingsSourceSave"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
     setIsBusy(true);
     try {
       const result = await runOperation(() => galleryApi.saveGallerySource(draft), {

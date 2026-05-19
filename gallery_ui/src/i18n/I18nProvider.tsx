@@ -8,6 +8,7 @@ interface TranslateOptions {
   totalPages?: number;
   count?: number;
   name?: string;
+  target?: string;
   tab?: WorkspaceTab;
 }
 

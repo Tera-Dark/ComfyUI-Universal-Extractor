@@ -202,6 +202,67 @@ describe("useGalleryData live refresh", () => {
     expect(result.current.images[0]?.filename).toBe("image-initial.png");
   });
 
+  it("keeps separate freshness fingerprints for different view scopes", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 2));
+    vi.mocked(galleryApi.getImageFreshness)
+      .mockResolvedValueOnce({
+        fingerprint: "page-1",
+        changed: false,
+        image_count: 1,
+        latest_created_at: 100,
+        latest_relative_path: "image-initial.png",
+        checked_at: 1,
+        subfolder: "",
+      })
+      .mockResolvedValueOnce({
+        fingerprint: "page-2",
+        changed: false,
+        image_count: 1,
+        latest_created_at: 100,
+        latest_relative_path: "image-initial.png",
+        checked_at: 2,
+        subfolder: "",
+      })
+      .mockResolvedValueOnce({
+        fingerprint: "page-1-refresh",
+        changed: true,
+        image_count: 2,
+        latest_created_at: 101,
+        latest_relative_path: "image-refresh.png",
+        checked_at: 3,
+        subfolder: "",
+      });
+
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: true }), { wrapper });
+    await flushAsyncEffects();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    await flushAsyncEffects();
+    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "");
+
+    await act(async () => {
+      result.current.setPage(2);
+    });
+    await flushAsyncEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    await flushAsyncEffects();
+    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "");
+
+    await act(async () => {
+      result.current.setPage(1);
+    });
+    await flushAsyncEffects();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(6_000);
+    });
+    await flushAsyncEffects();
+    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "page-1");
+  });
+
   it("does not schedule live refresh when the preference is disabled", async () => {
     vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
 

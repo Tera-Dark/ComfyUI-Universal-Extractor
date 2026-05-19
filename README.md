@@ -7,6 +7,8 @@
 - The Gallery backend keeps `py/gallery/service.py` as the route-facing facade, with source refs and source path hardening split into `py/gallery/refs.py` and `py/gallery/source_security.py`.
 - The frontend sidebar folder logic lives in `gallery_ui/src/components/shared/folderTree.ts`; gallery image prefetch/card loading lives in `gallery_ui/src/components/gallery/galleryImagePrefetch.ts` and `GalleryCardImage.tsx`.
 - Shared frontend menu placement, dismiss handling, and shortcut editable-target guards live in `gallery_ui/src/utils/interaction.ts`.
+- Gallery first screen is optimized to avoid external font requests, `/api/libraries`, and initial `force_refresh=true`; non-gallery workspaces and image detail are lazy-loaded chunks.
+- Runtime prompt-library counts are cached in `data/library_summary_cache.json`, which is ignored and excluded from user-visible JSON libraries.
 
 ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台插件，包含两块核心能力：
 
@@ -47,10 +49,10 @@ ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台�
 - **色系筛选**：支持红、橙、黄、绿、青、蓝、紫、粉、棕、黑、白、灰，以及暖色、冷色、低饱和分组；单个色系占比达到 25% 才会命中筛选。
 - **网格/列表模式**：图库、垃圾箱、词库子项目均支持两种常见排列方式；垃圾箱网格使用自适应瀑布流，长文件名和原始路径会限制在卡片内部。
 - **资源栏导航**：快捷入口固定在侧边栏顶部，输出图库和输入图库是独立 source 范围；目录区只显示当前入口对应的目录。目录支持搜索、树形/列表切换、置顶、默认按修改时间排序、名称排序备选和右键管理。
-- **选择交互**：默认关闭选择模式，单击图片打开详情；开启选择模式后支持左键拖选、Shift 连选、右键菜单和悬浮操作。
+- **选择交互**：默认关闭选择模式，单击图片打开详情；开启选择模式后支持左键拖选、滚动框选、Shift 连选、右键菜单和悬浮操作。
 - **双栏目录整理**：可在图库中开启左右双栏目录视图，两个目录独立搜索选择；支持单击选择、Ctrl/Meta 多选、Shift 连选、双击详情、批量拖拽移动、右键菜单、栏级全选/反选/清空/刷新/移动和键盘快捷键。双栏卡片会展示真实分辨率、文件大小和日期，并尽量保持与普通图库一致的 hover、选中和溢出控制体验。
 - **右侧 Inspector**：普通图库页选中图片后，桌面端以贴屏覆盖层显示，避免改变中间图库宽度和瀑布流列数；移动端以抽屉展示。
-- **图片详情页**：支持左右翻页、键盘导航、缩放、双击背景退出、发送工作流到 ComfyUI；工作流会定向发送到一个已刷新并可接收的现有 ComfyUI 页面，不会自动创建新的 ComfyUI 窗口。
+- **图片详情页**：支持左右翻页、键盘导航、缩放、双击背景退出、发送工作流到 ComfyUI；发送前会安全确认，发送过程和结果会进入右下角状态中心，工作流会定向发送到一个已刷新并可接收的现有 ComfyUI 页面，不会自动创建新的 ComfyUI 窗口。
 - **Metadata 与提示词**：支持查看图片 Metadata，并可从右键菜单或详情入口一键复制正面提示词。
 - **文件管理**：移动、重命名、批量重命名、创建目录、删除到垃圾箱、恢复和彻底删除。
 - **图版与分类**：支持 Pin 图、加入图版、分类管理和批量分类。
@@ -75,7 +77,7 @@ ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台�
 - 测试路径有效性和图片数量。
 - 配置导入目标。
 - 查看图源健康状态和诊断信息。
-- 配置界面与交互偏好，包括默认选择模式、发送工作流前确认、启动时收起侧边栏、图片预加载和目录默认视图。
+- 配置界面与交互偏好，包括默认选择模式、启动时收起侧边栏、图片预加载和目录默认视图。
 
 ## 安装
 

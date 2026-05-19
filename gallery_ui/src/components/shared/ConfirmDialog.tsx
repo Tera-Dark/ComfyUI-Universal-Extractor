@@ -38,7 +38,7 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
     <ConfirmContext.Provider value={value}>
       {children}
       {request ? (
-        <div className="ue-modal-backdrop" onClick={() => {
+        <div className="ue-modal-backdrop ue-confirm-backdrop" onClick={() => {
           request.resolve(false);
           setRequest(null);
         }}>

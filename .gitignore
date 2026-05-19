@@ -32,6 +32,7 @@ gallery_ui/node_modules/
 output/
 data/gallery_state.json
 data/gallery_index.sqlite3*
+data/library_summary_cache.json
 data/thumb_cache/
 data/trash/
 data/trash_state.json

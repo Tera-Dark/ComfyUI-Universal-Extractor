@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type MouseEvent } from "react";
+import { useCallback, useEffect, useMemo, useState, type DragEvent, type MouseEvent } from "react";
 import {
   ArrowRightLeft,
   BookOpen,
@@ -34,12 +34,16 @@ import {
   FOLDER_SORT_STORAGE_KEY,
   formatFolderLabel,
   getAncestorPaths,
+  getFolderBaseName,
   getFolderPinAliases,
   getFolderSourceId,
   getStoredFolderSort,
   getStoredPinnedFolders,
+  isFolderDescendant,
+  isSameFolderSource,
   isFolderPinned,
   isSourceRootRef,
+  makeChildFolderRef,
   makeSourceRootRef,
   PINNED_FOLDERS_STORAGE_KEY,
   TRASH_SUBFOLDER_KEY,
@@ -67,6 +71,7 @@ interface WorkspaceSidebarProps {
   onDeleteFolder: (path?: string) => void;
   onMergeFolder: (path?: string) => void;
   onRenameFolder: (path: string) => void;
+  onMoveFolder: (sourcePath: string, targetPath: string) => void;
   libraries: LibraryInfo[];
   activeLibraryName: string | null;
   onLibrarySelect: (name: string) => void;
@@ -86,8 +91,15 @@ const TreeBranch = ({
   onToggle,
   onSelect,
   onContextMenu,
+  onFolderDragStart,
+  onFolderDragEnd,
+  onFolderDragOver,
+  onFolderDrop,
+  canDragFolder,
   pinnedFolders,
   searchActive,
+  draggingPath,
+  dropTargetPath,
 }: {
   node: TreeNode;
   depth: number;
@@ -96,8 +108,15 @@ const TreeBranch = ({
   onToggle: (path: string) => void;
   onSelect: (value: string) => void;
   onContextMenu: (event: MouseEvent, path: string) => void;
+  onFolderDragStart: (event: DragEvent, path: string) => void;
+  onFolderDragEnd: () => void;
+  onFolderDragOver: (event: DragEvent, path: string) => void;
+  onFolderDrop: (event: DragEvent, path: string) => void;
+  canDragFolder: (path: string) => boolean;
   pinnedFolders: Set<string>;
   searchActive: boolean;
+  draggingPath: string;
+  dropTargetPath: string;
 }) => {
   const hasChildren = node.children.length > 0;
   const expanded = searchActive || expandedPaths.has(node.path);
@@ -122,9 +141,14 @@ const TreeBranch = ({
         )}
 
         <button
-          className={`ue-tree-label ${pinned ? "is-pinned" : ""}`}
+          className={`ue-tree-label ${pinned ? "is-pinned" : ""} ${draggingPath === node.path ? "is-dragging" : ""} ${dropTargetPath === node.path ? "is-drop-target" : ""}`}
           onClick={() => onSelect(node.path)}
           onContextMenu={(event) => onContextMenu(event, node.path)}
+          draggable={canDragFolder(node.path)}
+          onDragStart={(event) => onFolderDragStart(event, node.path)}
+          onDragEnd={onFolderDragEnd}
+          onDragOver={(event) => onFolderDragOver(event, node.path)}
+          onDrop={(event) => onFolderDrop(event, node.path)}
           title={node.path}
         >
           <Folder size={14} />
@@ -144,9 +168,16 @@ const TreeBranch = ({
               selectedSubfolder={selectedSubfolder}
               onToggle={onToggle}
               onSelect={onSelect}
-                onContextMenu={onContextMenu}
-                pinnedFolders={pinnedFolders}
-                searchActive={searchActive}
+              onContextMenu={onContextMenu}
+              onFolderDragStart={onFolderDragStart}
+              onFolderDragEnd={onFolderDragEnd}
+              onFolderDragOver={onFolderDragOver}
+              onFolderDrop={onFolderDrop}
+              canDragFolder={canDragFolder}
+              pinnedFolders={pinnedFolders}
+              searchActive={searchActive}
+              draggingPath={draggingPath}
+              dropTargetPath={dropTargetPath}
               />
           ))}
         </div>
@@ -175,6 +206,7 @@ export const WorkspaceSidebar = ({
   onDeleteFolder,
   onMergeFolder,
   onRenameFolder,
+  onMoveFolder,
   libraries,
   activeLibraryName,
   onLibrarySelect,
@@ -190,6 +222,8 @@ export const WorkspaceSidebar = ({
   const [folderContextMenu, setFolderContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const [folderActionsMenu, setFolderActionsMenu] = useState<{ x: number; y: number } | null>(null);
   const [folderSearchQuery, setFolderSearchQuery] = useState("");
+  const [draggingFolderPath, setDraggingFolderPath] = useState("");
+  const [folderDropTargetPath, setFolderDropTargetPath] = useState("");
   const [expandedSidebarGroups, setExpandedSidebarGroups] = useState<Set<SidebarGroupId>>(
     () => new Set(["folders", "boards", "categories"]),
   );
@@ -203,6 +237,10 @@ export const WorkspaceSidebar = ({
   const currentSourceWritable = Boolean(currentSource?.enabled && currentSource.exists && currentSource.writable);
   const selectedConcreteFolder = Boolean(selectedSubfolder && selectedSubfolder !== TRASH_SUBFOLDER_KEY && !isSourceRootRef(selectedSubfolder));
   const canMutateSelectedFolder = currentSourceWritable && selectedConcreteFolder && getFolderSourceId(selectedSubfolder) === currentSourceId;
+  const sourceById = useMemo(
+    () => new Map((galleryContext?.sources ?? []).map((source) => [source.id, source])),
+    [galleryContext?.sources],
+  );
   const scopedSubfolders = useMemo(
     () => filterSubfoldersBySource(galleryContext?.subfolders ?? [], currentSourceId),
     [currentSourceId, galleryContext?.subfolders],
@@ -349,6 +387,86 @@ export const WorkspaceSidebar = ({
 
   const toggleFolderSortMode = () => {
     setFolderSortMode((current) => (current === "modified" ? "name" : "modified"));
+  };
+
+  const canDragFolder = useCallback((path: string) => {
+    if (!path || path === TRASH_SUBFOLDER_KEY || isSourceRootRef(path)) {
+      return false;
+    }
+    const source = sourceById.get(getFolderSourceId(path));
+    return Boolean(source?.enabled && source.exists && source.writable);
+  }, [sourceById]);
+
+  const getFolderMoveTarget = useCallback((sourcePath: string, targetParentPath: string) => {
+    if (!canDragFolder(sourcePath) || !canDragFolder(targetParentPath)) {
+      return "";
+    }
+    if (sourcePath === targetParentPath || !isSameFolderSource(sourcePath, targetParentPath)) {
+      return "";
+    }
+    if (isFolderDescendant(targetParentPath, sourcePath)) {
+      return "";
+    }
+    const childName = getFolderBaseName(sourcePath);
+    if (!childName) {
+      return "";
+    }
+    const targetPath = makeChildFolderRef(targetParentPath, childName);
+    if (targetPath === sourcePath || scopedSubfolders.includes(targetPath)) {
+      return "";
+    }
+    return targetPath;
+  }, [canDragFolder, scopedSubfolders]);
+
+  const handleFolderDragStart = (event: DragEvent, path: string) => {
+    if (!canDragFolder(path)) {
+      event.preventDefault();
+      return;
+    }
+    event.stopPropagation();
+    event.dataTransfer.effectAllowed = "move";
+    event.dataTransfer.setData("application/x-universal-gallery-folder", path);
+    event.dataTransfer.setData("text/plain", path);
+    setDraggingFolderPath(path);
+    setFolderDropTargetPath("");
+  };
+
+  const handleFolderDragEnd = () => {
+    setDraggingFolderPath("");
+    setFolderDropTargetPath("");
+  };
+
+  const handleFolderDragOver = (event: DragEvent, targetParentPath: string) => {
+    const sourcePath = draggingFolderPath || event.dataTransfer.getData("application/x-universal-gallery-folder");
+    if (!getFolderMoveTarget(sourcePath, targetParentPath)) {
+      setFolderDropTargetPath((current) => (current === targetParentPath ? "" : current));
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    event.dataTransfer.dropEffect = "move";
+    setFolderDropTargetPath(targetParentPath);
+    setExpandedPaths((current) => {
+      if (current.has(targetParentPath)) {
+        return current;
+      }
+      const next = new Set(current);
+      next.add(targetParentPath);
+      return next;
+    });
+  };
+
+  const handleFolderDrop = (event: DragEvent, targetParentPath: string) => {
+    const sourcePath = draggingFolderPath || event.dataTransfer.getData("application/x-universal-gallery-folder");
+    const targetPath = getFolderMoveTarget(sourcePath, targetParentPath);
+    if (!targetPath) {
+      handleFolderDragEnd();
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    handleFolderDragEnd();
+    onMoveFolder(sourcePath, targetPath);
   };
 
   const toggleSidebarGroup = (group: SidebarGroupId) => {
@@ -523,8 +641,15 @@ export const WorkspaceSidebar = ({
                         onToggle={toggleExpanded}
                         onSelect={onSubfolderSelect}
                         onContextMenu={handleFolderContextMenu}
+                        onFolderDragStart={handleFolderDragStart}
+                        onFolderDragEnd={handleFolderDragEnd}
+                        onFolderDragOver={handleFolderDragOver}
+                        onFolderDrop={handleFolderDrop}
+                        canDragFolder={canDragFolder}
                         pinnedFolders={pinnedFolderPaths}
                         searchActive={folderSearchActive}
+                        draggingPath={draggingFolderPath}
+                        dropTargetPath={folderDropTargetPath}
                       />
                     ))}
                   </div>
@@ -542,9 +667,14 @@ export const WorkspaceSidebar = ({
                     {sortedSubfolders.map((subfolder) => (
                       <button
                         key={subfolder}
-                        className={`ue-tree-item ue-tree-item--compact ${selectedSubfolder === subfolder ? "active" : ""} ${isFolderPinned(subfolder, pinnedFolderPaths) ? "is-pinned" : ""}`}
+                        className={`ue-tree-item ue-tree-item--compact ${selectedSubfolder === subfolder ? "active" : ""} ${isFolderPinned(subfolder, pinnedFolderPaths) ? "is-pinned" : ""} ${draggingFolderPath === subfolder ? "is-dragging" : ""} ${folderDropTargetPath === subfolder ? "is-drop-target" : ""}`}
                         onClick={() => onSubfolderSelect(subfolder)}
                         onContextMenu={(event) => handleFolderContextMenu(event, subfolder)}
+                        draggable={canDragFolder(subfolder)}
+                        onDragStart={(event) => handleFolderDragStart(event, subfolder)}
+                        onDragEnd={handleFolderDragEnd}
+                        onDragOver={(event) => handleFolderDragOver(event, subfolder)}
+                        onDrop={(event) => handleFolderDrop(event, subfolder)}
                         title={subfolder}
                       >
                         <Folder size={14} />

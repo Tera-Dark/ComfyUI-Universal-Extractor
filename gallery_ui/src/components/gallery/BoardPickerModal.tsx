@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { Check, FolderPlus, Images, X } from "lucide-react";
 
 import { useI18n } from "../../i18n/I18nProvider";
+import { useConfirm } from "../shared/ConfirmDialog";
 import type { BoardMutationResult, BoardSummary } from "../../types/universal-gallery";
 
 interface BoardPickerModalProps {
@@ -22,6 +23,7 @@ export const BoardPickerModal = ({
   onAddToBoard,
 }: BoardPickerModalProps) => {
   const { t } = useI18n();
+  const { confirm } = useConfirm();
   const [selectedBoardId, setSelectedBoardId] = useState("");
   const [newBoardName, setNewBoardName] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -42,6 +44,16 @@ export const BoardPickerModal = ({
     try {
       let boardId = targetBoardId;
       if (newBoardName.trim()) {
+        const approved = await confirm({
+          title: t("boardCreateTitle"),
+          message: t("boardCreateConfirm", { name: newBoardName.trim() }),
+          tone: "warning",
+          confirmLabel: t("commonCreate"),
+          cancelLabel: t("libraryCancel"),
+        });
+        if (!approved) {
+          return;
+        }
         const result = await onCreateBoard(newBoardName.trim());
         boardId = result.board?.id ?? "";
       }

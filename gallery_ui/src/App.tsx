@@ -1,14 +1,10 @@
-import { startTransition, useMemo, useState } from "react";
+import { Suspense, lazy, startTransition, useMemo, useState } from "react";
 
 import { GalleryWorkspace } from "./components/gallery/GalleryWorkspace";
 import { GalleryInspectorPanel } from "./components/gallery/GalleryInspectorPanel";
-import { ImageDetailModal } from "./components/gallery/ImageDetailModal";
-import { LibraryWorkspace } from "./components/library/LibraryWorkspace";
 import { TopNavigation } from "./components/shared/TopNavigation";
 import { WorkspaceSidebar } from "./components/shared/WorkspaceSidebar";
 import { TextInputDialog } from "./components/shared/TextInputDialog";
-import { SettingsWorkspace } from "./components/settings/SettingsWorkspace";
-import { WorkbenchWorkspace } from "./components/workbench/WorkbenchWorkspace";
 import { useGalleryData } from "./hooks/useGalleryData";
 import { useI18n } from "./i18n/I18nProvider";
 import { useLibraryData } from "./hooks/useLibraryData";
@@ -16,8 +12,22 @@ import { galleryApi } from "./services/galleryApi";
 import { useConfirm } from "./components/shared/ConfirmDialog";
 import { useToast } from "./components/shared/ToastViewport";
 import { useOperationStatus } from "./components/shared/OperationStatusCenter";
+import { getFolderBaseName } from "./components/shared/folderTree";
 import type { ImageRecord, LibraryInfo, UiPreferences, WorkspaceTab } from "./types/universal-gallery";
 import "./App.css";
+
+const ImageDetailModal = lazy(() =>
+  import("./components/gallery/ImageDetailModal").then((module) => ({ default: module.ImageDetailModal })),
+);
+const LibraryWorkspace = lazy(() =>
+  import("./components/library/LibraryWorkspace").then((module) => ({ default: module.LibraryWorkspace })),
+);
+const SettingsWorkspace = lazy(() =>
+  import("./components/settings/SettingsWorkspace").then((module) => ({ default: module.SettingsWorkspace })),
+);
+const WorkbenchWorkspace = lazy(() =>
+  import("./components/workbench/WorkbenchWorkspace").then((module) => ({ default: module.WorkbenchWorkspace })),
+);
 
 const PENDING_WORKFLOW_KEY = "universal-extractor:pending-workflow";
 const WORKFLOW_CHANNEL_NAME = "universal-extractor-workflow";
@@ -199,7 +209,8 @@ function App() {
     isActive: activeTab === "gallery",
     liveRefreshEnabled: uiPreferences.enableLiveGalleryRefresh,
   });
-  const library = useLibraryData(true);
+  const libraryDataEnabled = activeTab === "library" || activeTab === "workbench";
+  const library = useLibraryData(libraryDataEnabled);
 
   const filteredLibraries = useMemo(
     () => library.libraries.filter((item) => matchesLibrarySearch(item, librarySearchTerm)),
@@ -311,6 +322,17 @@ function App() {
   };
 
   const handleSaveLibrary = async () => {
+    const approved = await confirm({
+      title: t("librarySaveConfirmTitle"),
+      message: t("librarySaveConfirm", { name: library.activeLibraryName ?? "" }),
+      tone: "warning",
+      confirmLabel: t("librarySave"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
     await runOperation(async () => {
       const result = await library.saveLibrary();
       if (!result.ok && result.message) {
@@ -381,6 +403,17 @@ function App() {
   };
 
   const handleSubmitBoardDialog = async (name: string) => {
+    const approved = await confirm({
+      title: t("boardCreateTitle"),
+      message: t("boardCreateConfirm", { name }),
+      tone: "warning",
+      confirmLabel: t("commonCreate"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
     const result = await runOperation(() => gallery.createBoard(name), {
       pending: t("operationCreateBoard"),
       success: t("boardCreateSuccess"),
@@ -407,6 +440,20 @@ function App() {
       });
       gallery.refresh();
     } else if (folderDialog.mode === "merge") {
+      const approved = await confirm({
+        title: t("folderMergeTitle"),
+        message: t("folderMergeConfirm", {
+          name: toFolderDialogValue(folderDialog.sourcePath ?? gallery.selectedSubfolder),
+          target: path,
+        }),
+        tone: "warning",
+        confirmLabel: t("sidebarMergeFolder"),
+        cancelLabel: t("libraryCancel"),
+      });
+      if (!approved) {
+        return;
+      }
+
       await runOperation(() => gallery.mergeFolder(folderDialog.sourcePath ?? gallery.selectedSubfolder, path), {
         pending: t("operationMergeFolder"),
         success: t("folderMergeSuccess"),
@@ -414,6 +461,20 @@ function App() {
       });
     } else if (folderDialog.sourcePath) {
       const sourcePath = folderDialog.sourcePath;
+      const approved = await confirm({
+        title: t("folderRenameTitle"),
+        message: t("folderRenameConfirm", {
+          name: toFolderDialogValue(sourcePath),
+          target: path,
+        }),
+        tone: "warning",
+        confirmLabel: t("folderRename"),
+        cancelLabel: t("libraryCancel"),
+      });
+      if (!approved) {
+        return;
+      }
+
       await runOperation(() => gallery.renameFolder(sourcePath, path), {
         pending: t("operationRenameFolder"),
         success: t("folderRenameSuccess"),
@@ -458,6 +519,32 @@ function App() {
     setFolderDialog({ mode: "rename", initialValue: toFolderDialogValue(path), sourcePath: path });
   };
 
+  const handleMoveFolder = async (sourcePath: string, targetPath: string) => {
+    if (!sourcePath || !targetPath) {
+      return;
+    }
+    const sourceName = getFolderBaseName(sourcePath) || toFolderDialogValue(sourcePath);
+    const approved = await confirm({
+      title: t("folderMoveTitle"),
+      message: t("folderMoveConfirm", {
+        name: sourceName,
+        target: toFolderDialogValue(targetPath),
+      }),
+      tone: "warning",
+      confirmLabel: t("folderMove"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
+    await runOperation(() => gallery.renameFolder(sourcePath, targetPath), {
+      pending: t("operationMoveFolder"),
+      success: t("folderMoveSuccess"),
+      error: (error) => (error instanceof Error ? error.message : t("folderMoveError")),
+    }).catch(() => undefined);
+  };
+
   const handleWorkbenchLibrarySelect = async (name: string) => {
     try {
       await library.openLibrary(name);
@@ -467,6 +554,24 @@ function App() {
   };
 
   const handleImportFiles = async (files: File[], targetSourceId = "") => {
+    if (!files.length) {
+      return;
+    }
+    const targetSource = gallery.context?.sources.find((source) => source.id === targetSourceId);
+    const approved = await confirm({
+      title: t("galleryImportConfirmTitle"),
+      message: t("galleryImportConfirm", {
+        count: files.length,
+        target: targetSource?.name || targetSourceId || t("galleryOutputFolder"),
+      }),
+      tone: "info",
+      confirmLabel: t("libraryImport"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
     const response = await runOperation(() => gallery.importFiles(files, targetSourceId), {
       pending: t("operationImportFiles"),
       success: (result) => t("galleryImportSuccess", { count: result.imported_images.length + result.imported_libraries.length }),
@@ -502,17 +607,15 @@ function App() {
   };
 
   const handleOpenImageWorkflow = async (image: { relative_path: string; original_url?: string; url?: string }) => {
-    if (uiPreferences.confirmWorkflowSend) {
-      const approved = await confirm({
-        title: t("modalOpenWorkflow"),
-        message: t("workflowSendConfirm", { name: image.relative_path }),
-        tone: "info",
-        confirmLabel: t("commonSend"),
-        cancelLabel: t("libraryCancel"),
-      });
-      if (!approved) {
-        return;
-      }
+    const approved = await confirm({
+      title: t("modalOpenWorkflow"),
+      message: t("workflowSendConfirm", { name: image.relative_path }),
+      tone: "warning",
+      confirmLabel: t("commonSend"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
     }
 
     await runOperation(async () => {
@@ -630,6 +733,7 @@ function App() {
           onDeleteFolder={handleDeleteFolder}
           onMergeFolder={handleMergeFolder}
           onRenameFolder={handleRenameFolder}
+          onMoveFolder={handleMoveFolder}
           libraries={filteredLibraries}
           activeLibraryName={library.activeLibraryName}
           onLibrarySelect={handleLibrarySelect}
@@ -692,6 +796,14 @@ function App() {
               onImportFiles={handleImportFiles}
               onApplyPendingLiveRefresh={gallery.refresh}
               onRestoreTrashItem={async (id) => {
+                const approved = await confirm({
+                  title: t("trashRestore"),
+                  message: t("trashRestoreConfirm"),
+                  tone: "warning",
+                  confirmLabel: t("trashRestore"),
+                  cancelLabel: t("libraryCancel"),
+                });
+                if (!approved) return;
                 await runOperation(() => gallery.restoreTrashItem(id), {
                   pending: t("operationRestoreTrash"),
                   success: t("trashRestore"),
@@ -733,103 +845,136 @@ function App() {
               }}
             />
           ) : activeTab === "library" ? (
-            <LibraryWorkspace
-              libraries={library.libraries}
-              activeLibraryName={library.activeLibraryName}
-              entries={library.entries}
-              searchTerm={librarySearchTerm}
-              onSearchClear={() => {
-                setLibrarySearchTerm("");
-                library.setSearchTerm("");
-                library.setEntryPage(1);
-              }}
-              editorValue={library.editorValue}
-              isEditing={library.isEditing}
-              isDirty={library.isDirty}
-              isLoading={library.isLoading}
-              isRefreshing={library.isRefreshing}
-              isSubmitting={library.isSubmitting}
-              error={library.error}
-              statusMessage={library.statusMessage}
-              validationIssues={library.validationIssues}
-              canUseRawEditor={canUseRawLibraryEditor}
-              page={library.entryPage}
-              totalPages={Math.max(1, Math.ceil(library.entryTotal / library.entryLimit))}
-              totalEntries={library.entryTotal}
-              onEditorValueChange={library.setEditorValue}
-              onStartEditing={library.startEditing}
-              onPageChange={library.setEntryPage}
-              onCancelEditing={async () => {
-                if (!(await confirmDiscardLibraryEdits())) {
-                  return;
-                }
-                library.cancelEditing();
-              }}
-              onFormatEditor={() => {
-                const result = library.formatEditor();
-                if (!result.ok && result.message) {
-                  pushToast(result.message, "error");
-                }
-              }}
-              onSaveLibrary={handleSaveLibrary}
-              onRefresh={handleRefresh}
-              onExportLibrary={handleExportLibrary}
-              onImportLibrary={async (file, mode, targetName, newName) => {
-                const result = await runOperation(async () => {
-                  const value = await library.importLibrary(file, mode, targetName, newName);
-                  if (!value.ok && value.message) {
-                    throw new Error(value.message);
+            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
+              <LibraryWorkspace
+                libraries={library.libraries}
+                activeLibraryName={library.activeLibraryName}
+                entries={library.entries}
+                searchTerm={librarySearchTerm}
+                onSearchClear={() => {
+                  setLibrarySearchTerm("");
+                  library.setSearchTerm("");
+                  library.setEntryPage(1);
+                }}
+                editorValue={library.editorValue}
+                isEditing={library.isEditing}
+                isDirty={library.isDirty}
+                isLoading={library.isLoading}
+                isRefreshing={library.isRefreshing}
+                isSubmitting={library.isSubmitting}
+                error={library.error}
+                statusMessage={library.statusMessage}
+                validationIssues={library.validationIssues}
+                canUseRawEditor={canUseRawLibraryEditor}
+                page={library.entryPage}
+                totalPages={Math.max(1, Math.ceil(library.entryTotal / library.entryLimit))}
+                totalEntries={library.entryTotal}
+                onEditorValueChange={library.setEditorValue}
+                onStartEditing={library.startEditing}
+                onPageChange={library.setEntryPage}
+                onCancelEditing={async () => {
+                  if (!(await confirmDiscardLibraryEdits())) {
+                    return;
                   }
-                  return value;
-                }, {
-                  pending: t("operationImportLibrary"),
-                  success: t("libraryImportSuccess", { count: library.entryTotal, name: targetName || newName || file.name }),
-                  error: (error) => (error instanceof Error ? error.message : t("errorImportLibrary")),
-                }).catch(() => ({ ok: false, message: "" }));
-                return result.ok;
-              }}
-              onSaveEntry={async (index, entry) => {
-                const result = await runOperation(async () => {
-                  const value = await library.saveEntry(index, entry);
-                  if (!value.ok && value.message) {
-                    throw new Error(value.message);
+                  library.cancelEditing();
+                }}
+                onFormatEditor={() => {
+                  const result = library.formatEditor();
+                  if (!result.ok && result.message) {
+                    pushToast(result.message, "error");
                   }
-                  return value;
-                }, {
-                  pending: t("operationSaveLibrary"),
-                  success: t("librarySaveSuccess", { count: library.entryTotal }),
-                  error: (error) => (error instanceof Error ? error.message : t("errorSaveLibrary")),
-                }).catch(() => ({ ok: false, message: "" }));
-                return result.ok;
-              }}
-              onDeleteEntry={async (index) => {
-                const result = await runOperation(async () => {
-                  const value = await library.removeEntry(index);
-                  if (!value.ok && value.message) {
-                    throw new Error(value.message);
+                }}
+                onSaveLibrary={handleSaveLibrary}
+                onRefresh={handleRefresh}
+                onExportLibrary={handleExportLibrary}
+                onImportLibrary={async (file, mode, targetName, newName) => {
+                  const approved = await confirm({
+                    title: t("libraryImportConfirmTitle"),
+                    message:
+                      mode === "create"
+                        ? t("libraryImportCreateConfirm", { name: newName || file.name })
+                        : mode === "replace"
+                          ? t("libraryImportReplaceConfirm", { name: targetName })
+                          : t("libraryImportMergeConfirm", { name: targetName }),
+                    tone: mode === "replace" ? "danger" : "warning",
+                    confirmLabel: t("libraryImportConfirm"),
+                    cancelLabel: t("libraryCancel"),
+                  });
+                  if (!approved) {
+                    return false;
                   }
-                  return value;
-                }, {
-                  pending: t("operationDeleteLibrary"),
-                  success: t("commonDelete"),
-                  error: (error) => (error instanceof Error ? error.message : t("errorDeleteLibrary")),
-                }).catch(() => ({ ok: false, message: "" }));
-                return result.ok;
-              }}
-            />
+
+                  const result = await runOperation(async () => {
+                    const value = await library.importLibrary(file, mode, targetName, newName);
+                    if (!value.ok && value.message) {
+                      throw new Error(value.message);
+                    }
+                    return value;
+                  }, {
+                    pending: t("operationImportLibrary"),
+                    success: t("libraryImportSuccess", { count: library.entryTotal, name: targetName || newName || file.name }),
+                    error: (error) => (error instanceof Error ? error.message : t("errorImportLibrary")),
+                  }).catch(() => ({ ok: false, message: "" }));
+                  return result.ok;
+                }}
+                onSaveEntry={async (index, entry) => {
+                  const approved = await confirm({
+                    title: t("librarySaveEntryConfirmTitle"),
+                    message: t("librarySaveEntryConfirm"),
+                    tone: "warning",
+                    confirmLabel: t("librarySave"),
+                    cancelLabel: t("libraryCancel"),
+                  });
+                  if (!approved) {
+                    return false;
+                  }
+
+                  const result = await runOperation(async () => {
+                    const value = await library.saveEntry(index, entry);
+                    if (!value.ok && value.message) {
+                      throw new Error(value.message);
+                    }
+                    return value;
+                  }, {
+                    pending: t("operationSaveLibrary"),
+                    success: t("librarySaveSuccess", { count: library.entryTotal }),
+                    error: (error) => (error instanceof Error ? error.message : t("errorSaveLibrary")),
+                  }).catch(() => ({ ok: false, message: "" }));
+                  return result.ok;
+                }}
+                onDeleteEntry={async (index) => {
+                  const result = await runOperation(async () => {
+                    const value = await library.removeEntry(index);
+                    if (!value.ok && value.message) {
+                      throw new Error(value.message);
+                    }
+                    return value;
+                  }, {
+                    pending: t("operationDeleteLibrary"),
+                    success: t("commonDelete"),
+                    error: (error) => (error instanceof Error ? error.message : t("errorDeleteLibrary")),
+                  }).catch(() => ({ ok: false, message: "" }));
+                  return result.ok;
+                }}
+              />
+            </Suspense>
           ) : activeTab === "workbench" ? (
-            <WorkbenchWorkspace
-              libraries={library.libraries}
-              activeLibraryName={library.activeLibraryName}
-              onLibrarySelect={handleWorkbenchLibrarySelect}
-            />
+            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
+              <WorkbenchWorkspace
+                libraries={library.libraries}
+                activeLibraryName={library.activeLibraryName}
+                onLibrarySelect={handleWorkbenchLibrarySelect}
+              />
+            </Suspense>
           ) : (
-            <SettingsWorkspace
-              sources={gallery.context?.sources ?? []}
-              preferences={uiPreferences}
-              onPreferencesChange={updateUiPreferences}
-              onSourcesChange={() => gallery.refresh()}
-            />
+            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
+              <SettingsWorkspace
+                sources={gallery.context?.sources ?? []}
+                preferences={uiPreferences}
+                onPreferencesChange={updateUiPreferences}
+                onSourcesChange={() => gallery.refresh()}
+              />
+            </Suspense>
           )}
         </main>
 
@@ -861,25 +1006,27 @@ function App() {
       </div>
 
       {gallery.selectedImage ? (
-        <ImageDetailModal
-          image={gallery.selectedImage}
-          onClose={() => gallery.setSelectedImage(null)}
-          onSaveState={handleUpdateImageState}
-          onRenameFile={handleRenameImage}
-          onDeleteFile={handleDeleteSingleImage}
-          onOpenWorkflow={handleOpenImageWorkflow}
-          navigation={gallery.detailNavigation}
-          onNavigate={(nextIndex) => {
-            const items = gallery.detailNavigation?.items ?? [];
-            const nextImage = items[nextIndex];
-            if (!nextImage) return;
-            gallery.setSelectedImage(nextImage);
-            gallery.setDetailNavigation({
-              items,
-              currentIndex: nextIndex,
-            });
-          }}
-        />
+        <Suspense fallback={null}>
+          <ImageDetailModal
+            image={gallery.selectedImage}
+            onClose={() => gallery.setSelectedImage(null)}
+            onSaveState={handleUpdateImageState}
+            onRenameFile={handleRenameImage}
+            onDeleteFile={handleDeleteSingleImage}
+            onOpenWorkflow={handleOpenImageWorkflow}
+            navigation={gallery.detailNavigation}
+            onNavigate={(nextIndex) => {
+              const items = gallery.detailNavigation?.items ?? [];
+              const nextImage = items[nextIndex];
+              if (!nextImage) return;
+              gallery.setSelectedImage(nextImage);
+              gallery.setDetailNavigation({
+                items,
+                currentIndex: nextIndex,
+              });
+            }}
+          />
+        </Suspense>
       ) : null}
 
       <TextInputDialog

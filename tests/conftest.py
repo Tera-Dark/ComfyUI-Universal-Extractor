@@ -58,8 +58,12 @@ def isolated_gallery_env(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "THUMB_CACHE_DIR", str(thumb_cache_dir))
     monkeypatch.setattr(service, "TRASH_DIR", str(trash_dir))
     monkeypatch.setattr(service, "GALLERY_INDEX_DB_FILE", str(data_dir / "gallery_index.sqlite3"))
+    monkeypatch.setattr(service, "LIBRARY_SUMMARY_CACHE_FILE", str(data_dir / "library_summary_cache.json"))
 
     service.LIBRARY_CACHE.clear()
+    service.LIBRARY_SUMMARY_CACHE.clear()
+    service.LIBRARY_SUMMARY_CACHE_LOADED = False
+    service.LIBRARY_SUMMARY_CACHE_DIRTY = False
     service.IMAGE_FRESHNESS_CACHE.clear()
     service.IMAGE_INDEX_CACHE.update(
         {

@@ -228,6 +228,10 @@ describe("DualFolderWorkspace", () => {
     fireEvent.dragStart(cards[0], { dataTransfer });
     fireEvent.drop(panes[1], { dataTransfer });
 
+    await screen.findByText("移动选中图片");
+    expect(onMoveImages).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("移动"));
+
     await waitFor(() => {
       expect(onMoveImages).toHaveBeenCalledWith(["left.png"], "right", "default_output");
     });
@@ -298,6 +302,10 @@ describe("DualFolderWorkspace", () => {
     fireEvent.dragStart(leftCards[0], { dataTransfer });
     fireEvent.drop(container.querySelectorAll(".ue-dual-pane")[1], { dataTransfer });
 
+    await screen.findByText("移动选中图片");
+    expect(onMoveImages).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("移动"));
+
     await waitFor(() => {
       expect(onMoveImages).toHaveBeenCalledWith(["a.png", "b.png"], "right", "default_output");
     });
@@ -320,6 +328,9 @@ describe("DualFolderWorkspace", () => {
 
     fireEvent.contextMenu(leftCards[1]);
     fireEvent.click(screen.getByText("置顶"));
+    await screen.findByText("将选中的 2 张图片设为 Pin 吗？");
+    expect(onUpdateImageState).not.toHaveBeenCalled();
+    fireEvent.click(screen.getAllByText("置顶").at(-1)!);
     await waitFor(() => {
       expect(onUpdateImageState).toHaveBeenCalledWith("a.png", { pinned: true });
       expect(onUpdateImageState).toHaveBeenCalledWith("b.png", { pinned: true });
@@ -403,6 +414,10 @@ describe("DualFolderWorkspace", () => {
     expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "a.png" }));
 
     fireEvent.keyDown(window, { key: "m", ctrlKey: true });
+    await screen.findByText("移动选中图片");
+    expect(onMoveImages).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByText("移动"));
+
     await waitFor(() => {
       expect(onMoveImages).toHaveBeenCalledWith(["a.png", "b.png"], "right", "default_output");
     });

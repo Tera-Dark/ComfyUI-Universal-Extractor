@@ -314,6 +314,11 @@ export const DualFolderWorkspace = ({
         loading: "Loading folder...",
         moving: "Moving images...",
         moved: "Moved",
+        moveConfirmTitle: "Move selected images",
+        moveConfirm: (count: number, target: string) => `Move ${count} image(s) to "${target}"?`,
+        pinConfirm: (count: number) => `Pin ${count} selected image(s)?`,
+        unpinConfirm: (count: number) => `Unpin ${count} selected image(s)?`,
+        addToBoardConfirm: (count: number, target: string) => `Add ${count} selected image(s) to "${target}"?`,
         sameFolder: "Already in this folder",
         noMatch: "No matching folders",
         loadError: "Failed to load folder images.",
@@ -359,6 +364,11 @@ export const DualFolderWorkspace = ({
         loading: "正在加载目录...",
         moving: "正在移动图片...",
         moved: "已移动",
+        moveConfirmTitle: "移动选中图片",
+        moveConfirm: (count: number, target: string) => `将 ${count} 张图片移动到“${target}”吗？`,
+        pinConfirm: (count: number) => `将选中的 ${count} 张图片设为 Pin 吗？`,
+        unpinConfirm: (count: number) => `取消选中 ${count} 张图片的 Pin 吗？`,
+        addToBoardConfirm: (count: number, target: string) => `将选中的 ${count} 张图片加入“${target}”吗？`,
         sameFolder: "已在这个目录",
         noMatch: "没有匹配目录",
         loadError: "目录图片加载失败。",
@@ -603,6 +613,17 @@ export const DualFolderWorkspace = ({
       setTimedMessage(text.readOnly);
       return;
     }
+    const approved = await confirm({
+      title: text.moveConfirmTitle,
+      message: text.moveConfirm(relativePaths.length, getFolderLabel(targetFolder, context)),
+      tone: "warning",
+      confirmLabel: locale === "en" ? "Move" : "移动",
+      cancelLabel: locale === "en" ? "Cancel" : "取消",
+    });
+    if (!approved) {
+      return;
+    }
+
     const { targetSourceId, targetSubfolder } = getTargetFolderPayload(targetFolder);
     try {
       await runOperation(() => onMoveImages(relativePaths, targetSubfolder, targetSourceId), {
@@ -618,7 +639,7 @@ export const DualFolderWorkspace = ({
     } catch {
       setTimedMessage(text.moveError);
     }
-  }, [clearPaneSelection, context, getPaneFolder, onMoveImages, reloadBothPanes, runOperation, setTimedMessage, t, text.moveError, text.moved, text.readOnly, text.sameFolder]);
+  }, [clearPaneSelection, confirm, context, getPaneFolder, locale, onMoveImages, reloadBothPanes, runOperation, setTimedMessage, t, text]);
 
   const moveActiveSelectionToOtherPane = useCallback(async (pane: PaneId) => {
     const selection = getPaneSelection(pane);
@@ -779,11 +800,42 @@ export const DualFolderWorkspace = ({
     if (!boardPickerPaths.length) {
       return;
     }
+    const board = boards.find((item) => item.id === boardId);
+    const approved = await confirm({
+      title: text.addToBoard,
+      message: text.addToBoardConfirm(boardPickerPaths.length, board?.name || boardId),
+      tone: "warning",
+      confirmLabel: locale === "en" ? "Add" : "加入",
+      cancelLabel: locale === "en" ? "Cancel" : "取消",
+    });
+    if (!approved) {
+      return;
+    }
+
     await runOperation(() => onUpdateBoardPins(boardId, boardPickerPaths, true), {
       pending: t("operationAddToBoard"),
       success: t("boardAddSuccess", { count: boardPickerPaths.length }),
     });
     setBoardPickerPaths([]);
+  };
+
+  const handleTogglePinned = async (paths: string[], pinned: boolean) => {
+    if (!paths.length) {
+      return;
+    }
+    const approved = await confirm({
+      title: pinned ? text.pin : text.unpin,
+      message: pinned ? text.pinConfirm(paths.length) : text.unpinConfirm(paths.length),
+      tone: "warning",
+      confirmLabel: pinned ? text.pin : text.unpin,
+      cancelLabel: locale === "en" ? "Cancel" : "取消",
+    });
+    if (!approved) {
+      return;
+    }
+    for (const path of paths) {
+      await onUpdateImageState(path, { pinned });
+    }
   };
 
   const renderPane = (pane: PaneId, folderRef: string, setFolder: (value: string) => void, state: FolderPaneState) => {
@@ -1021,9 +1073,7 @@ export const DualFolderWorkspace = ({
           <button
             className="ue-context-menu-item"
             onClick={() => menuAction(() => {
-              for (const path of selectedPaths) {
-                void onUpdateImageState(path, { pinned: !image.pinned });
-              }
+              void handleTogglePinned(selectedPaths, !image.pinned);
             })}
           >
             <Pin size={14} fill={image.pinned ? "currentColor" : "none"} />

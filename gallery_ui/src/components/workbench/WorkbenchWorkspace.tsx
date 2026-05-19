@@ -27,6 +27,7 @@ import { useOperationStatus } from "../shared/OperationStatusCenter";
 import { useI18n } from "../../i18n/I18nProvider";
 import { galleryApi } from "../../services/galleryApi";
 import type { LibraryInfo } from "../../types/universal-gallery";
+import "../../styles/workbench.css";
 
 interface WorkbenchWorkspaceProps {
   libraries: LibraryInfo[];

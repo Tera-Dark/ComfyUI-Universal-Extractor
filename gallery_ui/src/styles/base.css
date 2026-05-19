@@ -80,7 +80,7 @@ body {
     radial-gradient(circle at top left, rgba(244, 244, 245, 0.96), transparent 28%),
     linear-gradient(180deg, #ffffff 0%, #fcfcfc 100%);
   color: var(--ue-ink);
-  font-family: "Inter", -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
   font-size: 13px;
   line-height: 1.6;
@@ -440,7 +440,7 @@ textarea::placeholder {
   position: fixed;
   right: 18px;
   bottom: 18px;
-  z-index: 82;
+  z-index: 120;
   display: flex;
   width: min(390px, calc(100vw - 24px));
   max-height: min(520px, calc(100vh - 36px));
@@ -448,6 +448,10 @@ textarea::placeholder {
   gap: 10px;
   overflow: hidden auto;
   pointer-events: none;
+}
+
+.ue-confirm-backdrop {
+  z-index: 130;
 }
 
 .ue-operation-card {
@@ -563,6 +567,7 @@ textarea::placeholder {
 
 .ue-confirm-modal {
   position: relative;
+  z-index: 130;
   display: flex;
   width: min(460px, 100%);
   flex-direction: column;

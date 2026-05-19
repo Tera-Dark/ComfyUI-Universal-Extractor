@@ -111,6 +111,11 @@ IMAGE_FRESHNESS_CACHE: dict[str, dict[str, Any]] = {}
 IMAGE_FRESHNESS_LOCK = Lock()
 LIBRARY_CACHE: dict[str, dict[str, Any]] = {}
 LIBRARY_CACHE_LOCK = Lock()
+LIBRARY_SUMMARY_CACHE_FILE = os.path.join(DATA_DIR, "library_summary_cache.json")
+LIBRARY_SUMMARY_CACHE: dict[str, dict[str, Any]] = {}
+LIBRARY_SUMMARY_CACHE_LOADED = False
+LIBRARY_SUMMARY_CACHE_DIRTY = False
+LIBRARY_SUMMARY_CACHE_LOCK = Lock()
 THUMB_GENERATION_SEMAPHORE = BoundedSemaphore(2)
 THUMB_LOCKS: dict[str, Lock] = {}
 THUMB_LOCKS_GUARD = Lock()
@@ -3005,9 +3010,7 @@ def list_libraries() -> list[dict]:
         if filename in RUNTIME_STATE_FILENAMES or not filename.endswith(".json"):
             continue
         full_path = os.path.join(DATA_DIR, filename)
-        data = load_json(full_path, [])
-        count = len(data) if isinstance(data, list) else 0
-        libraries.append({"filename": filename, "count": count, "size": os.path.getsize(full_path)})
+        libraries.append(_get_library_summary(filename, full_path))
     return libraries
 
 
@@ -3019,8 +3022,74 @@ def invalidate_library_cache(name: str | None = None):
     with LIBRARY_CACHE_LOCK:
         if name is None:
             LIBRARY_CACHE.clear()
+            invalidate_library_summary_cache(None)
             return
         LIBRARY_CACHE.pop(os.path.basename(name), None)
+        invalidate_library_summary_cache(name)
+
+
+def _load_library_summary_cache_locked():
+    global LIBRARY_SUMMARY_CACHE_LOADED, LIBRARY_SUMMARY_CACHE
+    if LIBRARY_SUMMARY_CACHE_LOADED:
+        return
+    cached = load_json(LIBRARY_SUMMARY_CACHE_FILE, {})
+    LIBRARY_SUMMARY_CACHE = cached if isinstance(cached, dict) else {}
+    LIBRARY_SUMMARY_CACHE_LOADED = True
+
+
+def _save_library_summary_cache_locked():
+    global LIBRARY_SUMMARY_CACHE_DIRTY
+    if not LIBRARY_SUMMARY_CACHE_DIRTY:
+        return
+    ensure_data_dir()
+    save_json(LIBRARY_SUMMARY_CACHE_FILE, LIBRARY_SUMMARY_CACHE)
+    LIBRARY_SUMMARY_CACHE_DIRTY = False
+
+
+def _get_library_summary(filename: str, full_path: str) -> dict[str, Any]:
+    global LIBRARY_SUMMARY_CACHE_DIRTY
+    stat = os.stat(full_path)
+    size = int(stat.st_size)
+    mtime_ns = int(getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000)))
+    with LIBRARY_SUMMARY_CACHE_LOCK:
+        _load_library_summary_cache_locked()
+        cached = LIBRARY_SUMMARY_CACHE.get(filename)
+        if (
+            isinstance(cached, dict)
+            and cached.get("size") == size
+            and cached.get("mtime_ns") == mtime_ns
+            and isinstance(cached.get("count"), int)
+        ):
+            return {"filename": filename, "count": int(cached["count"]), "size": size}
+
+    data = load_json(full_path, [])
+    count = len(data) if isinstance(data, list) else 0
+    with LIBRARY_SUMMARY_CACHE_LOCK:
+        _load_library_summary_cache_locked()
+        LIBRARY_SUMMARY_CACHE[filename] = {"size": size, "mtime_ns": mtime_ns, "count": count}
+        valid_names = {
+            name
+            for name in os.listdir(DATA_DIR)
+            if name.endswith(".json") and name not in RUNTIME_STATE_FILENAMES
+        }
+        for stale_name in list(LIBRARY_SUMMARY_CACHE):
+            if stale_name not in valid_names:
+                LIBRARY_SUMMARY_CACHE.pop(stale_name, None)
+        LIBRARY_SUMMARY_CACHE_DIRTY = True
+        _save_library_summary_cache_locked()
+    return {"filename": filename, "count": count, "size": size}
+
+
+def invalidate_library_summary_cache(name: str | None = None):
+    global LIBRARY_SUMMARY_CACHE_DIRTY
+    with LIBRARY_SUMMARY_CACHE_LOCK:
+        _load_library_summary_cache_locked()
+        if name is None:
+            LIBRARY_SUMMARY_CACHE.clear()
+        else:
+            LIBRARY_SUMMARY_CACHE.pop(os.path.basename(name), None)
+        LIBRARY_SUMMARY_CACHE_DIRTY = True
+        _save_library_summary_cache_locked()
 
 
 def load_library_data(name: str) -> list[dict[str, Any]]:

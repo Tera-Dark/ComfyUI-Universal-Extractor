@@ -5,6 +5,7 @@ This document summarizes the runtime architecture that matters for future backen
 ## Request Flow
 
 - ComfyUI serves the committed frontend bundle from `gallery_ui/dist/` at `/gallery/`.
+- `/gallery/` serves `index.html` with `Cache-Control: no-store`; hashed files under `/gallery/assets/*` are served with long-lived immutable cache headers so unchanged chunks can be reused by the browser.
 - Gallery API routes live under `/universal_gallery/api/` in `py/gallery/routes.py`.
 - Gallery behavior is exposed through the compatibility facade in `py/gallery/service.py`. Low-risk helper domains now live beside it: `refs.py` owns source/image/folder ref normalization, `source_security.py` owns source path hardening and scope checks, and `state_store.py` owns persisted image state and boards.
 - File APIs must stay scoped to registered gallery sources and supported image extensions.
@@ -16,6 +17,7 @@ Runtime gallery data is stored under `data/`. User state remains JSON-backed, wh
 - `gallery_state.json`: editable image state, categories, pins, notes, and boards.
 - `gallery_sources.json`: configured gallery sources.
 - `gallery_index.sqlite3`: derived image index.
+- `library_summary_cache.json`: derived prompt-library counts keyed by filename, file size, and `mtime_ns`; it is runtime state, not a user library.
 - `thumb_cache/`: generated thumbnails.
 - `trash/`: plugin-managed trash storage.
 
@@ -32,6 +34,8 @@ The index has composite indexes for common list views: source plus folder plus c
 
 Normal image listing uses `list_images_page()`, which queries SQLite directly with pagination. It does not need to load the whole image index into Python.
 
+The first gallery load should use the existing SQLite index without `force_refresh=true`. Forced image refresh is reserved for user-triggered refreshes and freshness-detected changes, where the backend can prefer incremental sync over a full rebuild.
+
 Automatic gallery sync is a two-step flow:
 
 1. The frontend calls `/universal_gallery/api/images/freshness` for the current folder/source view while the page is visible.
@@ -40,6 +44,8 @@ Automatic gallery sync is a two-step flow:
 Incremental sync scans only the affected scope, upserts new or modified files, deletes missing files, and queues only changed paths for color backfill. Full rebuild remains the cold-start and repair fallback.
 
 `get_gallery_context()` avoids full image reads. It derives source counts, pinned count, subfolders, and move targets from SQLite aggregates plus lightweight directory discovery. `list_boards()` uses the small editable state set and DB existence checks rather than scanning every indexed image.
+
+`list_libraries()` does not parse every prompt-library JSON file on each request. It uses `library_summary_cache.json` for list counts when filename, file size, and `mtime_ns` match, then invalidates the affected summary when a library is imported, saved, deleted, or otherwise invalidated through the service facade.
 
 `GalleryContext.subfolders` keeps the legacy string list for API compatibility. `GalleryContext.subfolder_details` adds source id, relative path, and directory modified time for frontend source-scoped folder trees and default modified-time sorting.
 
@@ -62,9 +68,11 @@ The public response shapes for `ImageListResponse` and `GalleryContext` are pres
 
 Large frontend surfaces are split along stable helper boundaries. `WorkspaceSidebar` imports folder-scope and sorting helpers from `components/shared/folderTree.ts`, while `GalleryWorkspace` delegates image prefetch state and card image loading to `components/gallery/galleryImagePrefetch.ts` and `GalleryCardImage.tsx`. These modules are implementation details; UI behavior and public API calls remain unchanged.
 
+First-screen loading is intentionally gallery-first. `GalleryWorkspace` stays statically imported, while `LibraryWorkspace`, `WorkbenchWorkspace`, `SettingsWorkspace`, and `ImageDetailModal` are declared with `React.lazy` and loaded on demand through `Suspense`. `useLibraryData` should remain disabled until the `library` or `workbench` tabs are active, so the gallery first screen does not request `/universal_gallery/api/libraries`.
+
 Shared interaction primitives live in `gallery_ui/src/utils/interaction.ts`. Context menus in gallery, dual-folder, sidebar, and library surfaces should use the shared placement and dismiss helpers so menus stay near their trigger, flip inside the viewport, and close consistently on Escape, outside click, resize, or scroll. Keyboard shortcuts should use the shared editable-target guard so input fields and folder searches keep normal text-editing behavior.
 
-The main gallery grid is rendered through the `useVirtualMasonry` helper, backed by `@tanstack/react-virtual`. The right Inspector is an overlay layer, not a layout column; opening or closing it should not change the main gallery scroll container width, column count, page, selection, or scroll position.
+The main gallery grid is rendered through the `useVirtualMasonry` helper, backed by `@tanstack/react-virtual`. The right Inspector is an overlay layer, not a layout column; opening or closing it should not change the main gallery scroll container width, column count, page, selection, or scroll position. Box selection in the virtual grid must not depend only on mounted DOM cards: it should freeze the drag-start layout, use estimated rectangles for offscreen masonry items, compensate scroll delta while dragging, and auto-scroll near the main scroll container edges.
 
 Dual-folder organization lives in `DualFolderWorkspace`. It is a frontend-only file-management surface over the existing image APIs: folder panes call `galleryApi.listImages`, internal drags use a private `application/x-universal-gallery-image` payload, moves use the existing `/api/images/move` wrapper, and delete/state/board actions reuse the same callbacks as normal gallery selection. It must keep external file drops separate from internal image drags so imports continue to receive the browser-provided `File` objects unchanged. Dual-folder cards should mirror normal-gallery interaction polish: clipped text, real-resolution chips when dimensions are available, hover lift, image scale, and stable selected/focused/drop states.
 
@@ -78,7 +86,7 @@ Trash grid mode is presentation-only and remains backed by `/api/trash`. It uses
 
 ## ComfyUI Workflow Handoff
 
-The image detail action for opening a workflow in ComfyUI is a same-origin handoff, not a window-creation path. `gallery_ui/src/App.tsx` sends a `universal-extractor:workflow-probe` over the `universal-extractor-workflow` `BroadcastChannel`. `web/comfyui/top_menu_extension.js` responds with an `instanceId`, visibility state, and focus state. The gallery then sends one targeted `universal-extractor:workflow-message` to a single acknowledged ComfyUI instance and waits for `universal-extractor:workflow-delivered`.
+The image detail action for opening a workflow in ComfyUI is a same-origin handoff, not a window-creation path. `gallery_ui/src/App.tsx` asks for confirmation, wraps the send in the global operation status center, then sends a `universal-extractor:workflow-probe` over the `universal-extractor-workflow` `BroadcastChannel`. `web/comfyui/top_menu_extension.js` responds with an `instanceId`, visibility state, and focus state. The gallery then sends one targeted `universal-extractor:workflow-message` to a single acknowledged ComfyUI instance and waits for `universal-extractor:workflow-delivered`.
 
 The gallery must not call `window.open()` as a fallback for workflow handoff. If no refreshed ComfyUI page responds, the gallery stores the payload under `universal-extractor:pending-workflow` and shows a refresh/retry error so the user can refresh an existing ComfyUI tab. This avoids one click opening multiple ComfyUI tabs or broadcasting the same workflow into every open ComfyUI page.
 

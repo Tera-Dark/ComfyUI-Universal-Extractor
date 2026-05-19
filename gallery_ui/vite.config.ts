@@ -7,6 +7,7 @@ export default defineConfig({
   base: '/gallery/',
   build: {
     emptyOutDir: false,
+    modulePreload: false,
   },
   plugins: [
     react(),

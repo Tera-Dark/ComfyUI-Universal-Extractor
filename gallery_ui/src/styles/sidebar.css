@@ -592,6 +592,18 @@
   color: #1d4ed8;
 }
 
+.ue-tree-item.is-dragging,
+.ue-tree-label.is-dragging {
+  opacity: 0.46;
+}
+
+.ue-tree-item.is-drop-target,
+.ue-tree-label.is-drop-target {
+  border-color: rgba(37, 99, 235, 0.42);
+  background: rgba(239, 246, 255, 0.96);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.16);
+}
+
 .ue-tree-item.active::before,
 .ue-tree-row.active .ue-tree-label::before,
 .ue-library-list-item.active::before {

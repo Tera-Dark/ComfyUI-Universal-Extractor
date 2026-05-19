@@ -162,6 +162,19 @@ async def serve_gallery_index(_request: web.Request) -> web.StreamResponse:
     return web.FileResponse(GALLERY_INDEX_FILE, headers={"Cache-Control": "no-store, max-age=0"})
 
 
+async def serve_gallery_asset(request: web.Request) -> web.StreamResponse:
+    relative_path = request.match_info.get("path", "")
+    asset_path = Path(GALLERY_UI_DIR, "assets", relative_path).resolve()
+    assets_dir = Path(GALLERY_UI_DIR, "assets").resolve()
+    try:
+        asset_path.relative_to(assets_dir)
+    except ValueError:
+        raise web.HTTPNotFound()
+    if not asset_path.is_file():
+        raise web.HTTPNotFound()
+    return web.FileResponse(asset_path, headers={"Cache-Control": "public, max-age=31536000, immutable"})
+
+
 async def redirect_gallery_root(_request: web.Request) -> web.StreamResponse:
     raise web.HTTPFound("/gallery/")
 
@@ -952,6 +965,7 @@ def register_routes(app):
     if os.path.exists(GALLERY_UI_DIR):
         _safe_add_route(app.router, "get", "/gallery", redirect_gallery_root)
         _safe_add_route(app.router, "get", "/gallery/", serve_gallery_index)
+        _safe_add_route(app.router, "get", "/gallery/assets/{path:.*}", serve_gallery_asset)
         _safe_add_static(app.router, "/gallery", GALLERY_UI_DIR)
         print("[Universal Extractor] Gallery UI -> /gallery")
     else:

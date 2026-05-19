@@ -33,6 +33,7 @@ import type { DetailNavigationState, ImageMetadata, ImageRecord } from "../../ty
 import { formatFileSize, formatLongDateTime } from "../../utils/formatters";
 import { isEditableTarget } from "../../utils/interaction";
 import { getPositivePromptText } from "../../utils/metadata";
+import "../../styles/detail.css";
 
 interface ImageDetailModalProps {
   image: ImageRecord;
@@ -375,6 +376,19 @@ export const ImageDetailModal = ({
   };
 
   const handleSave = async () => {
+    if (isStateDirty) {
+      const approved = await confirm({
+        title: t("modalSaveState"),
+        message: t("imageStateSaveConfirm", { name: image.filename }),
+        tone: "warning",
+        confirmLabel: t("librarySave"),
+        cancelLabel: t("libraryCancel"),
+      });
+      if (!approved) {
+        return;
+      }
+    }
+
     setIsSavingState(true);
     setStateSaveError(null);
     try {
@@ -401,6 +415,17 @@ export const ImageDetailModal = ({
   };
 
   const handleRename = async () => {
+    const approved = await confirm({
+      title: t("modalRenameFile"),
+      message: t("imageRenameConfirm", { name: image.filename, target: draftFilename }),
+      tone: "warning",
+      confirmLabel: t("folderRename"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
     await onRenameFile(image.relative_path, draftFilename);
   };
 

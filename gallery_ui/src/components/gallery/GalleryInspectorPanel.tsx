@@ -77,6 +77,21 @@ export const GalleryInspectorPanel = ({
     if (!boardPickerPaths.length) {
       return;
     }
+    const board = boards.find((item) => item.id === boardId);
+    const approved = await confirm({
+      title: t("bulkAddToBoard"),
+      message: t("bulkAddToBoardConfirm", {
+        count: boardPickerPaths.length,
+        target: board?.name || boardId,
+      }),
+      tone: "warning",
+      confirmLabel: t("boardAddToAction"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
     await runOperation(() => onUpdateBoardPins(boardId, boardPickerPaths, true), {
       pending: t("operationAddToBoard"),
       success: t("boardAddSuccess", { count: boardPickerPaths.length }),
@@ -115,6 +130,20 @@ export const GalleryInspectorPanel = ({
     if (!selectedBoard || !selectedPaths.length) {
       return;
     }
+    const approved = await confirm({
+      title: t("bulkRemoveFromBoard"),
+      message: t("bulkRemoveFromBoardConfirm", {
+        count: selectedPaths.length,
+        target: selectedBoard.name,
+      }),
+      tone: "warning",
+      confirmLabel: t("bulkRemoveFromBoard"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
     await runOperation(() => onUpdateBoardPins(selectedBoard.id, selectedPaths, false), {
       pending: t("operationRemoveFromBoard"),
       success: t("bulkRemoveFromBoard"),
@@ -128,6 +157,20 @@ export const GalleryInspectorPanel = ({
     }
 
     const target = targetFolderOptions.find((option) => option.value === bulkTargetSubfolder);
+    const approved = await confirm({
+      title: t("bulkMoveTo"),
+      message: t("bulkMoveConfirm", {
+        count: selectedPaths.length,
+        target: target?.label || bulkTargetSubfolder,
+      }),
+      tone: "warning",
+      confirmLabel: t("folderMove"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
     await runOperation(() => onMoveImages(selectedPaths, bulkTargetSubfolder, target?.source_id), {
       pending: t("operationMoveImages"),
       success: t("operationMoveImagesSuccess"),
@@ -141,14 +184,76 @@ export const GalleryInspectorPanel = ({
       return;
     }
 
+    const approved = await confirm({
+      title: t("bulkRenameApply"),
+      message: t("bulkRenameConfirm", {
+        count: selectedPaths.length,
+        target: bulkRenameTemplate.trim(),
+      }),
+      tone: "warning",
+      confirmLabel: t("folderRename"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
     await onBatchRenameImages(
       selectedPaths,
       bulkRenameTemplate.trim(),
       bulkRenameStart,
       bulkRenamePadding,
       page,
-    );
+    ).catch(() => undefined);
     onClose();
+  };
+
+  const handleBatchPin = async (pinned: boolean) => {
+    if (!selectedPaths.length) {
+      return;
+    }
+    const approved = await confirm({
+      title: pinned ? t("bulkPin") : t("bulkUnpin"),
+      message: pinned
+        ? t("bulkPinConfirm", { count: selectedPaths.length })
+        : t("bulkUnpinConfirm", { count: selectedPaths.length }),
+      tone: "warning",
+      confirmLabel: pinned ? t("bulkPin") : t("bulkUnpin"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
+    await runOperation(() => onBatchUpdateImages(selectedPaths, { pinned }), {
+      pending: t("operationUpdateImages"),
+      success: t("operationUpdateImagesSuccess"),
+    });
+  };
+
+  const handleBatchCategory = async () => {
+    const category = bulkCategory.trim();
+    if (!selectedPaths.length || !category) {
+      return;
+    }
+    const approved = await confirm({
+      title: t("bulkSetCategory"),
+      message: t("bulkSetCategoryConfirm", {
+        count: selectedPaths.length,
+        target: category,
+      }),
+      tone: "warning",
+      confirmLabel: t("commonConfirm"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
+    await runOperation(() => onBatchUpdateImages(selectedPaths, { category }), {
+      pending: t("operationUpdateImages"),
+      success: t("operationUpdateImagesSuccess"),
+    });
   };
 
   return (
@@ -178,16 +283,10 @@ export const GalleryInspectorPanel = ({
           <button className="ue-icon-action" onClick={onClose} aria-label={t("bulkClear")} title={t("bulkClear")}>
             <Square size={14} />
           </button>
-          <button className="ue-icon-action" onClick={() => void runOperation(() => onBatchUpdateImages(selectedPaths, { pinned: true }), {
-            pending: t("operationUpdateImages"),
-            success: t("operationUpdateImagesSuccess"),
-          })} aria-label={t("bulkPin")} title={t("bulkPin")}>
+          <button className="ue-icon-action" onClick={() => void handleBatchPin(true)} aria-label={t("bulkPin")} title={t("bulkPin")}>
             <Pin size={14} />
           </button>
-          <button className="ue-icon-action" onClick={() => void runOperation(() => onBatchUpdateImages(selectedPaths, { pinned: false }), {
-            pending: t("operationUpdateImages"),
-            success: t("operationUpdateImagesSuccess"),
-          })} aria-label={t("bulkUnpin")} title={t("bulkUnpin")}>
+          <button className="ue-icon-action" onClick={() => void handleBatchPin(false)} aria-label={t("bulkUnpin")} title={t("bulkUnpin")}>
             <Pin size={14} />
           </button>
           <button className="ue-icon-action" onClick={() => setBoardPickerPaths(selectedPaths)} aria-label={t("bulkAddToBoard")} title={t("bulkAddToBoard")}>
@@ -213,10 +312,7 @@ export const GalleryInspectorPanel = ({
               <label className="ue-select-field ue-select-field--input">
                 <input value={bulkCategory} onChange={(event) => setBulkCategory(event.target.value)} placeholder={t("galleryCategoryPlaceholder")} />
               </label>
-              <button className="ue-icon-action ue-icon-action--filled" onClick={() => void runOperation(() => onBatchUpdateImages(selectedPaths, { category: bulkCategory }), {
-                pending: t("operationUpdateImages"),
-                success: t("operationUpdateImagesSuccess"),
-              })} aria-label={t("bulkSetCategory")} title={t("bulkSetCategory")} disabled={!bulkCategory.trim()}>
+              <button className="ue-icon-action ue-icon-action--filled" onClick={() => void handleBatchCategory()} aria-label={t("bulkSetCategory")} title={t("bulkSetCategory")} disabled={!bulkCategory.trim()}>
                 <Check size={14} />
               </button>
             </div>

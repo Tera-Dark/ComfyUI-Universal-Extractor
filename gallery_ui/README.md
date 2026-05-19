@@ -8,6 +8,8 @@
 - `GalleryWorkspace` keeps image prefetch state and card image loading in `src/components/gallery/galleryImagePrefetch.ts` and `GalleryCardImage.tsx`.
 - Global pending/success/error feedback is centralized in `src/components/shared/OperationStatusCenter.tsx`; `src/components/shared/ToastViewport.tsx` is a compatibility wrapper around the same right-bottom status center, not a separate toast surface.
 - Floating menu placement, dismiss behavior, and editable-target shortcut guards are centralized in `src/utils/interaction.ts`.
+- The gallery first screen should not fetch `/api/libraries` or use initial `forceRefresh=true`; library data is enabled only for `library` and `workbench` tabs.
+- `LibraryWorkspace`, `WorkbenchWorkspace`, `SettingsWorkspace`, and `ImageDetailModal` are lazy-loaded from `src/App.tsx`; keep `GalleryWorkspace` statically imported for the first screen.
 
 这是 ComfyUI Universal Extractor 的图库前端，使用 React、TypeScript 和 Vite 构建。构建产物位于 `gallery_ui/dist/`，由后端以 `/gallery/` 路径挂载到 ComfyUI。
 
@@ -98,7 +100,7 @@ powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 
 - 单击图片默认打开大图详情页；如果用户在设置中开启“默认进入选择模式”，则单击进入选取模式。
 - 双击图片或点击“查看详情”也会打开大图详情页。
-- 左键拖拽支持类似文件管理器的框选。
+- 左键拖拽支持类似文件管理器的框选；网格模式使用虚拟瀑布流时，框选需要基于拖拽开始时的布局快照和离屏卡片估算坐标，拖到滚动容器边缘应自动滚动并继续命中后续项目。
 - Shift 支持连续选择。
 - 右键菜单支持单图和多选批量操作。
 - 单图右键菜单和详情入口支持复制图片、复制文件名、复制路径、复制正面提示词、查看 Metadata、打开原图等高频操作。
@@ -107,14 +109,14 @@ powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 - 双栏模式快捷键：Ctrl/Meta+A 全选当前栏，Escape 关闭菜单或清空选择，Delete 删除所选，Enter 打开聚焦图片详情，Ctrl/Meta+M 移动到另一栏，Ctrl/Meta+R 刷新左右栏，Tab 切换左右栏焦点；输入框和目录搜索框聚焦时不触发这些快捷键。
 - 网格/列表切换要覆盖图库、垃圾箱和词库子项目；垃圾箱网格模式保持瀑布流自适应，不使用固定拉伸列。
 - 小型子页面和弹窗使用统一的标题、说明、输入区、操作区排版。
-- “在 ComfyUI 中打开工作流”通过 `BroadcastChannel` 探测已打开的 ComfyUI 页面，并只向一个回传 `instanceId` 的接收页发送工作流；不会自动创建新的 ComfyUI 窗口。没有可接收页面时，会保留 pending payload 并提示刷新现有 ComfyUI 页面后重试。
+- “在 ComfyUI 中打开工作流”会先弹出安全确认，再通过 `BroadcastChannel` 探测已打开的 ComfyUI 页面，并只向一个回传 `instanceId` 的接收页发送工作流；不会自动创建新的 ComfyUI 窗口。没有可接收页面时，会保留 pending payload，并通过右下角状态中心提示刷新现有 ComfyUI 页面后重试；发送成功或失败也必须走同一个状态中心。
+- 文件移动、删除、重命名、清空/彻底删除、批量分类、批量图版、导入、图源保存等敏感操作应通过确认弹窗拦截，长耗时或易失败操作应使用 `useOperationStatus().runOperation(...)` 显示 pending/success/error。
 
 ## 设置偏好
 
 设置页包含浏览器本地保存的界面与交互偏好：
 
 - 默认进入选择模式：默认关闭，关闭时单击图片打开详情。
-- 发送工作流前确认：关闭后直接发送到已打开的 ComfyUI 页面。
 - 启动时收起侧边栏：适合小屏或专注浏览。
 - 预加载附近图片：可在大图库中提升翻页和滚动体验，也可关闭以减少后台读取。
 - 目录默认树形视图：关闭后输出目录默认使用平铺列表。

@@ -84,6 +84,25 @@ def test_library_validation_and_import_modes_use_isolated_data_dir(isolated_gall
     ]
 
 
+def test_library_summary_cache_is_reused_and_hidden(isolated_gallery_env, monkeypatch):
+    service = isolated_gallery_env.service
+    service.save_library("artists.json", [{"name": "Artist A"}, {"name": "Artist B"}])
+
+    first = service.list_libraries()
+
+    assert first == [{"filename": "artists.json", "count": 2, "size": os.path.getsize(isolated_gallery_env.data_dir / "artists.json")}]
+    assert (isolated_gallery_env.data_dir / "library_summary_cache.json").exists()
+
+    def fail_json_load(_path, _default):
+        raise AssertionError("unchanged library summaries should not parse JSON again")
+
+    monkeypatch.setattr(service, "load_json", fail_json_load)
+    second = service.list_libraries()
+
+    assert second == first
+    assert all(item["filename"] != "library_summary_cache.json" for item in second)
+
+
 def test_image_freshness_fingerprint_tracks_current_view_without_rebuilding_index(isolated_gallery_env, monkeypatch):
     service = isolated_gallery_env.service
     monkeypatch.setattr(service, "IMAGE_FRESHNESS_CACHE_TTL_SECONDS", 0)
@@ -322,6 +341,25 @@ def test_folder_mutations_accept_source_root_refs_and_block_read_only_sources(is
 
     with pytest.raises(ValueError, match="read-only"):
         service.create_folder(f"{service.DEFAULT_INPUT_SOURCE_ID}{service.IMAGE_REF_SEPARATOR}blocked")
+
+
+def test_rename_folder_moves_folder_as_child_and_preserves_state(isolated_gallery_env):
+    service = isolated_gallery_env.service
+    source_dir = isolated_gallery_env.output_dir / "source"
+    target_dir = isolated_gallery_env.output_dir / "target"
+    source_dir.mkdir()
+    target_dir.mkdir()
+    (source_dir / "image.png").write_bytes(b"image")
+    service.persist_image_state("source/image.png", {"title": "Moved image", "category": "kept"})
+
+    source_ref = f"{service.DEFAULT_OUTPUT_SOURCE_ID}{service.IMAGE_REF_SEPARATOR}source"
+    target_ref = f"{service.DEFAULT_OUTPUT_SOURCE_ID}{service.IMAGE_REF_SEPARATOR}target/source"
+    result = service.rename_folder(source_ref, target_ref)
+
+    assert result["target_path"] == target_ref
+    assert not source_dir.exists()
+    assert (target_dir / "source" / "image.png").exists()
+    assert service.get_image_state("target/source/image.png")["title"] == "Moved image"
 
 
 def test_state_sync_skips_unchanged_gallery_state(isolated_gallery_env, monkeypatch):

@@ -10,7 +10,7 @@ GALLERY_SOURCES_FILE = os.path.join(DATA_DIR, "gallery_sources.json")
 THUMB_CACHE_DIR = os.path.join(DATA_DIR, "thumb_cache")
 TRASH_DIR = os.path.join(DATA_DIR, "trash")
 TRASH_STATE_FILE = os.path.join(DATA_DIR, "trash_state.json")
-RUNTIME_STATE_FILENAMES = {"gallery_state.json", "gallery_sources.json", "trash_state.json"}
+RUNTIME_STATE_FILENAMES = {"gallery_state.json", "gallery_sources.json", "trash_state.json", "library_summary_cache.json"}
 
 IMPORT_IMAGE_SUBFOLDER = "universal_gallery_imports"
 SUPPORTED_IMAGE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".webp")

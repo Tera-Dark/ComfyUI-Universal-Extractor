@@ -32,12 +32,14 @@ import { GalleryMainContent } from "./GalleryMainContent";
 import { GalleryToolbar } from "./GalleryToolbar";
 import { MetadataViewerModal } from "./MetadataViewerModal";
 import { prefetchGalleryImage } from "./galleryImagePrefetch";
-import { dedupeVisibleSelection, getSelectionBoxRect, rectsIntersect, selectPathRange, togglePathSelection, type SelectionBoxState } from "./gallerySelectionModel";
+import { dedupeVisibleSelection, getSelectionBoxRect, rectsIntersect, selectPathRange, togglePathSelection, type RectLike, type SelectionBoxState } from "./gallerySelectionModel";
 import { getActiveFilterControlCount, getStoredViewMode, type ContentViewMode } from "./galleryWorkspaceModel";
 import { TrashWorkspaceView } from "./TrashWorkspaceView";
-import { useVirtualMasonry } from "./useVirtualMasonry";
+import { estimateMasonryCardHeight, useVirtualMasonry } from "./useVirtualMasonry";
 import { FloatingLayerPortal, isEditableTarget, placeMenuForEvent, useDismissableLayer } from "../../utils/interaction";
 const MASONRY_GAP = 14;
+const SELECTION_AUTO_SCROLL_EDGE_PX = 72;
+const SELECTION_AUTO_SCROLL_MAX_STEP_PX = 30;
 const GALLERY_VIEW_MODE_STORAGE_KEY = "universal-extractor:gallery-view-mode";
 
 interface GalleryWorkspaceProps {
@@ -186,6 +188,7 @@ export const GalleryWorkspace = ({
   const [dualFolderMode, setDualFolderMode] = useState(false);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [gridWidth, setGridWidth] = useState(0);
+  const [selectionFrozenGridWidth, setSelectionFrozenGridWidth] = useState(0);
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const dragDepthRef = useRef(0);
   const gridRef = useRef<HTMLDivElement | null>(null);
@@ -194,11 +197,18 @@ export const GalleryWorkspace = ({
   const isDraggingSelectionRef = useRef(false);
   const selectionDragResetTimerRef = useRef<number | null>(null);
   const selectionBoxBasePathsRef = useRef<string[]>([]);
+  const selectionBoxAccumulatedPathsRef = useRef<string[]>([]);
+  const selectionBoxCardRectsRef = useRef<Record<string, RectLike>>({});
+  const selectionBoxStartScrollTopRef = useRef(0);
   const selectionBoxAppendRef = useRef(false);
   const lastSelectedPathRef = useRef<string>("");
   const scrollContainerRef = useRef<HTMLElement | null>(null);
 
   const visibleImagePaths = useMemo(() => images.map((image) => image.relative_path), [images]);
+  const imageIndexByPath = useMemo(
+    () => new Map(images.map((image, index) => [image.relative_path, index])),
+    [images],
+  );
   const visibleSelectionPaths = useMemo(
     () => (isTrashView ? trashItems.map((item) => item.id) : visibleImagePaths),
     [isTrashView, trashItems, visibleImagePaths],
@@ -210,6 +220,7 @@ export const GalleryWorkspace = ({
   );
   const selectedCount = pageSelectedPaths.length;
   const hasSelection = selectedCount > 0;
+  const selectionLayoutLocked = Boolean(selectionBox);
   const selectionEnabled = !dualFolderMode;
   const inspectorSelectionActive = !isTrashView && (selectionMode || selectedCount > 0);
   const selectedTrashItems = useMemo(
@@ -312,6 +323,12 @@ export const GalleryWorkspace = ({
     }
     setSelectionBox(null);
     isDraggingSelectionRef.current = false;
+    selectionBoxBasePathsRef.current = [];
+    selectionBoxAccumulatedPathsRef.current = [];
+    selectionBoxCardRectsRef.current = {};
+    selectionBoxStartScrollTopRef.current = 0;
+    setSelectionFrozenGridWidth(0);
+    selectionBoxAppendRef.current = false;
   }, [selectionEnabled]);
 
   useEffect(() => () => {
@@ -356,12 +373,38 @@ export const GalleryWorkspace = ({
   const masonryLayout = useVirtualMasonry({
     images,
     requestedColumns: gridColumns,
-    gridWidth,
+    gridWidth: selectionLayoutLocked && selectionFrozenGridWidth > 0 ? selectionFrozenGridWidth : gridWidth,
     viewportWidth,
     scrollElement,
     gap: MASONRY_GAP,
   });
   const effectiveColumns = masonryLayout.columnCount;
+
+  const getEstimatedGridCardRect = useCallback((relativePath: string): RectLike | null => {
+    if (isTrashView || galleryViewMode !== "grid") {
+      return null;
+    }
+    const index = imageIndexByPath.get(relativePath);
+    if (index === undefined || !gridRef.current) {
+      return null;
+    }
+
+    const columnCount = Math.max(1, masonryLayout.columnCount);
+    const lane = index % columnCount;
+    const row = Math.floor(index / columnCount);
+    const columnWidth = masonryLayout.columnWidth;
+    const cardHeight = estimateMasonryCardHeight(columnWidth);
+    const gridRect = gridRef.current.getBoundingClientRect();
+    const left = gridRect.left + lane * (columnWidth + MASONRY_GAP);
+    const top = gridRect.top + row * (cardHeight + MASONRY_GAP);
+
+    return {
+      left,
+      right: left + columnWidth,
+      top,
+      bottom: top + cardHeight,
+    };
+  }, [galleryViewMode, imageIndexByPath, isTrashView, masonryLayout.columnCount, masonryLayout.columnWidth]);
 
   useEffect(() => {
     if (!enableImagePrefetch || !images.length || isTrashView || typeof IntersectionObserver === "undefined") {
@@ -563,11 +606,57 @@ export const GalleryWorkspace = ({
     if (!boardPickerPaths.length) {
       return;
     }
+    const board = boards.find((item) => item.id === boardId);
+    const approved = await confirm({
+      title: t("bulkAddToBoard"),
+      message: t("bulkAddToBoardConfirm", {
+        count: boardPickerPaths.length,
+        target: board?.name || boardId,
+      }),
+      tone: "warning",
+      confirmLabel: t("boardAddToAction"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+
     await runOperation(() => onUpdateBoardPins(boardId, boardPickerPaths, true), {
       pending: t("operationAddToBoard"),
       success: t("boardAddSuccess", { count: boardPickerPaths.length }),
     });
     setBoardPickerPaths([]);
+  };
+
+  const handleTogglePin = async (image: ImageRecord) => {
+    const nextPinned = !image.pinned;
+    const approved = await confirm({
+      title: nextPinned ? t("galleryPin") : t("galleryUnpin"),
+      message: nextPinned
+        ? t("imagePinConfirm", { name: image.filename })
+        : t("imageUnpinConfirm", { name: image.filename }),
+      tone: "warning",
+      confirmLabel: nextPinned ? t("galleryPin") : t("galleryUnpin"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (!approved) {
+      return;
+    }
+    await onUpdateImageState(image.relative_path, { pinned: nextPinned });
+  };
+
+  const handleUpdateImageStateWithConfirm = async (relativePath: string, updates: Record<string, unknown>) => {
+    if (
+      Object.keys(updates).length === 1 &&
+      typeof updates.pinned === "boolean"
+    ) {
+      const image = images.find((item) => item.relative_path === relativePath);
+      if (image) {
+        await handleTogglePin(image);
+        return;
+      }
+    }
+    await onUpdateImageState(relativePath, updates);
   };
 
   const handleDeleteSelectedBoard = async () => {
@@ -655,20 +744,39 @@ export const GalleryWorkspace = ({
 
     const intersectedPaths = selectionItems
       .filter((item) => {
-        const element = cardRefs.current[item.key];
-        if (!element) {
+        const rect =
+          selectionBoxCardRectsRef.current[item.key] ??
+          cardRefs.current[item.key]?.getBoundingClientRect() ??
+          getEstimatedGridCardRect(item.key);
+        if (!rect) {
           return false;
         }
-        return rectsIntersect(selectionRect, element.getBoundingClientRect());
+        const scrollDelta = (scrollContainerRef.current?.scrollTop ?? 0) - selectionBoxStartScrollTopRef.current;
+        const adjustedRect = scrollDelta
+          ? {
+              left: rect.left,
+              right: rect.right,
+              top: rect.top - scrollDelta,
+              bottom: rect.bottom - scrollDelta,
+            }
+          : rect;
+        return rectsIntersect(selectionRect, adjustedRect);
       })
       .map((item) => item.key);
 
     setSelection(
-      selectionBoxAppendRef.current
-        ? dedupeVisibleSelection([...selectionBoxBasePathsRef.current, ...intersectedPaths], visibleSelectionPaths)
-        : intersectedPaths,
+      (() => {
+        const accumulatedPaths = dedupeVisibleSelection(
+          [...selectionBoxAccumulatedPathsRef.current, ...intersectedPaths],
+          visibleSelectionPaths,
+        );
+        selectionBoxAccumulatedPathsRef.current = accumulatedPaths;
+        return selectionBoxAppendRef.current
+          ? dedupeVisibleSelection([...selectionBoxBasePathsRef.current, ...accumulatedPaths], visibleSelectionPaths)
+          : accumulatedPaths;
+      })(),
     );
-  }, [images, isTrashView, setSelection, trashItems, visibleSelectionPaths]);
+  }, [getEstimatedGridCardRect, images, isTrashView, setSelection, trashItems, visibleSelectionPaths]);
 
   const handleSelectionPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (!selectionEnabled || event.button !== 0 || event.pointerType === "touch") {
@@ -686,6 +794,17 @@ export const GalleryWorkspace = ({
       selectionDragResetTimerRef.current = null;
     }
     selectionBoxBasePathsRef.current = pageSelectedPaths;
+    selectionBoxAccumulatedPathsRef.current = [];
+    selectionBoxCardRectsRef.current = Object.fromEntries(
+      visibleSelectionPaths
+        .map((path) => {
+          const rect = cardRefs.current[path]?.getBoundingClientRect() ?? getEstimatedGridCardRect(path);
+          return rect ? [path, rect] : null;
+        })
+        .filter((entry): entry is [string, RectLike] => entry !== null),
+    );
+    setSelectionFrozenGridWidth(gridRef.current?.getBoundingClientRect().width || gridWidth);
+    selectionBoxStartScrollTopRef.current = scrollContainerRef.current?.scrollTop ?? 0;
     selectionBoxAppendRef.current = event.ctrlKey || event.metaKey;
     setSelectionBox({
       startX: event.clientX,
@@ -693,7 +812,7 @@ export const GalleryWorkspace = ({
       currentX: event.clientX,
       currentY: event.clientY,
     });
-  }, [pageSelectedPaths, selectionEnabled]);
+  }, [getEstimatedGridCardRect, gridWidth, pageSelectedPaths, selectionEnabled, visibleSelectionPaths]);
 
   const handleSelectionPointerMove = useCallback((event: React.PointerEvent<HTMLElement>) => {
     if (!selectionEnabled || !selectionBox) {
@@ -737,18 +856,97 @@ export const GalleryWorkspace = ({
     if (!isDraggingSelectionRef.current) {
       setSelectionBox(null);
       selectionBoxBasePathsRef.current = [];
+      selectionBoxAccumulatedPathsRef.current = [];
+      selectionBoxCardRectsRef.current = {};
+      selectionBoxStartScrollTopRef.current = 0;
+      setSelectionFrozenGridWidth(0);
       selectionBoxAppendRef.current = false;
       return;
     }
 
     setSelectionBox(null);
     selectionBoxBasePathsRef.current = [];
+    selectionBoxAccumulatedPathsRef.current = [];
+    selectionBoxCardRectsRef.current = {};
+    selectionBoxStartScrollTopRef.current = 0;
+    setSelectionFrozenGridWidth(0);
     selectionBoxAppendRef.current = false;
     selectionDragResetTimerRef.current = window.setTimeout(() => {
       isDraggingSelectionRef.current = false;
       selectionDragResetTimerRef.current = null;
     }, 160);
   }, [selectionBox]);
+
+  useEffect(() => {
+    if (!scrollElement || !selectionBox) {
+      return;
+    }
+
+    let frame = 0;
+    const handleSelectionScroll = () => {
+      if (!isDraggingSelectionRef.current) {
+        return;
+      }
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        updateSelectionFromBox(selectionBox);
+      });
+    };
+
+    scrollElement.addEventListener("scroll", handleSelectionScroll, { passive: true });
+    return () => {
+      if (frame) {
+        window.cancelAnimationFrame(frame);
+      }
+      scrollElement.removeEventListener("scroll", handleSelectionScroll);
+    };
+  }, [scrollElement, selectionBox, updateSelectionFromBox]);
+
+  useEffect(() => {
+    if (!scrollElement || !selectionBox) {
+      return;
+    }
+
+    let frame = 0;
+    const tick = () => {
+      frame = window.requestAnimationFrame(tick);
+      if (!isDraggingSelectionRef.current) {
+        return;
+      }
+
+      const rect = scrollElement.getBoundingClientRect();
+      const maxScroll = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
+      if (maxScroll <= 0) {
+        return;
+      }
+
+      let delta = 0;
+      if (selectionBox.currentY > rect.bottom - SELECTION_AUTO_SCROLL_EDGE_PX) {
+        const distanceIntoEdge = SELECTION_AUTO_SCROLL_EDGE_PX - (rect.bottom - selectionBox.currentY);
+        delta = Math.ceil((distanceIntoEdge / SELECTION_AUTO_SCROLL_EDGE_PX) * SELECTION_AUTO_SCROLL_MAX_STEP_PX);
+      } else if (selectionBox.currentY < rect.top + SELECTION_AUTO_SCROLL_EDGE_PX) {
+        const distanceIntoEdge = SELECTION_AUTO_SCROLL_EDGE_PX - (selectionBox.currentY - rect.top);
+        delta = -Math.ceil((distanceIntoEdge / SELECTION_AUTO_SCROLL_EDGE_PX) * SELECTION_AUTO_SCROLL_MAX_STEP_PX);
+      }
+
+      if (delta === 0) {
+        return;
+      }
+
+      const nextScrollTop = Math.min(maxScroll, Math.max(0, scrollElement.scrollTop + delta));
+      if (nextScrollTop === scrollElement.scrollTop) {
+        return;
+      }
+      scrollElement.scrollTop = nextScrollTop;
+      updateSelectionFromBox(selectionBox);
+    };
+
+    frame = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(frame);
+  }, [scrollElement, selectionBox, updateSelectionFromBox]);
 
   useEffect(() => {
     if (!selectionEnabled || !scrollElement) {
@@ -954,7 +1152,7 @@ export const GalleryWorkspace = ({
             onOpenWorkflow={onOpenWorkflow}
             onMoveImages={onMoveImages}
             onDeleteImages={onDeleteImages}
-            onUpdateImageState={onUpdateImageState}
+            onUpdateImageState={handleUpdateImageStateWithConfirm}
             onCreateBoard={onCreateBoard}
             onUpdateBoardPins={onUpdateBoardPins}
           />
@@ -1006,7 +1204,7 @@ export const GalleryWorkspace = ({
             isDraggingSelectionRef={isDraggingSelectionRef}
             onOpenDetail={onOpenDetail}
             onOpenWorkflow={onOpenWorkflow}
-            onUpdateImageState={onUpdateImageState}
+            onUpdateImageState={handleUpdateImageStateWithConfirm}
             onBoardPickerPathsChange={setBoardPickerPaths}
             onImageSelectionClick={handleImageSelectionClick}
             onOpenContextMenu={handleOpenContextMenu}
@@ -1089,7 +1287,7 @@ export const GalleryWorkspace = ({
               <button
                 className="ue-context-menu-item"
                 onClick={() => {
-                  void onUpdateImageState(contextMenu.image.relative_path, { pinned: !contextMenu.image.pinned });
+                  void handleTogglePin(contextMenu.image);
                   setContextMenu(null);
                 }}
               >

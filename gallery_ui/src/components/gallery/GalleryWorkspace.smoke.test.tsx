@@ -62,6 +62,16 @@ const secondGalleryImage = {
   thumb_url: "/thumb-2.png",
 };
 
+const makeGalleryImage = (index: number) => ({
+  ...galleryImage,
+  filename: `sample-${index}.png`,
+  relative_path: `default_output::sample-${index}.png`,
+  url: `/view?filename=sample-${index}.png&type=output`,
+  original_url: `/view?filename=sample-${index}.png&type=output`,
+  thumb_url: `/thumb-${index}.png`,
+  created_at: index,
+});
+
 const renderWorkspace = (overrides: Partial<Parameters<typeof GalleryWorkspace>[0]> = {}) => {
   const noop = vi.fn();
   const props: Parameters<typeof GalleryWorkspace>[0] = {
@@ -125,7 +135,9 @@ const renderWorkspace = (overrides: Partial<Parameters<typeof GalleryWorkspace>[
       <ConfirmProvider>
         <OperationStatusProvider>
           <ToastProvider>
-          <GalleryWorkspace {...props} />
+            <main className="ue-main-shell">
+              <GalleryWorkspace {...props} />
+            </main>
           </ToastProvider>
         </OperationStatusProvider>
       </ConfirmProvider>
@@ -338,6 +350,109 @@ describe("GalleryWorkspace smoke", () => {
     fireEvent.click(rows[1]);
 
     expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample-2.png" }));
+  });
+
+  it("keeps earlier box-selected images when scrolling during a drag", async () => {
+    const onSelectionChange = vi.fn();
+    window.localStorage.setItem("universal-extractor:gallery-view-mode", "list");
+    const { container } = renderWorkspace({
+      isTrashView: false,
+      selectedSubfolder: "default_output::",
+      total: 2,
+      images: [galleryImage, secondGalleryImage],
+      onSelectionChange,
+    });
+
+    const mainShell = container.querySelector(".ue-main-shell") as HTMLElement;
+    const list = container.querySelector(".ue-gallery-list") as HTMLElement;
+    const rows = Array.from(container.querySelectorAll(".ue-gallery-list-row")) as HTMLElement[];
+    expect(mainShell).toBeInTheDocument();
+    expect(rows).toHaveLength(2);
+
+    rows[0].getBoundingClientRect = () =>
+      ({ left: 20, right: 220, top: 20, bottom: 90, width: 200, height: 70, x: 20, y: 20, toJSON: () => ({}) }) as DOMRect;
+    rows[1].getBoundingClientRect = () =>
+      ({ left: 20, right: 220, top: 220, bottom: 290, width: 200, height: 70, x: 20, y: 220, toJSON: () => ({}) }) as DOMRect;
+
+    fireEvent.pointerDown(list, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(list, { pointerId: 1, pointerType: "mouse", clientX: 240, clientY: 98 });
+    expect(onSelectionChange).toHaveBeenLastCalledWith([galleryImage.relative_path]);
+
+    rows[0].getBoundingClientRect = () =>
+      ({ left: 20, right: 220, top: -180, bottom: -110, width: 200, height: 70, x: 20, y: -180, toJSON: () => ({}) }) as DOMRect;
+    rows[1].getBoundingClientRect = () =>
+      ({ left: 20, right: 220, top: 20, bottom: 90, width: 200, height: 70, x: 20, y: 20, toJSON: () => ({}) }) as DOMRect;
+    Object.defineProperty(mainShell, "scrollTop", { configurable: true, value: 200 });
+    fireEvent.scroll(mainShell);
+
+    await waitFor(() => {
+      expect(onSelectionChange).toHaveBeenLastCalledWith([galleryImage.relative_path, secondGalleryImage.relative_path]);
+    });
+    fireEvent.pointerUp(list, { pointerId: 1, pointerType: "mouse", clientX: 240, clientY: 98 });
+  });
+
+  it("uses the drag-start card rect snapshot when box selection opens the inspector", () => {
+    const onSelectionChange = vi.fn();
+    window.localStorage.setItem("universal-extractor:gallery-view-mode", "list");
+    const { container } = renderWorkspace({
+      isTrashView: false,
+      selectedSubfolder: "default_output::",
+      total: 2,
+      images: [galleryImage, secondGalleryImage],
+      onSelectionChange,
+    });
+
+    const list = container.querySelector(".ue-gallery-list") as HTMLElement;
+    const rows = Array.from(container.querySelectorAll(".ue-gallery-list-row")) as HTMLElement[];
+    rows[0].getBoundingClientRect = () =>
+      ({ left: 20, right: 220, top: 20, bottom: 90, width: 200, height: 70, x: 20, y: 20, toJSON: () => ({}) }) as DOMRect;
+    rows[1].getBoundingClientRect = () =>
+      ({ left: 20, right: 220, top: 104, bottom: 174, width: 200, height: 70, x: 20, y: 104, toJSON: () => ({}) }) as DOMRect;
+
+    fireEvent.pointerDown(list, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(list, { pointerId: 1, pointerType: "mouse", clientX: 240, clientY: 98 });
+    expect(onSelectionChange).toHaveBeenLastCalledWith([galleryImage.relative_path]);
+
+    rows[0].getBoundingClientRect = () =>
+      ({ left: 20, right: 220, top: 160, bottom: 230, width: 200, height: 70, x: 20, y: 160, toJSON: () => ({}) }) as DOMRect;
+    rows[1].getBoundingClientRect = () =>
+      ({ left: 20, right: 220, top: 20, bottom: 90, width: 200, height: 70, x: 20, y: 20, toJSON: () => ({}) }) as DOMRect;
+    fireEvent.pointerMove(list, { pointerId: 1, pointerType: "mouse", clientX: 240, clientY: 98 });
+
+    expect(onSelectionChange).toHaveBeenLastCalledWith([galleryImage.relative_path]);
+  });
+
+  it("box-selects virtual grid images that were not mounted before scrolling", async () => {
+    const onSelectionChange = vi.fn();
+    const images = Array.from({ length: 16 }, (_, index) => makeGalleryImage(index + 1));
+    window.localStorage.setItem("universal-extractor:gallery-view-mode", "grid");
+    const { container } = renderWorkspace({
+      isTrashView: false,
+      selectedSubfolder: "default_output::",
+      total: images.length,
+      images,
+      gridColumns: 4,
+      onSelectionChange,
+    });
+
+    const mainShell = container.querySelector(".ue-main-shell") as HTMLElement;
+    const grid = container.querySelector(".ue-gallery-grid--virtual") as HTMLElement;
+    expect(mainShell).toBeInTheDocument();
+    expect(grid).toBeInTheDocument();
+    grid.getBoundingClientRect = () =>
+      ({ left: 20, right: 1020, top: 20, bottom: 2020, width: 1000, height: 2000, x: 20, y: 20, toJSON: () => ({}) }) as DOMRect;
+    onSelectionChange.mockClear();
+
+    fireEvent.pointerDown(grid, { button: 0, pointerId: 1, pointerType: "mouse", clientX: 10, clientY: 10 });
+    fireEvent.pointerMove(grid, { pointerId: 1, pointerType: "mouse", clientX: 1000, clientY: 220 });
+
+    Object.defineProperty(mainShell, "scrollTop", { configurable: true, value: 1100 });
+    fireEvent.scroll(mainShell);
+
+    await waitFor(() => {
+      expect(onSelectionChange.mock.calls.at(-1)?.[0]).toContain(images[12].relative_path);
+    });
+    fireEvent.pointerUp(grid, { pointerId: 1, pointerType: "mouse", clientX: 1000, clientY: 220 });
   });
 
   it("only treats real external file drops as imports", async () => {
