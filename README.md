@@ -2,35 +2,45 @@
 
 ## Maintenance notes
 
-- Full local verification is `powershell -ExecutionPolicy Bypass -File scripts\verify.ps1`; it now includes Python tests, compileall, frontend typecheck/lint/tests/build, dist asset audit, and release metadata checks.
+- Full local verification is `powershell -ExecutionPolicy Bypass -File scripts\verify.ps1`; it now includes Python tests, compileall, frontend typecheck/lint/tests/security audit/build, dist asset audit, and release metadata checks.
 - Release version metadata is kept in sync across `pyproject.toml`, `gallery_ui/package.json`, and `gallery_ui/package-lock.json`.
 - The Gallery backend keeps `py/gallery/service.py` as the route-facing facade, with source refs and source path hardening split into `py/gallery/refs.py` and `py/gallery/source_security.py`.
 - The frontend sidebar folder logic lives in `gallery_ui/src/components/shared/folderTree.ts`; gallery image prefetch/card loading lives in `gallery_ui/src/components/gallery/galleryImagePrefetch.ts` and `GalleryCardImage.tsx`.
 - Shared frontend menu placement, dismiss handling, and shortcut editable-target guards live in `gallery_ui/src/utils/interaction.ts`.
 - Gallery first screen is optimized to avoid external font requests, `/api/libraries`, and initial `force_refresh=true`; non-gallery workspaces and image detail are lazy-loaded chunks.
+- First-run onboarding is browser-local state in `gallery_ui/src/components/shared/OnboardingTour.tsx` and `onboardingTourModel.ts`; completing or skipping the tour writes `universal-extractor:onboarding-tour-v1-completed`, and Settings can restart the tour without changing `UiPreferences`.
 - Runtime prompt-library counts are cached in `data/library_summary_cache.json`, which is ignored and excluded from user-visible JSON libraries.
 
 ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台插件，包含两块核心能力：
 
-- **Universal Extractor 节点**：从 `data/` 里的 JSON 提示词库随机或顺序抽取文本，用于构建动态提示词工作流。
+- **Universal Artist/Tag Randomizer 节点**：按字段路径从 `data/` 词库条目中抽取特定词段，例如 `name`、`other_names`、`meta.tags`，并可直接输出 Anima、artist、NAI、加权画师串或通用 tag 串。
 - **Universal Gallery 图库工作台**：在浏览器中管理 ComfyUI 图片输出、图版、分类、垃圾箱、词库和画师工作台。
 
 前端支持中文和英文界面，图库页面使用轻量、偏工具型的工作台布局：左侧资源栏、中间浏览区，以及不会挤压主图库的覆盖式右侧 Inspector。
 
 ## 功能概览
 
-### Extractor 节点
+### Artist/Tag Randomizer 节点
+
+`Universal Artist/Tag Randomizer` 适合从词库条目里抽取指定字段片段，并直接整理成随机生成可用的画师串或 tag 串：
 
 | 参数 | 说明 |
 | --- | --- |
-| `file_name` | 选择 `data/` 目录下的 JSON 提示词库文件 |
-| `extract_count` | 抽取数量，范围 1 到 100 |
-| `mode` | 抽取模式：`random` 随机，`sequential` 顺序 |
-| `prefix` / `suffix` | 为每条抽取结果添加前缀或后缀 |
-| `separator` | 多条结果之间的分隔符 |
-| `seed` | 随机种子，保证可复现 |
+| `file_name` | 选择 `data/` 下的 JSON 词库文件；节点只读取普通 `.json` 词库，不读取运行时状态文件 |
+| `field_paths` | 要抽取的字段路径，支持逗号或换行分隔，例如 `name`、`other_names`、`meta.style`、`tags.*` |
+| `extract_count` | 抽取数量，范围 1 到 200 |
+| `mode` | `random` 随机抽取，`polling` 每次生成轮询推进，`sequential` 按 `seed` 作为起点顺序抽取 |
+| `duplicate_policy` | `auto` 在数量超过池大小时允许重复；`allow_duplicates` 始终可重复；`unique_only` 只返回不重复结果 |
+| `output_format` | `anima` 输出 `@name` / `@name \(alias\)`，`artist` 输出 `artist:name`，`weighted_artist` 输出 `(name:1.0)`，`nai` 输出 NAI 权重段，`tags` 保留通用 tag，`custom` 使用模板 |
+| `weight_min` / `weight_max` | 加权输出的权重范围；两者相同则固定权重 |
+| `custom_template` | 自定义输出模板，支持 `{tag}`、`{clean}`、`{anima}`、`{index}` |
+| `filter_path` / `filter_value` / `filter_mode` | 可选条目过滤，先按字段路径筛条目，再从命中的条目里抽取 |
+| `prefix` / `suffix` / `separator` | 输出格式控制 |
+| `seed` | 随机或顺序起点种子，保证可复现 |
 
-节点会自动识别 JSON 数组中的字符串、`prompt`、`name`、`title` 等常见字段。
+节点输出两个字符串：`Prompt` 是拼接后的提示词，`Selected JSON` 是本次抽中的原始词段数组，方便调试工作流。常见画师词库可以用 `field_paths=name` 搭配 `output_format=anima` 或 `artist`；通用 tag 词库可以用 `field_paths=tags.*` 搭配 `output_format=tags` 或 `custom`。`polling` 轮询状态保存在当前 Python 进程内，并按节点 id、词库、字段、过滤条件、词池内容和 seed 隔离；重启 ComfyUI 后会从 seed 位置重新开始。
+
+节点输入顺序需要兼容 ComfyUI 已保存工作流的 widget 位置：旧字段保持 `separator`、`seed`、`filter_path`、`filter_value`、`filter_mode` 的顺序，新加的 `weight_min`、`weight_max`、`custom_template` 放在末尾。升级后如果右侧错误面板出现 `Failed to convert an input value to a FLOAT/INT value`，并且内容类似 `weight_max ... ''`、`seed ... 'contains'` 或 `weight_min ... 'randomize'`，通常表示浏览器或 ComfyUI 仍加载了旧节点定义，先重启 ComfyUI 并刷新页面；如果错位状态已经被保存进工作流，重新放置一次 `Universal Artist/Tag Randomizer` 节点即可恢复干净参数。
 
 ### Gallery 图库工作台
 
@@ -249,10 +259,11 @@ cd gallery_ui
 npm run typecheck
 npm run lint
 npm run test:run
+npm run audit:security
 npm run build
 ```
 
-CI 会在 Windows 上执行同一组 Python 和前端检查。`npm run build` 会自动把当前 CSS/JS 内容同步到已跟踪的旧 hash 兼容文件名，降低 ComfyUI 或浏览器旧缓存请求静态资源 404 的概率。CI 只验证构建可以通过，不会自动提交 `gallery_ui/dist/`；发布前仍需显式提交构建产物。
+CI 会在 Windows 上执行同一组 Python 和前端检查，并用 `npm run audit:security` 阻止 moderate 及以上级别的前端依赖漏洞回归。`npm run build` 会自动把当前 CSS/JS 内容同步到已跟踪的旧 hash 兼容文件名，降低 ComfyUI 或浏览器旧缓存请求静态资源 404 的概率。CI 只验证构建可以通过，不会自动提交 `gallery_ui/dist/`；发布前仍需显式提交构建产物。
 
 ## 系统要求
 

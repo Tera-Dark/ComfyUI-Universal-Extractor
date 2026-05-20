@@ -44,7 +44,7 @@ def extract_artist_prompts(metadata: dict) -> list[str]:
             continue
 
         inputs = node.get("inputs", {})
-        if node.get("class_type") == "UniversalTextExtractor":
+        if node.get("class_type") in {"UniversalTextExtractor", "UniversalJsonSegmentRandomizer"}:
             file_name = inputs.get("file_name")
             if file_name:
                 results.append(f"[Extractor: {file_name}]")

@@ -1,19 +1,20 @@
 try:
-    from .py.plugin import load_node_class, register_gallery_routes
+    from .py.plugin import load_node_classes, register_gallery_routes
 except ImportError:
-    from py.plugin import load_node_class, register_gallery_routes
+    from py.plugin import load_node_classes, register_gallery_routes
 
 
-UniversalTextExtractor = load_node_class()
+_NODE_CLASSES = load_node_classes()
+UniversalJsonSegmentRandomizer = _NODE_CLASSES["UniversalJsonSegmentRandomizer"]
 register_gallery_routes()
 
 
 NODE_CLASS_MAPPINGS = {
-    "UniversalTextExtractor": UniversalTextExtractor,
+    "UniversalJsonSegmentRandomizer": UniversalJsonSegmentRandomizer,
 }
 
 NODE_DISPLAY_NAME_MAPPINGS = {
-    "UniversalTextExtractor": "Universal Extractor",
+    "UniversalJsonSegmentRandomizer": "Universal Artist/Tag Randomizer",
 }
 
 WEB_DIRECTORY = "./web/comfyui"

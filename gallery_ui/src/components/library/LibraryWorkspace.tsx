@@ -372,6 +372,7 @@ export const LibraryWorkspace = ({
     <>
       <section
         className={`ue-workspace ue-animate-in ${dragActive ? "is-dragging-library" : ""}`}
+        data-tour-id="library-workspace"
         onDragEnter={(event) => {
           event.preventDefault();
           dragDepthRef.current += 1;
@@ -408,7 +409,7 @@ export const LibraryWorkspace = ({
             </p>
           </div>
 
-          <div className="ue-library-actions">
+          <div className="ue-library-actions" data-tour-id="library-actions">
             <div className="ue-segmented-control ue-segmented-control--compact ue-view-toggle" aria-label={t("viewMode")}>
               <button
                 className={libraryViewMode === "grid" ? "active" : ""}

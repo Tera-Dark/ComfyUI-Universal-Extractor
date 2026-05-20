@@ -8,9 +8,11 @@ if PLUGIN_DIR not in sys.path:
     sys.path.insert(0, PLUGIN_DIR)
 
 
-def load_node_class():
+def load_node_classes():
     module = importlib.import_module(".nodes.extractor_node", package=__package__)
-    return module.UniversalTextExtractor
+    return {
+        "UniversalJsonSegmentRandomizer": module.UniversalJsonSegmentRandomizer,
+    }
 
 
 def register_gallery_routes():

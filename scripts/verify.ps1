@@ -29,6 +29,8 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cmd /c npm run test:run
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    cmd /c npm run audit:security
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cmd /c npm run build
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cmd /c npm run audit:dist

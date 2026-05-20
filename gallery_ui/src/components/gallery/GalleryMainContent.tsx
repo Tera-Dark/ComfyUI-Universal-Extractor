@@ -138,12 +138,13 @@ export const GalleryMainContent = ({
             ref={gridRef}
             className="ue-gallery-list ue-gallery-list--selectable"
           >
-            {images.map((image) => {
+            {images.map((image, index) => {
               const selected = pageSelectedPaths.includes(image.relative_path);
 
               return (
                 <article
                   key={image.relative_path}
+                  data-tour-id={index === 0 ? "gallery-card" : undefined}
                   ref={(element) => {
                     cardRefs.current[image.relative_path] = element;
                   }}
@@ -201,6 +202,7 @@ export const GalleryMainContent = ({
                   <div className="ue-gallery-list-actions">
                     <button
                       className="ue-icon-action"
+                      data-tour-id={index === 0 ? "gallery-workflow" : undefined}
                       onClick={(event) => {
                         event.stopPropagation();
                         void onOpenWorkflow(image);
@@ -266,6 +268,7 @@ export const GalleryMainContent = ({
                 <article
                   key={image.relative_path}
                   className={`ue-gallery-card ${selected ? "is-selected" : ""}`}
+                  data-tour-id={index === 0 ? "gallery-card" : undefined}
                   data-index={index}
                   data-lane={lane}
                   style={{ top: `${top}px`, left: `${left}px`, width: `${width}px` }}
@@ -294,6 +297,7 @@ export const GalleryMainContent = ({
                   <div className="ue-gallery-actions">
                     <button
                       className="ue-send-btn"
+                      data-tour-id={index === 0 ? "gallery-workflow" : undefined}
                       onClick={(event) => {
                         event.stopPropagation();
                         void onOpenWorkflow(image);

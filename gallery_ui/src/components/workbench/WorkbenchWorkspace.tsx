@@ -504,7 +504,7 @@ export const WorkbenchWorkspace = ({
   };
 
   return (
-    <section className="ue-workspace ue-workspace--workbench ue-animate-in">
+    <section className="ue-workspace ue-workspace--workbench ue-animate-in" data-tour-id="workbench-workspace">
       <div className="ue-pane-header ue-pane-header--compact">
         <div className="ue-pane-copy">
           <p className="ue-pane-kicker">{t("workbenchTitle")}</p>
@@ -544,7 +544,7 @@ export const WorkbenchWorkspace = ({
         <div className="ue-workbench-stage">
           {activeTool === "artist" ? (
             <div className="ue-workbench-grid ue-workbench-grid--expanded">
-              <article className="ue-tool-panel ue-tool-panel--generator">
+              <article className="ue-tool-panel ue-tool-panel--generator" data-tour-id="workbench-generator">
                 <div className="ue-tool-panel-head">
                   <div className="ue-section-kicker">
                     <Sparkles size={14} />

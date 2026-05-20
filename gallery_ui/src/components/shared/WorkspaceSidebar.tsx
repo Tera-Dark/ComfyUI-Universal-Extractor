@@ -483,7 +483,7 @@ export const WorkspaceSidebar = ({
   const currentSourceRootRef = makeSourceRootRef(currentSourceId);
 
   return (
-    <aside className={`ue-sidebar ${collapsed ? "is-collapsed" : ""}`}>
+    <aside className={`ue-sidebar ${collapsed ? "is-collapsed" : ""}`} data-tour-id="sidebar">
       <button 
         className="ue-sidebar-toggle-edge"
         onClick={onToggle}
@@ -500,7 +500,7 @@ export const WorkspaceSidebar = ({
             <strong>{galleryContext?.active_source_count ?? 0}</strong>
           </div>
 
-          <div className="ue-sidebar-quick">
+          <div className="ue-sidebar-quick" data-tour-id="sidebar-quick">
             <div className="ue-sidebar-quick-label">{t("sidebarQuickAccess")}</div>
             {quickAccessSources.length > 0 ? (
               quickAccessSources.map((source) => {
@@ -538,7 +538,7 @@ export const WorkspaceSidebar = ({
           </div>
 
           <div className="ue-sidebar-scroll" data-has-query={folderSearchActive ? "true" : "false"}>
-          <div className="ue-sidebar-group">
+          <div className="ue-sidebar-group" data-tour-id="sidebar-folders">
             <div className="ue-sidebar-group-header ue-sidebar-group-header--folders">
               <button
                 className="ue-sidebar-group-title"

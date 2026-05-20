@@ -1,7 +1,7 @@
 {
   "name": "gallery_ui",
   "private": true,
-  "version": "1.2.2",
+  "version": "1.2.3",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,8 @@
     "lint": "eslint .",
     "test": "vitest",
     "test:run": "vitest run",
-    "verify": "npm run typecheck && npm run lint && npm run test:run && npm run build",
+    "audit:security": "npm audit --audit-level=moderate",
+    "verify": "npm run typecheck && npm run lint && npm run test:run && npm run audit:security && npm run build",
     "audit:dist": "node scripts/audit-dist-assets.mjs",
     "preview": "vite preview"
   },

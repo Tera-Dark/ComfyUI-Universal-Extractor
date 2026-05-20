@@ -1,4 +1,4 @@
-from .extractor_node import UniversalTextExtractor
+from .extractor_node import UniversalJsonSegmentRandomizer
 
 
-__all__ = ["UniversalTextExtractor"]
+__all__ = ["UniversalJsonSegmentRandomizer"]

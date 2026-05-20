@@ -5,6 +5,7 @@ import { GalleryInspectorPanel } from "./components/gallery/GalleryInspectorPane
 import { TopNavigation } from "./components/shared/TopNavigation";
 import { WorkspaceSidebar } from "./components/shared/WorkspaceSidebar";
 import { TextInputDialog } from "./components/shared/TextInputDialog";
+import { OnboardingTour } from "./components/shared/OnboardingTour";
 import { useGalleryData } from "./hooks/useGalleryData";
 import { useI18n } from "./i18n/I18nProvider";
 import { useLibraryData } from "./hooks/useLibraryData";
@@ -13,6 +14,7 @@ import { useConfirm } from "./components/shared/ConfirmDialog";
 import { useToast } from "./components/shared/ToastViewport";
 import { useOperationStatus } from "./components/shared/OperationStatusCenter";
 import { getFolderBaseName } from "./components/shared/folderTree";
+import { isOnboardingTourCompleted, markOnboardingTourCompleted } from "./components/shared/onboardingTourModel";
 import type { ImageRecord, LibraryInfo, UiPreferences, WorkspaceTab } from "./types/universal-gallery";
 import "./App.css";
 
@@ -204,6 +206,7 @@ function App() {
   const [gallerySelectionModeActive, setGallerySelectionModeActive] = useState(false);
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [boardDialogOpen, setBoardDialogOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(() => !isOnboardingTourCompleted());
 
   const gallery = useGalleryData({
     isActive: activeTab === "gallery",
@@ -400,6 +403,11 @@ function App() {
           ? gallery.selectedSubfolder
           : `${toFolderDialogValue(gallery.selectedSubfolder)}/`;
     setFolderDialog({ mode: "create", initialValue: basePath });
+  };
+
+  const closeOnboardingTour = () => {
+    markOnboardingTourCompleted();
+    setOnboardingOpen(false);
   };
 
   const handleSubmitBoardDialog = async (name: string) => {
@@ -973,6 +981,7 @@ function App() {
                 preferences={uiPreferences}
                 onPreferencesChange={updateUiPreferences}
                 onSourcesChange={() => gallery.refresh()}
+                onRestartOnboarding={() => setOnboardingOpen(true)}
               />
             </Suspense>
           )}
@@ -1074,6 +1083,15 @@ function App() {
         confirmLabel={t("commonCreate")}
         onClose={() => setBoardDialogOpen(false)}
         onSubmit={handleSubmitBoardDialog}
+      />
+      <OnboardingTour
+        open={onboardingOpen}
+        onRequestTabChange={(tab) => {
+          void handleTabChange(tab);
+        }}
+        onRequestSidebarOpen={() => setSidebarCollapsed(false)}
+        onSkip={closeOnboardingTour}
+        onComplete={closeOnboardingTour}
       />
     </div>
   );

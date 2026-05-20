@@ -3,11 +3,13 @@
 ## Maintenance notes
 
 - `npm run audit:dist` reports tracked `dist/assets/index-*.js` and `index-*.css` counts, sizes, and latest entrypoint assets.
-- The repository-level `scripts\verify.ps1` runs frontend build, dist audit, and release metadata checks after Python verification.
+- `npm run audit:security` runs `npm audit --audit-level=moderate` so frontend dependency vulnerabilities stay visible.
+- The repository-level `scripts\verify.ps1` runs frontend security audit, build, dist audit, and release metadata checks after Python verification.
 - `WorkspaceSidebar` keeps folder source scoping and sorting helpers in `src/components/shared/folderTree.ts`.
 - `GalleryWorkspace` keeps image prefetch state and card image loading in `src/components/gallery/galleryImagePrefetch.ts` and `GalleryCardImage.tsx`.
 - Global pending/success/error feedback is centralized in `src/components/shared/OperationStatusCenter.tsx`; `src/components/shared/ToastViewport.tsx` is a compatibility wrapper around the same right-bottom status center, not a separate toast surface.
 - Floating menu placement, dismiss behavior, and editable-target shortcut guards are centralized in `src/utils/interaction.ts`.
+- First-run onboarding lives in `src/components/shared/OnboardingTour.tsx`; its completion flag is localStorage-only, while the Settings restart button reopens it without adding another `UiPreferences` field.
 - The gallery first screen should not fetch `/api/libraries` or use initial `forceRefresh=true`; library data is enabled only for `library` and `workbench` tabs.
 - `LibraryWorkspace`, `WorkbenchWorkspace`, `SettingsWorkspace`, and `ImageDetailModal` are lazy-loaded from `src/App.tsx`; keep `GalleryWorkspace` statically imported for the first screen.
 
@@ -31,6 +33,7 @@ npm run lint
 npm run typecheck
 npm run lint
 npm run test:run
+npm run audit:security
 npm run build
 ```
 

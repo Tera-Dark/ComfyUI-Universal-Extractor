@@ -132,7 +132,7 @@ export const GalleryToolbar = ({
   );
 
   return (
-    <div className="ue-filter-bar ue-filter-bar--gallery">
+    <div className="ue-filter-bar ue-filter-bar--gallery" data-tour-id="gallery-toolbar">
       <div className="ue-filter-copy">
         <p className="ue-filter-kicker">
           {isTrashView ? t("trashTitle") : selectedBoard ? selectedBoard.name : selectedSubfolder || t("galleryOutputFolder")}
@@ -163,6 +163,7 @@ export const GalleryToolbar = ({
             <div className="ue-filter-popover">
               <button
                 className={`ue-filter-trigger ${showFiltersMenu ? "is-open" : ""} ${activeFilterControlCount ? "active" : ""}`}
+                data-tour-id="gallery-filters"
                 onClick={(event) => {
                   event.stopPropagation();
                   onToggleFiltersMenu();
@@ -277,6 +278,7 @@ export const GalleryToolbar = ({
             ) : null}
             <button
               className={`ue-chip-toggle ue-chip-toggle--icon ${selectionMode ? "active" : ""}`}
+              data-tour-id="gallery-selection"
               title={t("bulkSelectionHint")}
               aria-label={t("bulkSelectMode")}
               onClick={() => {

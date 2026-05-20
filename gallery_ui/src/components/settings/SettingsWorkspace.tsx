@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   Check,
   ChevronsLeft,
+  CircleHelp,
   FolderPlus,
   HardDrive,
   ImagePlus,
@@ -28,6 +29,7 @@ interface SettingsWorkspaceProps {
   preferences: UiPreferences;
   onPreferencesChange: (updates: Partial<UiPreferences>) => void;
   onSourcesChange: () => void;
+  onRestartOnboarding: () => void;
 }
 
 type DraftSource = Partial<GallerySource> & {
@@ -89,7 +91,7 @@ const preferenceItems = [
   },
 ] as const;
 
-export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, onSourcesChange }: SettingsWorkspaceProps) => {
+export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, onSourcesChange, onRestartOnboarding }: SettingsWorkspaceProps) => {
   const { t } = useI18n();
   const { confirm } = useConfirm();
   const { runOperation } = useOperationStatus();
@@ -262,6 +264,20 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
           <Settings size={18} />
         </div>
 
+        <div className="ue-settings-onboarding-card" data-tour-id="settings-onboarding">
+          <span className="ue-settings-onboarding-icon">
+            <CircleHelp size={18} />
+          </span>
+          <span className="ue-settings-onboarding-copy">
+            <strong>{t("settingsOnboardingTitle")}</strong>
+            <small>{t("settingsOnboardingHint")}</small>
+          </span>
+          <button className="ue-secondary-action" type="button" onClick={onRestartOnboarding}>
+            <CircleHelp size={16} />
+            <span>{t("settingsOnboardingRestart")}</span>
+          </button>
+        </div>
+
         <div className="ue-preference-grid">
           {preferenceItems.map((item) => {
             const Icon = item.icon;
@@ -289,7 +305,7 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
       </div>
 
       <div className="ue-settings-layout">
-        <aside className="ue-settings-source-list">
+        <aside className="ue-settings-source-list" data-tour-id="settings-sources">
           <div className="ue-settings-panel-heading">
             <div>
               <h2>{t("settingsSourcesTitle")}</h2>
@@ -392,7 +408,7 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
         </div>
       </div>
 
-      <div className="ue-settings-diagnostics">
+      <div className="ue-settings-diagnostics" data-tour-id="settings-diagnostics">
         <div className="ue-settings-panel-heading">
           <div>
             <h2>{t("settingsDiagnostics")}</h2>

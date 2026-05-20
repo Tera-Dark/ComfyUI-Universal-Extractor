@@ -47,4 +47,22 @@ describe("ConfirmProvider", () => {
     expect(screen.getByTestId("result").textContent).toBe("true");
     expect(screen.queryByText("Delete image")).toBeNull();
   });
+
+  it("renders confirmation with the shared backdrop and modal classes", async () => {
+    render(
+      <I18nProvider>
+        <ConfirmProvider>
+          <ConfirmHarness />
+        </ConfirmProvider>
+      </I18nProvider>,
+    );
+
+    await userEvent.click(screen.getByRole("button", { name: "Ask" }));
+
+    const backdrop = document.querySelector(".ue-confirm-backdrop");
+    const modal = document.querySelector(".ue-confirm-modal");
+
+    expect(backdrop).toHaveClass("ue-modal-backdrop");
+    expect(modal).toHaveClass("ue-dialog-modal");
+  });
 });

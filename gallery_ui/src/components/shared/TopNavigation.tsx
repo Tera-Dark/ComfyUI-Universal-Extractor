@@ -71,6 +71,7 @@ export const TopNavigation = ({
           onClick={onSidebarToggle}
           aria-label={t("navToggleSidebar")}
           title={t("navToggleSidebar")}
+          data-tour-id="topbar-sidebar-toggle"
         >
           {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
         </button>
@@ -79,7 +80,7 @@ export const TopNavigation = ({
         <span>{t("topStatus", { tab: activeTab })}</span>
       </div>
 
-      <nav className="ue-topbar-tabs" aria-label="Primary navigation">
+      <nav className="ue-topbar-tabs" aria-label="Primary navigation" data-tour-id="topbar-tabs">
         <button
           className={`ue-topbar-tab ${activeTab === "gallery" ? "active" : ""}`}
           onClick={() => onTabChange("gallery")}
@@ -111,7 +112,7 @@ export const TopNavigation = ({
       </nav>
 
       <div className="ue-topbar-tools">
-        <div className={`ue-topbar-search-wrap ${searchOpen ? "is-open" : ""}`}>
+        <div className={`ue-topbar-search-wrap ${searchOpen ? "is-open" : ""}`} data-tour-id="topbar-search">
           <button
             className={`ue-topbar-icon-btn ${searchOpen ? "is-active" : ""}`}
             onClick={() => {
@@ -160,6 +161,7 @@ export const TopNavigation = ({
           onClick={toggleLocale}
           aria-label={t("navLanguage")}
           title={locale === "zh-CN" ? t("navSwitchToEnglish") : t("navSwitchToChinese")}
+          data-tour-id="topbar-language"
         >
           <span>{locale === "zh-CN" ? t("navLanguageZhShort") : t("navLanguageEnShort")}</span>
         </button>
@@ -169,6 +171,7 @@ export const TopNavigation = ({
           onClick={onRefresh}
           aria-label={t("navRefresh")}
           title={t("navRefresh")}
+          data-tour-id="topbar-refresh"
         >
           <RefreshCw size={14} />
         </button>
