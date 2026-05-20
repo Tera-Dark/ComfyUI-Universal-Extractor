@@ -73,11 +73,10 @@ export const TopNavigation = ({
           title={t("navToggleSidebar")}
           data-tour-id="topbar-sidebar-toggle"
         >
-          {sidebarCollapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
+          {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
         <strong>Gallery</strong>
-        <span aria-hidden="true">·</span>
-        <span>{t("topStatus", { tab: activeTab })}</span>
+        <span className="ue-topbar-scope">{t("topStatus", { tab: activeTab })}</span>
       </div>
 
       <nav className="ue-topbar-tabs" aria-label="Primary navigation" data-tour-id="topbar-tabs">
@@ -85,28 +84,28 @@ export const TopNavigation = ({
           className={`ue-topbar-tab ${activeTab === "gallery" ? "active" : ""}`}
           onClick={() => onTabChange("gallery")}
         >
-          <LayoutGrid size={15} />
+          <LayoutGrid size={16} />
           <span>{t("navGallery")}</span>
         </button>
         <button
           className={`ue-topbar-tab ${activeTab === "library" ? "active" : ""}`}
           onClick={() => onTabChange("library")}
         >
-          <Library size={15} />
+          <Library size={16} />
           <span>{t("navLibrary")}</span>
         </button>
         <button
           className={`ue-topbar-tab ${activeTab === "workbench" ? "active" : ""}`}
           onClick={() => onTabChange("workbench")}
         >
-          <Wrench size={15} />
+          <Wrench size={16} />
           <span>{t("navWorkbench")}</span>
         </button>
         <button
           className={`ue-topbar-tab ${activeTab === "settings" ? "active" : ""}`}
           onClick={() => onTabChange("settings")}
         >
-          <Settings size={15} />
+          <Settings size={16} />
           <span>{t("navSettings")}</span>
         </button>
       </nav>
@@ -125,7 +124,7 @@ export const TopNavigation = ({
             title={t("navToggleSearch")}
             disabled={!searchEnabled}
           >
-            <Search size={14} />
+            <Search size={16} />
           </button>
 
           <label className="ue-topbar-search" htmlFor="ue-topbar-search">
@@ -173,7 +172,7 @@ export const TopNavigation = ({
           title={t("navRefresh")}
           data-tour-id="topbar-refresh"
         >
-          <RefreshCw size={14} />
+          <RefreshCw size={16} />
         </button>
       </div>
     </header>

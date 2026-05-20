@@ -151,6 +151,20 @@ describe("WorkspaceSidebar folder tree", () => {
     expect(onSubfolderSelect).toHaveBeenCalledWith("default_output::");
   });
 
+  it("keeps active source styling and folder header actions accessible", () => {
+    const { container } = renderSidebar({
+      selectedSubfolder: "default_output::",
+    });
+
+    const quickActive = container.querySelector(".ue-sidebar-quick .ue-tree-item.active");
+    const folderHeader = container.querySelector(".ue-sidebar-group-header--folders");
+    const folderActions = folderHeader?.querySelectorAll("button[aria-label], .ue-sidebar-viewmodes button");
+
+    expect(quickActive).toHaveAttribute("title", "D:/ComfyUI/output");
+    expect(folderHeader?.querySelector(".ue-sidebar-subactions")).toBeInTheDocument();
+    expect(folderActions?.length).toBeGreaterThanOrEqual(4);
+  });
+
   it("opens folder context menus at the pointer without changing the current folder", () => {
     const onRenameFolder = vi.fn();
     const onSubfolderSelect = vi.fn();

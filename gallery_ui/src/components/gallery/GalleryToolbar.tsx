@@ -159,7 +159,7 @@ export const GalleryToolbar = ({
 
       {!isTrashView ? (
         <div className="ue-filter-controls ue-filter-controls--gallery">
-          <div className="ue-toolbar-group ue-toolbar-group--filters">
+          <div className="ue-toolbar-group ue-toolbar-group--browse">
             <div className="ue-filter-popover">
               <button
                 className={`ue-filter-trigger ${showFiltersMenu ? "is-open" : ""} ${activeFilterControlCount ? "active" : ""}`}
@@ -202,9 +202,7 @@ export const GalleryToolbar = ({
                 />
               ) : null}
             </div>
-          </div>
 
-          <div className="ue-toolbar-group ue-toolbar-group--view">
             {viewModeToggle}
             {galleryViewMode === "grid" ? (
               <div className="ue-select-field ue-select-field--menu">

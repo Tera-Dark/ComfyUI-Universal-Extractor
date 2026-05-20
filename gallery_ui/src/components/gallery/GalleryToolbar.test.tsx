@@ -95,4 +95,27 @@ describe("GalleryToolbar", () => {
     expect(props.onSelectionModeChange).toHaveBeenCalledWith(true);
     expect(props.onClearSelection).toHaveBeenCalledTimes(2);
   });
+
+  it("keeps browse, action, and source groups distinct while preserving source selection", async () => {
+    const user = userEvent.setup();
+    const { container, props } = renderToolbar({
+      writableSources: [
+        { id: "default_output", name: "Output", kind: "output", path: "D:/out", enabled: true, writable: true, recursive: true, import_target: true, exists: true },
+        { id: "import_target", name: "Import Target", kind: "custom", path: "D:/import", enabled: true, writable: true, recursive: true, import_target: true, exists: true },
+      ],
+    });
+
+    const browseGroup = container.querySelector(".ue-toolbar-group--browse");
+    const actionGroup = container.querySelector(".ue-toolbar-group--state");
+    const sourceGroup = container.querySelector(".ue-toolbar-group--source");
+
+    expect(browseGroup).toContainElement(container.querySelector(".ue-filter-trigger"));
+    expect(browseGroup).toContainElement(container.querySelector(".ue-view-toggle"));
+    expect(browseGroup).toContainElement(container.querySelector(".ue-select-field--menu"));
+    expect(actionGroup?.querySelector("[data-tour-id='gallery-selection']")).toBeInTheDocument();
+    expect(sourceGroup?.querySelector("select")).toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole("combobox"), "import_target");
+    expect(props.onImportTargetSourceIdChange).toHaveBeenCalledWith("import_target");
+  });
 });

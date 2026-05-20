@@ -151,9 +151,9 @@ const TreeBranch = ({
           onDrop={(event) => onFolderDrop(event, node.path)}
           title={node.path}
         >
-          <Folder size={14} />
+          <Folder size={15} />
           <span>{node.name}</span>
-          {pinned ? <Pin size={11} fill="currentColor" /> : null}
+          {pinned ? <span className="ue-pin-dot" aria-hidden="true" /> : null}
         </button>
       </div>
 
@@ -514,7 +514,7 @@ export const WorkspaceSidebar = ({
                     onClick={() => onSubfolderSelect(value)}
                     title={source.path}
                   >
-                    <SourceIcon size={14} />
+                    <SourceIcon size={15} />
                     <span>{getSidebarSourceLabel(source, source.id)}</span>
                   </button>
                 );
@@ -524,7 +524,7 @@ export const WorkspaceSidebar = ({
                 className={`ue-tree-item ue-tree-item--root ${selectedSubfolder === "" && selectedBoardId === "" && !pinnedOnly ? "active" : ""}`}
                 onClick={() => onSubfolderSelect("")}
               >
-                <HardDrive size={14} />
+                <HardDrive size={15} />
                 <span>{galleryContext?.output_dir_relative || "./output"}</span>
               </button>
             )}
@@ -532,7 +532,7 @@ export const WorkspaceSidebar = ({
               className={`ue-tree-item ue-tree-item--root ${selectedSubfolder === "__trash__" && selectedBoardId === "" ? "active" : ""}`}
               onClick={() => onSubfolderSelect("__trash__")}
             >
-              <Trash size={14} />
+              <Trash size={15} />
               <span>{t("sidebarTrash")}</span>
             </button>
           </div>
@@ -660,7 +660,7 @@ export const WorkspaceSidebar = ({
                         className={`ue-tree-item ue-tree-item--compact ${selectedSubfolder === currentSourceRootRef && selectedBoardId === "" && !pinnedOnly ? "active" : ""}`}
                         onClick={() => onSubfolderSelect(currentSourceRootRef)}
                       >
-                        <Folder size={14} />
+                        <Folder size={15} />
                         <span>./</span>
                       </button>
                     ) : null}
@@ -677,9 +677,9 @@ export const WorkspaceSidebar = ({
                         onDrop={(event) => handleFolderDrop(event, subfolder)}
                         title={subfolder}
                       >
-                        <Folder size={14} />
+                        <Folder size={15} />
                         <span>{formatFolderLabel(subfolder, galleryContext?.sources ?? [], getSidebarSourceLabel, currentSourceId)}</span>
-                        {isFolderPinned(subfolder, pinnedFolderPaths) ? <Pin size={11} fill="currentColor" /> : null}
+                        {isFolderPinned(subfolder, pinnedFolderPaths) ? <span className="ue-pin-dot" aria-hidden="true" /> : null}
                       </button>
                     ))}
                 </div>

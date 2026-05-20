@@ -344,6 +344,16 @@
   align-items: center;
   gap: 5px;
   flex: 0 0 auto;
+  transition: opacity var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-sidebar-group-header--folders .ue-sidebar-subactions {
+  opacity: 0.42;
+}
+
+.ue-sidebar-group-header--folders:hover .ue-sidebar-subactions,
+.ue-sidebar-group-header--folders:focus-within .ue-sidebar-subactions {
+  opacity: 1;
 }
 
 .ue-sidebar-subactions--dense {
@@ -400,6 +410,16 @@
 .ue-tree-item svg,
 .ue-tree-label svg {
   display: block;
+}
+
+.ue-sidebar-subaction svg,
+.ue-sidebar-viewmodes svg,
+.ue-sidebar-group-title svg,
+.ue-sidebar-group-toggle svg,
+.ue-tree-item > svg:first-child,
+.ue-tree-label > svg:first-child {
+  width: 15px;
+  height: 15px;
 }
 
 .ue-sidebar-action-menu {
@@ -558,6 +578,12 @@
   min-width: 0;
 }
 
+.ue-tree-item > svg:first-child,
+.ue-tree-label > svg:first-child {
+  color: currentColor;
+  opacity: 0.88;
+}
+
 .ue-tree-item::before,
 .ue-tree-label::before,
 .ue-library-list-item::before {
@@ -581,7 +607,8 @@
 
 .ue-tree-item.active,
 .ue-tree-row.active .ue-tree-label,
-.ue-library-list-item.active {
+.ue-library-list-item.active,
+.ue-board-list-item.active {
   background: rgba(239, 246, 255, 0.86);
   color: #1d4ed8;
   font-weight: 600;
@@ -606,7 +633,8 @@
 
 .ue-tree-item.active::before,
 .ue-tree-row.active .ue-tree-label::before,
-.ue-library-list-item.active::before {
+.ue-library-list-item.active::before,
+.ue-board-list-item.active::before {
   background: #2563eb;
 }
 
@@ -649,6 +677,18 @@
     transform var(--ue-duration-fast) var(--ue-ease);
 }
 
+.ue-board-list-item::before {
+  content: "";
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  left: 5px;
+  width: 2px;
+  border-radius: 999px;
+  background: transparent;
+  transition: background-color var(--ue-duration-fast) var(--ue-ease);
+}
+
 .ue-board-list-item:hover {
   background: rgba(244, 244, 245, 0.88);
   color: var(--ue-ink);
@@ -656,8 +696,7 @@
 }
 
 .ue-board-list-item.active {
-  background: var(--ue-accent);
-  color: #ffffff;
+  transform: none;
 }
 
 .ue-board-list-item span:nth-child(2) {
@@ -689,8 +728,8 @@
 }
 
 .ue-board-list-item.active .ue-board-cover {
-  background: rgba(255, 255, 255, 0.16);
-  color: #ffffff;
+  background: rgba(255, 255, 255, 0.74);
+  color: #1d4ed8;
 }
 
 .ue-board-cover img {
@@ -712,6 +751,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ue-tree-label .ue-pin-dot,
+.ue-tree-item .ue-pin-dot {
+  flex: 0 0 auto;
+  width: 6px;
+  height: 6px;
+  margin-left: auto;
+  overflow: visible;
+  border-radius: 999px;
+  background: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
 .ue-tree-branch,

@@ -12,6 +12,7 @@
 - First-run onboarding lives in `src/components/shared/OnboardingTour.tsx`; its completion flag is localStorage-only, while the Settings restart button reopens it without adding another `UiPreferences` field.
 - The gallery first screen should not fetch `/api/libraries` or use initial `forceRefresh=true`; library data is enabled only for `library` and `workbench` tabs.
 - `LibraryWorkspace`, `WorkbenchWorkspace`, `SettingsWorkspace`, and `ImageDetailModal` are lazy-loaded from `src/App.tsx`; keep `GalleryWorkspace` statically imported for the first screen.
+- Normal gallery masonry measurement is owned by `GalleryWorkspace` and `useVirtualMasonry`. Dual-folder mode unmounts the normal grid, so leaving dual-folder mode must reset stale `gridWidth` and reattach `ResizeObserver` to the newly mounted `.ue-gallery-grid--virtual`.
 
 这是 ComfyUI Universal Extractor 的图库前端，使用 React、TypeScript 和 Vite 构建。构建产物位于 `gallery_ui/dist/`，由后端以 `/gallery/` 路径挂载到 ComfyUI。
 

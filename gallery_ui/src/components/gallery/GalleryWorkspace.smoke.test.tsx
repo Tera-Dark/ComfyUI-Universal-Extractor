@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "../../i18n/I18nProvider";
+import { galleryApi } from "../../services/galleryApi";
 import type { GalleryContext, TrashItem } from "../../types/universal-gallery";
 import { ConfirmProvider } from "../shared/ConfirmDialog";
 import { OperationStatusProvider } from "../shared/OperationStatusCenter";
@@ -453,6 +454,74 @@ describe("GalleryWorkspace smoke", () => {
       expect(onSelectionChange.mock.calls.at(-1)?.[0]).toContain(images[12].relative_path);
     });
     fireEvent.pointerUp(grid, { pointerId: 1, pointerType: "mouse", clientX: 1000, clientY: 220 });
+  });
+
+  it("reattaches grid measurement after opening and closing dual-folder mode", async () => {
+    const observedElements: Element[] = [];
+    const originalResizeObserver = window.ResizeObserver;
+    class MockResizeObserver {
+      callback: ResizeObserverCallback;
+
+      constructor(callback: ResizeObserverCallback) {
+        this.callback = callback;
+      }
+
+      observe(element: Element) {
+        observedElements.push(element);
+        this.callback([], this as unknown as ResizeObserver);
+      }
+
+      unobserve() {}
+
+      disconnect() {}
+    }
+    vi.stubGlobal("ResizeObserver", MockResizeObserver);
+    const listImagesSpy = vi.spyOn(galleryApi, "listImages").mockResolvedValue({
+      images: [],
+      total: 0,
+      page: 1,
+      limit: 80,
+    });
+
+    try {
+      const { container } = renderWorkspace({
+        isTrashView: false,
+        selectedSubfolder: "default_output::",
+        total: 2,
+        images: [galleryImage, secondGalleryImage],
+        gridColumns: 4,
+      });
+
+      await waitFor(() =>
+        expect(observedElements.some((element) => element.classList.contains("ue-gallery-grid--virtual"))).toBe(true),
+      );
+      const firstGrid = container.querySelector(".ue-gallery-grid--virtual");
+      expect(observedElements).toContain(firstGrid);
+      const initialGridObserveCount = observedElements.filter((element) =>
+        element.classList.contains("ue-gallery-grid--virtual"),
+      ).length;
+
+      fireEvent.click(screen.getByRole("button", { name: "开启双栏目录整理" }));
+      expect(container.querySelector(".ue-dual-workspace")).toBeInTheDocument();
+
+      fireEvent.click(screen.getByRole("button", { name: "关闭双栏目录整理" }));
+      await waitFor(() => expect(container.querySelector(".ue-gallery-grid--virtual")).toBeInTheDocument());
+      await waitFor(() =>
+        expect(observedElements.filter((element) => element.classList.contains("ue-gallery-grid--virtual")).length).toBeGreaterThan(initialGridObserveCount),
+      );
+
+      const gridObservations = observedElements.filter((element) => element.classList.contains("ue-gallery-grid--virtual"));
+      expect(gridObservations.at(-1)).toBe(container.querySelector(".ue-gallery-grid--virtual"));
+      expect(gridObservations.at(-1)).not.toBe(firstGrid);
+      expect(listImagesSpy).toHaveBeenCalled();
+    } finally {
+      listImagesSpy.mockRestore();
+      if (originalResizeObserver) {
+        vi.stubGlobal("ResizeObserver", originalResizeObserver);
+      } else {
+        vi.unstubAllGlobals();
+      }
+    }
   });
 
   it("only treats real external file drops as imports", async () => {

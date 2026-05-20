@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronUp,
   CheckSquare,
@@ -352,11 +352,15 @@ export const GalleryWorkspace = ({
     handleScroll();
     scrollContainer.addEventListener("scroll", handleScroll, { passive: true });
     return () => scrollContainer.removeEventListener("scroll", handleScroll);
-  }, [images.length, isTrashView, trashItems.length]);
+  }, [dualFolderMode, galleryViewMode, images.length, isTrashView, trashItems.length]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const gridElement = gridRef.current;
-    if (!gridElement || typeof ResizeObserver === "undefined") {
+    if (dualFolderMode || !gridElement) {
+      setGridWidth(0);
+      return;
+    }
+    if (typeof ResizeObserver === "undefined") {
       setGridWidth(gridElement?.clientWidth ?? 0);
       return;
     }
@@ -369,7 +373,7 @@ export const GalleryWorkspace = ({
     observer.observe(gridElement);
     updateMetrics();
     return () => observer.disconnect();
-  }, [images.length, isTrashView, trashItems.length]);
+  }, [dualFolderMode, galleryViewMode, images.length, isTrashView, trashItems.length]);
   const masonryLayout = useVirtualMasonry({
     images,
     requestedColumns: gridColumns,

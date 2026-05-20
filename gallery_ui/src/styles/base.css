@@ -37,6 +37,10 @@
   --ue-duration-slow: 400ms;
 
   --ue-sidebar-width: clamp(236px, 18vw, 292px);
+  --ue-icon-size: 16px;
+  --ue-icon-size-compact: 14px;
+  --ue-icon-size-status: 11px;
+  --ue-hit-target: 32px;
 }
 
 *,
@@ -271,9 +275,20 @@ textarea::placeholder {
 
 .ue-topbar-icon-btn,
 .ue-icon-action {
-  width: 32px;
-  height: 32px;
+  width: var(--ue-hit-target);
+  height: var(--ue-hit-target);
   padding: 0;
+}
+
+.ue-topbar-icon-btn > svg,
+.ue-icon-action > svg,
+.ue-chip-toggle > svg,
+.ue-tool-btn > svg,
+.ue-secondary-btn > svg,
+.ue-primary-btn > svg {
+  flex: 0 0 auto;
+  width: var(--ue-icon-size);
+  height: var(--ue-icon-size);
 }
 
 .ue-primary-btn,
@@ -319,6 +334,12 @@ textarea::placeholder {
 .ue-icon-action--tiny {
   width: 28px;
   height: 28px;
+}
+
+.ue-icon-action--tiny > svg,
+.ue-chip-toggle--icon > svg {
+  width: var(--ue-icon-size-compact);
+  height: var(--ue-icon-size-compact);
 }
 
 .ue-danger-btn,

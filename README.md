@@ -9,6 +9,7 @@
 - Shared frontend menu placement, dismiss handling, and shortcut editable-target guards live in `gallery_ui/src/utils/interaction.ts`.
 - Gallery first screen is optimized to avoid external font requests, `/api/libraries`, and initial `force_refresh=true`; non-gallery workspaces and image detail are lazy-loaded chunks.
 - First-run onboarding is browser-local state in `gallery_ui/src/components/shared/OnboardingTour.tsx` and `onboardingTourModel.ts`; completing or skipping the tour writes `universal-extractor:onboarding-tour-v1-completed`, and Settings can restart the tour without changing `UiPreferences`.
+- Dual-folder organizer toggling remounts the normal virtual masonry grid; `GalleryWorkspace` must reset stale grid measurements and reobserve the new `.ue-gallery-grid--virtual` when returning to normal gallery layout.
 - Runtime prompt-library counts are cached in `data/library_summary_cache.json`, which is ignored and excluded from user-visible JSON libraries.
 
 ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台插件，包含两块核心能力：

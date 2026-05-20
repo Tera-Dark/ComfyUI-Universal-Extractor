@@ -26,9 +26,21 @@
   letter-spacing: -0.02em;
 }
 
-.ue-topbar-brand span {
+.ue-topbar-scope {
+  display: inline-flex;
+  align-items: center;
+  min-height: 22px;
+  max-width: 168px;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 1px solid var(--ue-line-soft);
+  border-radius: 999px;
+  background: rgba(244, 244, 245, 0.72);
   color: var(--ue-ink-ghost);
-  font-size: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1;
+  text-overflow: ellipsis;
   white-space: nowrap;
 }
 
@@ -56,6 +68,16 @@
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
+  opacity: 0.78;
+  transition:
+    color var(--ue-duration-fast) var(--ue-ease),
+    opacity var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-topbar-tab svg {
+  flex: 0 0 auto;
+  opacity: 0.72;
+  transition: opacity var(--ue-duration-fast) var(--ue-ease);
 }
 
 .ue-topbar-tab::after {
@@ -72,10 +94,17 @@
 
 .ue-topbar-tab:hover {
   color: var(--ue-ink-soft);
+  opacity: 1;
 }
 
 .ue-topbar-tab.active {
   color: var(--ue-ink);
+  font-weight: 650;
+  opacity: 1;
+}
+
+.ue-topbar-tab.active svg {
+  opacity: 1;
 }
 
 .ue-topbar-tab.active::after {
@@ -166,7 +195,7 @@
 }
 
 @media (max-width: 720px) {
-  .ue-topbar-brand span:last-child {
+  .ue-topbar-scope {
     display: none;
   }
 

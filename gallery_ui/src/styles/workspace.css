@@ -96,7 +96,7 @@
 .ue-library-actions {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 12px;
   flex-wrap: wrap;
   min-width: 0;
 }
@@ -109,21 +109,32 @@
   display: inline-flex;
   align-items: center;
   gap: 7px;
+  min-height: 42px;
   min-width: 0;
-  padding: 3px;
-  border: 1px solid rgba(228, 228, 231, 0.52);
+  padding: 4px;
+  border: 1px solid rgba(228, 228, 231, 0.86);
   border-radius: 999px;
-  background: rgba(250, 250, 250, 0.58);
+  background: rgba(255, 255, 255, 0.84);
+  box-shadow: var(--ue-shadow-1);
 }
 
+.ue-toolbar-group--browse,
 .ue-toolbar-group--filters,
 .ue-toolbar-group--state,
 .ue-toolbar-group--source {
-  background: rgba(255, 255, 255, 0.64);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.ue-toolbar-group--browse {
+  gap: 8px;
 }
 
 .ue-toolbar-group--source {
-  padding-inline: 6px;
+  padding-inline: 7px;
+}
+
+.ue-toolbar-group svg {
+  flex: 0 0 auto;
 }
 
 .ue-pill-group {
@@ -198,7 +209,7 @@
 .ue-segmented-control button.active {
   background: #ffffff;
   color: var(--ue-ink);
-  box-shadow: var(--ue-shadow-1);
+  box-shadow: 0 1px 4px rgba(24, 24, 27, 0.08);
 }
 
 .ue-segmented-control--compact button {
@@ -320,6 +331,11 @@
   background: transparent;
   color: var(--ue-ink-muted);
   cursor: pointer;
+  transition:
+    background-color var(--ue-duration-fast) var(--ue-ease),
+    border-color var(--ue-duration-fast) var(--ue-ease),
+    color var(--ue-duration-fast) var(--ue-ease),
+    box-shadow var(--ue-duration-fast) var(--ue-ease);
 }
 
 .ue-chip-toggle:hover {
@@ -331,6 +347,7 @@
   background: var(--ue-accent);
   border-color: var(--ue-accent);
   color: #ffffff;
+  box-shadow: 0 4px 12px rgba(24, 24, 27, 0.14);
 }
 
 .ue-chip-toggle--icon {
