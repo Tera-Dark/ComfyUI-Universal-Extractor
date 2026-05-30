@@ -92,15 +92,24 @@ def _same_origin_url(value: str, request: web.Request) -> bool:
 
 def _is_same_origin_request(request: web.Request) -> bool:
     sec_fetch_site = request.headers.get("Sec-Fetch-Site", "").strip().lower()
-    if sec_fetch_site and sec_fetch_site not in {"same-origin", "none"}:
-        return False
+    if sec_fetch_site:
+        return sec_fetch_site in {"same-origin", "none"}
 
     origin = request.headers.get("Origin", "").strip()
-    if origin and not _same_origin_url(origin, request):
-        return False
+    if origin:
+        return _same_origin_url(origin, request)
 
     referer = request.headers.get("Referer", "").strip()
-    if referer and not _same_origin_url(referer, request):
+    if referer:
+        return _same_origin_url(referer, request)
+
+    # No verifiable origin headers present. For mutating requests (POST, PUT,
+    # DELETE, PATCH) reject by default — browsers always send at least one of
+    # these headers on cross-origin or same-origin fetches. Their absence
+    # indicates a non-browser client (curl, scripts) which must not bypass the
+    # same-origin gate. GET/HEAD requests are allowed without origin headers
+    # because they are safe/idempotent and may come from direct navigation.
+    if request.method.upper() in {"POST", "PUT", "DELETE", "PATCH"}:
         return False
 
     return True

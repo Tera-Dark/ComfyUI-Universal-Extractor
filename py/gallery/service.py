@@ -469,12 +469,27 @@ def ensure_trash_storage_dir() -> str:
     return storage_dir
 
 
+def _powershell_escape_single_quoted(value: str) -> str:
+    """Escape a string for use inside PowerShell single-quoted literals.
+
+    Single-quoted strings in PowerShell only interpret '' as a literal '.
+    However, if the value is interpolated into a *command string* passed via
+    -Command, backticks and $() could still be dangerous in double-quoted
+    contexts. To be safe, we reject paths containing characters that should
+    never appear in filesystem paths but could enable injection.
+    """
+    dangerous_chars = {"`", "$", "\x00", "\n", "\r"}
+    if any(char in value for char in dangerous_chars):
+        raise ValueError(f"path contains disallowed characters: {value!r}")
+    return value.replace("'", "''")
+
+
 def send_to_system_recycle_bin(path: str):
     normalized_path = os.path.abspath(path)
     if not os.path.exists(normalized_path):
         return
 
-    escaped_path = normalized_path.replace("'", "''")
+    escaped_path = _powershell_escape_single_quoted(normalized_path)
     if os.path.isdir(normalized_path):
         command = (
             "Add-Type -AssemblyName Microsoft.VisualBasic; "
@@ -1572,6 +1587,11 @@ def _search_text_for_row(row: sqlite3.Row | dict[str, Any]) -> str:
     )
 
 
+def _escape_like(value: str) -> str:
+    """Escape SQL LIKE special characters (%, _, \\) so they match literally."""
+    return value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def _fts_match_query(search: str) -> str:
     value = str(search or "").strip()
     if len(value) < 3:
@@ -2610,9 +2630,9 @@ def list_images_page(
             params.append(fts_query)
         else:
             where_clauses.append(
-                "lower(filename || ' ' || relative_path || ' ' || title || ' ' || category || ' ' || notes) LIKE ?"
+                "lower(filename || ' ' || relative_path || ' ' || title || ' ' || category || ' ' || notes) LIKE ? ESCAPE '\\'"
             )
-            params.append(f"%{normalized_search}%")
+            params.append(f"%{_escape_like(normalized_search)}%")
     if normalized_category:
         where_clauses.append("lower(category) = ?")
         params.append(normalized_category)
@@ -2684,10 +2704,10 @@ def list_images_page(
                 raise
             fallback_where = where_sql.replace(
                 "relative_path IN (SELECT relative_path FROM gallery_images_fts WHERE gallery_images_fts MATCH ?)",
-                "lower(filename || ' ' || relative_path || ' ' || title || ' ' || category || ' ' || notes) LIKE ?",
+                "lower(filename || ' ' || relative_path || ' ' || title || ' ' || category || ' ' || notes) LIKE ? ESCAPE '\\'",
                 1,
             )
-            fallback_params = [f"%{normalized_search}%" if value == fts_query else value for value in params]
+            fallback_params = [f"%{_escape_like(normalized_search)}%" if value == fts_query else value for value in params]
             total = int(
                 connection.execute(f"SELECT COUNT(*) AS total FROM gallery_images WHERE {fallback_where}", fallback_params).fetchone()["total"]
             )
