@@ -1,0 +1,67 @@
+name: Publish to Comfy registry
+
+on:
+  workflow_dispatch:
+
+jobs:
+  publish-node:
+    name: Publish Custom Node to registry
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Read package version
+        id: package
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import tomllib
+          with open("pyproject.toml", "rb") as handle:
+              data = tomllib.load(handle)
+          print(f"node_id={data['project']['name']}")
+          print(f"version={data['project']['version']}")
+          PY
+
+      - name: Show publish target
+        run: echo "Preparing to publish ${{ steps.package.outputs.node_id }} ${{ steps.package.outputs.version }}"
+
+      - name: Check registry version
+        id: registry-version
+        shell: bash
+        env:
+          NODE_ID: ${{ steps.package.outputs.node_id }}
+          NODE_VERSION: ${{ steps.package.outputs.version }}
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          import sys
+          import urllib.parse
+          import urllib.request
+
+          node_id = os.environ["NODE_ID"]
+          version = os.environ["NODE_VERSION"]
+          params = urllib.parse.urlencode({
+              "nodeId": node_id,
+              "pageSize": "100",
+              "statuses": "NodeVersionStatusActive",
+          })
+          url = f"https://api.comfy.org/versions?{params}"
+          exists = False
+          try:
+              with urllib.request.urlopen(url, timeout=20) as response:
+                  payload = json.loads(response.read().decode("utf-8"))
+              exists = any(item.get("version") == version for item in payload.get("versions", []))
+          except Exception as error:
+              print(f"::warning::Could not check Comfy registry before publishing: {error}", file=sys.stderr)
+          print(f"exists={'true' if exists else 'false'}")
+          if exists:
+              print(f"::notice::Comfy registry already has {node_id} {version}; skipping publish.", file=sys.stderr)
+          PY
+
+      - name: Publish Custom Node
+        if: steps.registry-version.outputs.exists != 'true'
+        uses: Comfy-Org/publish-node-action@main
+        with:
+          personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}

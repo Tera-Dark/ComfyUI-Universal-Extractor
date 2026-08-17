@@ -1,0 +1,1030 @@
+import { useEffect, useMemo, useState } from "react";
+import {
+  ArrowUpRight,
+  BookmarkPlus,
+  Boxes,
+  Compass,
+  Copy,
+  ExternalLink,
+  Gauge,
+  Globe2,
+  Images,
+  LayoutGrid,
+  Link2,
+  Plus,
+  Search,
+  SlidersHorizontal,
+  Sparkles,
+  Star,
+  ToggleLeft,
+  ToggleRight,
+  Wand2,
+  X,
+} from "lucide-react";
+
+import { useToast } from "../shared/ToastViewport";
+import { useOperationStatus } from "../shared/OperationStatusCenter";
+import { useI18n } from "../../i18n/I18nProvider";
+import { galleryApi } from "../../services/galleryApi";
+import type { LibraryInfo } from "../../types/universal-gallery";
+import "../../styles/workbench.css";
+
+interface WorkbenchWorkspaceProps {
+  libraries: LibraryInfo[];
+  activeLibraryName: string | null;
+  onLibrarySelect: (name: string) => Promise<void>;
+}
+
+type WorkbenchTool = "artist" | "inspiration";
+type GeneratorMode = "pure" | "standard" | "creative" | "nai";
+type FilterMode = "none" | "gt" | "lt";
+type BracketStyle = "paren" | "curly" | "square";
+type FormatToolMode = "anima" | "custom";
+type InspirationSort = "recommendation" | "frequency" | "name";
+type InspirationType = "all" | "moodboard" | "portfolio" | "illustration" | "product" | "ai";
+
+const LS_KEY = "ue-artist-generator-v2";
+
+interface ArtistCandidate {
+  name: string;
+  other_names?: string[] | string;
+  post_count?: number;
+}
+
+interface InspirationSite {
+  id: string;
+  title: string;
+  url: string;
+  type: Exclude<InspirationType, "all">;
+  frequency: number;
+  recommendation: number;
+  regionKey: string;
+  descriptionKey: string;
+  bestForKey: string;
+}
+
+const inspirationSites: InspirationSite[] = [
+  {
+    id: "pinterest",
+    title: "Pinterest",
+    url: "https://www.pinterest.com/",
+    type: "moodboard",
+    frequency: 96,
+    recommendation: 95,
+    regionKey: "inspirationRegionGlobal",
+    descriptionKey: "inspirationPinterestDesc",
+    bestForKey: "inspirationPinterestBest",
+  },
+  {
+    id: "huaban",
+    title: "Huaban",
+    url: "https://huaban.com/",
+    type: "moodboard",
+    frequency: 88,
+    recommendation: 90,
+    regionKey: "inspirationRegionChina",
+    descriptionKey: "inspirationHuabanDesc",
+    bestForKey: "inspirationHuabanBest",
+  },
+  {
+    id: "behance",
+    title: "Behance",
+    url: "https://www.behance.net/",
+    type: "portfolio",
+    frequency: 84,
+    recommendation: 92,
+    regionKey: "inspirationRegionGlobal",
+    descriptionKey: "inspirationBehanceDesc",
+    bestForKey: "inspirationBehanceBest",
+  },
+  {
+    id: "artstation",
+    title: "ArtStation",
+    url: "https://www.artstation.com/",
+    type: "illustration",
+    frequency: 82,
+    recommendation: 91,
+    regionKey: "inspirationRegionGlobal",
+    descriptionKey: "inspirationArtStationDesc",
+    bestForKey: "inspirationArtStationBest",
+  },
+  {
+    id: "dribbble",
+    title: "Dribbble",
+    url: "https://dribbble.com/",
+    type: "product",
+    frequency: 78,
+    recommendation: 86,
+    regionKey: "inspirationRegionGlobal",
+    descriptionKey: "inspirationDribbbleDesc",
+    bestForKey: "inspirationDribbbleBest",
+  },
+  {
+    id: "cosmos",
+    title: "Cosmos",
+    url: "https://www.cosmos.so/",
+    type: "moodboard",
+    frequency: 68,
+    recommendation: 84,
+    regionKey: "inspirationRegionGlobal",
+    descriptionKey: "inspirationCosmosDesc",
+    bestForKey: "inspirationCosmosBest",
+  },
+  {
+    id: "arena",
+    title: "Are.na",
+    url: "https://www.are.na/",
+    type: "moodboard",
+    frequency: 61,
+    recommendation: 80,
+    regionKey: "inspirationRegionGlobal",
+    descriptionKey: "inspirationArenaDesc",
+    bestForKey: "inspirationArenaBest",
+  },
+  {
+    id: "designspiration",
+    title: "Designspiration",
+    url: "https://www.designspiration.com/",
+    type: "moodboard",
+    frequency: 59,
+    recommendation: 78,
+    regionKey: "inspirationRegionGlobal",
+    descriptionKey: "inspirationDesignspirationDesc",
+    bestForKey: "inspirationDesignspirationBest",
+  },
+  {
+    id: "lapa",
+    title: "Lapa Ninja",
+    url: "https://www.lapa.ninja/",
+    type: "product",
+    frequency: 54,
+    recommendation: 76,
+    regionKey: "inspirationRegionGlobal",
+    descriptionKey: "inspirationLapaDesc",
+    bestForKey: "inspirationLapaBest",
+  },
+  {
+    id: "lexica",
+    title: "Lexica",
+    url: "https://lexica.art/",
+    type: "ai",
+    frequency: 64,
+    recommendation: 74,
+    regionKey: "inspirationRegionGlobal",
+    descriptionKey: "inspirationLexicaDesc",
+    bestForKey: "inspirationLexicaBest",
+  },
+];
+
+const stripOuterWrappers = (value: string) => {
+  const pairs: Record<string, string> = {
+    "[": "]",
+    "(": ")",
+    "{": "}",
+  };
+
+  let current = value.trim();
+  while (current.length > 1) {
+    const opening = current[0];
+    const closing = current[current.length - 1];
+    if (pairs[opening] !== closing) {
+      break;
+    }
+    current = current.slice(1, -1).trim();
+  }
+  return current;
+};
+
+const cleanArtistTag = (tag: string) =>
+  stripOuterWrappers(tag)
+    .replace(/^\d+(\.\d+)?::/, "")
+    .replace(/::$/, "")
+    .replace(/:\d+(\.\d+)?$/, "")
+    .replace(/^artist:/i, "")
+    .replace(/^by\s+/i, "")
+    .trim();
+
+const normalizeArtistWords = (value: string) => value.replace(/_/g, " ").replace(/\s+/g, " ").trim();
+
+const normalizeAnimaTag = (tag: string) => {
+  const trimmed = cleanArtistTag(tag).replace(/^@+/, "");
+  const bracketMatch = trimmed.match(/^(.+?)_\((.+)\)$/) ?? trimmed.match(/^(.+?)\((.+)\)$/);
+  if (bracketMatch) {
+    const outer = normalizeArtistWords(bracketMatch[1].replace(/_+$/g, "").trim());
+    const inner = normalizeArtistWords(bracketMatch[2].trim());
+    return `@${outer} \\(${inner}\\)`;
+  }
+
+  return `@${normalizeArtistWords(trimmed)}`;
+};
+
+export const WorkbenchWorkspace = ({
+  libraries,
+  activeLibraryName,
+  onLibrarySelect,
+}: WorkbenchWorkspaceProps) => {
+  const { t } = useI18n();
+  const { pushToast } = useToast();
+  const { runOperation } = useOperationStatus();
+
+  const [activeTool, setActiveTool] = useState<WorkbenchTool>("artist");
+  const [selectedLibrary, setSelectedLibrary] = useState<string>("");
+  const [query, setQuery] = useState("");
+  const [mode, setMode] = useState<GeneratorMode>("standard");
+  const [artistCount, setArtistCount] = useState(3);
+  const [finalResult, setFinalResult] = useState("");
+  const [preselectedNames, setPreselectedNames] = useState<string[]>([]);
+
+  const [postCountFilterMode, setPostCountFilterMode] = useState<FilterMode>("none");
+  const [postCountThreshold, setPostCountThreshold] = useState(0);
+  const [creativeBracketStyle, setCreativeBracketStyle] = useState<BracketStyle>("paren");
+  const [creativeNestLevels, setCreativeNestLevels] = useState(0);
+  const [standardWeightMin, setStandardWeightMin] = useState(0.5);
+  const [standardWeightMax, setStandardWeightMax] = useState(1.5);
+  const [naiWeightMin, setNaiWeightMin] = useState(0.5);
+  const [naiWeightMax, setNaiWeightMax] = useState(1.5);
+  const [enableCustomFormat, setEnableCustomFormat] = useState(false);
+  const [customFormatString, setCustomFormatString] = useState("artist:{name}");
+  const [formatToolMode, setFormatToolMode] = useState<FormatToolMode>("anima");
+  const [customFormatToolString, setCustomFormatToolString] = useState("@{tag},");
+  const [formattedOutput, setFormattedOutput] = useState("");
+  const [previewCandidates, setPreviewCandidates] = useState<ArtistCandidate[]>([]);
+  const [previewTotal, setPreviewTotal] = useState(0);
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false);
+  const [inspirationQuery, setInspirationQuery] = useState("");
+  const [inspirationSort, setInspirationSort] = useState<InspirationSort>("recommendation");
+  const [inspirationType, setInspirationType] = useState<InspirationType>("all");
+  const [selectedInspirationId, setSelectedInspirationId] = useState("pinterest");
+
+  const preferredLibrary = useMemo(() => {
+    return (
+      libraries.find((library) => library.filename.toLowerCase().includes("artists"))?.filename ??
+      libraries[0]?.filename ??
+      ""
+    );
+  }, [libraries]);
+
+  const selectedInspiration = useMemo(
+    () => inspirationSites.find((site) => site.id === selectedInspirationId) ?? inspirationSites[0],
+    [selectedInspirationId],
+  );
+
+  const activeToolLabel = activeTool === "artist" ? t("toolArtistGenerator") : t("toolInspirationHub");
+  const resultTokenCount = useMemo(
+    () => finalResult.split(",").map((part) => part.trim()).filter(Boolean).length,
+    [finalResult],
+  );
+  const formattedTokenCount = useMemo(
+    () => formattedOutput.split(",").map((part) => part.trim()).filter(Boolean).length,
+    [formattedOutput],
+  );
+
+  const filteredInspirationSites = useMemo(() => {
+    const normalizedQuery = inspirationQuery.trim().toLowerCase();
+    const filtered = inspirationSites.filter((site) => {
+      const matchesType = inspirationType === "all" || site.type === inspirationType;
+      const searchableText = [
+        site.title,
+        t(site.descriptionKey),
+        t(site.bestForKey),
+        t(site.regionKey),
+        t(`inspirationType_${site.type}`),
+      ].join(" ").toLowerCase();
+      return matchesType && (!normalizedQuery || searchableText.includes(normalizedQuery));
+    });
+
+    return filtered.sort((left, right) => {
+      if (inspirationSort === "frequency") {
+        return right.frequency - left.frequency;
+      }
+      if (inspirationSort === "name") {
+        return left.title.localeCompare(right.title);
+      }
+      return right.recommendation - left.recommendation;
+    });
+  }, [inspirationQuery, inspirationSort, inspirationType, t]);
+
+  useEffect(() => {
+    if (!filteredInspirationSites.length) {
+      return;
+    }
+    if (!filteredInspirationSites.some((site) => site.id === selectedInspirationId)) {
+      setSelectedInspirationId(filteredInspirationSites[0].id);
+    }
+  }, [filteredInspirationSites, selectedInspirationId]);
+
+  useEffect(() => {
+    if (!selectedLibrary && preferredLibrary) {
+      setSelectedLibrary(preferredLibrary);
+    }
+  }, [preferredLibrary, selectedLibrary]);
+
+  useEffect(() => {
+    if (selectedLibrary && selectedLibrary !== activeLibraryName) {
+      void onLibrarySelect(selectedLibrary);
+    }
+  }, [selectedLibrary, activeLibraryName, onLibrarySelect]);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(LS_KEY);
+      if (!raw) return;
+      const stored = JSON.parse(raw) as Record<string, unknown>;
+      if (typeof stored.mode === "string") setMode(stored.mode as GeneratorMode);
+      if (typeof stored.artistCount === "number") setArtistCount(stored.artistCount);
+      if (typeof stored.postCountFilterMode === "string") setPostCountFilterMode(stored.postCountFilterMode as FilterMode);
+      if (typeof stored.postCountThreshold === "number") setPostCountThreshold(stored.postCountThreshold);
+      if (typeof stored.creativeBracketStyle === "string") setCreativeBracketStyle(stored.creativeBracketStyle as BracketStyle);
+      if (typeof stored.creativeNestLevels === "number") setCreativeNestLevels(stored.creativeNestLevels);
+      if (typeof stored.standardWeightMin === "number") setStandardWeightMin(stored.standardWeightMin);
+      if (typeof stored.standardWeightMax === "number") setStandardWeightMax(stored.standardWeightMax);
+      if (typeof stored.naiWeightMin === "number") setNaiWeightMin(stored.naiWeightMin);
+      if (typeof stored.naiWeightMax === "number") setNaiWeightMax(stored.naiWeightMax);
+      if (typeof stored.enableCustomFormat === "boolean") setEnableCustomFormat(stored.enableCustomFormat);
+      if (typeof stored.customFormatString === "string") setCustomFormatString(stored.customFormatString);
+      if (typeof stored.formatToolMode === "string") setFormatToolMode(stored.formatToolMode as FormatToolMode);
+      if (typeof stored.customFormatToolString === "string") setCustomFormatToolString(stored.customFormatToolString);
+      if (Array.isArray(stored.preselectedNames)) {
+        setPreselectedNames(stored.preselectedNames.filter((item): item is string => typeof item === "string"));
+      }
+      if (typeof stored.finalResult === "string") setFinalResult(stored.finalResult);
+      if (typeof stored.formattedOutput === "string") setFormattedOutput(stored.formattedOutput);
+      if (typeof stored.activeTool === "string") setActiveTool(stored.activeTool as WorkbenchTool);
+      if (typeof stored.inspirationSort === "string") setInspirationSort(stored.inspirationSort as InspirationSort);
+      if (typeof stored.inspirationType === "string") setInspirationType(stored.inspirationType as InspirationType);
+    } catch {
+      // ignore invalid persisted state
+    }
+  }, []);
+
+  useEffect(() => {
+    const payload = {
+      mode,
+      artistCount,
+      postCountFilterMode,
+      postCountThreshold,
+      creativeBracketStyle,
+      creativeNestLevels,
+      standardWeightMin,
+      standardWeightMax,
+      naiWeightMin,
+      naiWeightMax,
+      enableCustomFormat,
+      customFormatString,
+      formatToolMode,
+      customFormatToolString,
+      preselectedNames,
+      finalResult,
+      formattedOutput,
+      activeTool,
+      inspirationSort,
+      inspirationType,
+    };
+    try {
+      window.localStorage.setItem(LS_KEY, JSON.stringify(payload));
+    } catch {
+      // ignore persistence issues
+    }
+  }, [
+    mode,
+    artistCount,
+    postCountFilterMode,
+    postCountThreshold,
+    creativeBracketStyle,
+    creativeNestLevels,
+    standardWeightMin,
+    standardWeightMax,
+    naiWeightMin,
+    naiWeightMax,
+    enableCustomFormat,
+    customFormatString,
+    formatToolMode,
+    customFormatToolString,
+    preselectedNames,
+    finalResult,
+    formattedOutput,
+    activeTool,
+    inspirationSort,
+    inspirationType,
+  ]);
+
+  const applyFormatTool = () => {
+    if (!finalResult.trim()) {
+      pushToast(t("artistNoLibraries"), "error");
+      return;
+    }
+
+    const parts = finalResult
+      .split(",")
+      .map((part) => part.trim())
+      .filter(Boolean);
+
+    if (formatToolMode === "anima") {
+      const result = parts.map((tag) => normalizeAnimaTag(tag)).join(", ");
+      setFormattedOutput(result);
+      pushToast(t("workbenchFormatApplied"), "success");
+      return;
+    }
+
+    const template = customFormatToolString || "{tag}";
+    const result = parts
+      .map((tag) => template.replace(/{tag}/g, cleanArtistTag(tag)).replace(/{anima}/g, normalizeAnimaTag(tag)))
+      .join(", ");
+    setFormattedOutput(result);
+    pushToast(t("workbenchFormatApplied"), "success");
+  };
+
+  useEffect(() => {
+    if (!selectedLibrary) {
+      setPreviewCandidates([]);
+      setPreviewTotal(0);
+      return;
+    }
+
+    let cancelled = false;
+    setIsLoadingPreview(true);
+
+    void galleryApi
+      .searchLibraryArtists(selectedLibrary, query, postCountFilterMode, postCountThreshold, 12)
+      .then((response) => {
+        if (cancelled) return;
+        setPreviewCandidates((response.data ?? []) as ArtistCandidate[]);
+        setPreviewTotal(response.total ?? 0);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setPreviewCandidates([]);
+        setPreviewTotal(0);
+      })
+      .finally(() => {
+        if (!cancelled) setIsLoadingPreview(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedLibrary, query, postCountFilterMode, postCountThreshold]);
+
+  const handleGenerate = async () => {
+    if (!selectedLibrary) {
+      pushToast(t("artistNoLibraries"), "error");
+      return;
+    }
+
+    try {
+      const response = await runOperation(() => galleryApi.generateArtistString({
+        name: selectedLibrary,
+        query,
+        count: artistCount,
+        mode,
+        preselected_names: preselectedNames,
+        filter_mode: postCountFilterMode,
+        post_threshold: postCountThreshold,
+        creative_bracket_style: creativeBracketStyle,
+        creative_nest_levels: creativeNestLevels,
+        standard_weight_min: standardWeightMin,
+        standard_weight_max: standardWeightMax,
+        nai_weight_min: naiWeightMin,
+        nai_weight_max: naiWeightMax,
+        enable_custom_format: enableCustomFormat,
+        custom_format_string: customFormatString,
+      }), {
+        pending: t("operationGenerateArtists"),
+        success: t("workbenchGenerateSuccess"),
+        error: (error) => (error instanceof Error ? error.message : t("artistNoLibraries")),
+      });
+
+      setFinalResult(response.formatted);
+      if (response.names.length < artistCount) {
+        pushToast(`${t("artistGenerate")} ${response.names.length}/${artistCount}`, "info");
+      }
+    } catch {
+      // Status center already surfaces the failure.
+    }
+  };
+
+  const handleCopy = async (value = finalResult) => {
+    if (!value) return;
+    try {
+      await navigator.clipboard.writeText(value);
+      pushToast(t("artistCopyResult"), "success");
+    } catch {
+      pushToast(t("workbenchCopyError"), "error");
+    }
+  };
+
+  return (
+    <section className="ue-workspace ue-workspace--workbench ue-animate-in" data-tour-id="workbench-workspace">
+      <div className="ue-pane-header ue-pane-header--compact ue-workbench-hero">
+        <div className="ue-pane-copy">
+          <p className="ue-pane-kicker">{t("workbenchTitle")}</p>
+          <h2>{t("workbenchAppTitle")}</h2>
+          <p>{t("workbenchAppSubtitle")}</p>
+        </div>
+        <div className="ue-workbench-hero-strip" aria-label={t("workbenchStatusStrip")}>
+          <div>
+            <span>{t("workbenchActiveTool")}</span>
+            <strong>{activeToolLabel}</strong>
+          </div>
+          <div>
+            <span>{t("workbenchLibraryCount")}</span>
+            <strong>{libraries.length}</strong>
+          </div>
+          <div>
+            <span>{t("workbenchQueueCount")}</span>
+            <strong>{preselectedNames.length}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div className="ue-workbench-app-shell">
+        <aside className="ue-workbench-rail" aria-label={t("workbenchToolShelf")}>
+          <div className="ue-workbench-rail-head">
+            <LayoutGrid size={16} />
+            <span>{t("workbenchToolShelf")}</span>
+          </div>
+          <button
+            className={`ue-workbench-tool-tab ${activeTool === "artist" ? "is-active" : ""}`}
+            onClick={() => setActiveTool("artist")}
+          >
+            <Wand2 size={17} />
+            <span>{t("toolArtistGenerator")}</span>
+            <em>{t("workbenchToolReady")}</em>
+          </button>
+          <button
+            className={`ue-workbench-tool-tab ${activeTool === "inspiration" ? "is-active" : ""}`}
+            onClick={() => setActiveTool("inspiration")}
+          >
+            <Images size={17} />
+            <span>{t("toolInspirationHub")}</span>
+            <em>{t("workbenchToolNew")}</em>
+          </button>
+          <div className="ue-workbench-rail-footer">
+            <Boxes size={15} />
+            <p>{t("workbenchToolShelfHint")}</p>
+          </div>
+        </aside>
+
+        <div className="ue-workbench-stage">
+          {activeTool === "artist" ? (
+            <div className="ue-workbench-grid ue-workbench-grid--expanded">
+              <article className="ue-tool-panel ue-tool-panel--generator" data-tour-id="workbench-generator">
+                <div className="ue-tool-panel-head ue-tool-panel-head--split">
+                  <div>
+                    <div className="ue-section-kicker">
+                      <Sparkles size={14} />
+                      <span>{t("toolArtistGenerator")}</span>
+                    </div>
+                    <p>{t("toolArtistGeneratorDesc")}</p>
+                  </div>
+                  <div className="ue-workbench-mini-metrics" aria-label={t("workbenchGeneratorMetrics")}>
+                    <span>
+                      <strong>{artistCount}</strong>
+                      {t("artistCount")}
+                    </span>
+                    <span>
+                      <strong>{resultTokenCount}</strong>
+                      {t("workbenchResultTokens")}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="ue-tool-form">
+                  <div className="ue-tool-subsection">
+                    <span>01</span>
+                    <strong>{t("workbenchRecipeSection")}</strong>
+                  </div>
+                  <div className="ue-tool-grid ue-tool-grid--wide">
+                    <label>
+                      <span>{t("artistLibrarySource")}</span>
+                      <select value={selectedLibrary} onChange={(event) => setSelectedLibrary(event.target.value)}>
+                        {libraries.map((library) => (
+                          <option key={library.filename} value={library.filename}>
+                            {library.filename}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label>
+                      <span>{t("artistCount")}</span>
+                      <input
+                        type="number"
+                        min={1}
+                        max={20}
+                        value={artistCount}
+                        onChange={(event) => setArtistCount(Number(event.target.value) || 1)}
+                      />
+                    </label>
+                    <label>
+                      <span>{t("workbenchMode")}</span>
+                      <select value={mode} onChange={(event) => setMode(event.target.value as GeneratorMode)}>
+                        <option value="pure">{t("workbenchModePure")}</option>
+                        <option value="standard">{t("workbenchModeStandard")}</option>
+                        <option value="creative">{t("workbenchModeCreative")}</option>
+                        <option value="nai">{t("workbenchModeNai")}</option>
+                      </select>
+                    </label>
+                  </div>
+
+                  <div className="ue-tool-grid ue-tool-grid--wide">
+                    <label>
+                      <span>{t("workbenchPostFilter")}</span>
+                      <select value={postCountFilterMode} onChange={(event) => setPostCountFilterMode(event.target.value as FilterMode)}>
+                        <option value="none">{t("workbenchFilterNone")}</option>
+                        <option value="gt">{t("workbenchFilterGreater")}</option>
+                        <option value="lt">{t("workbenchFilterLess")}</option>
+                      </select>
+                    </label>
+                    <label>
+                      <span>{t("workbenchPostThreshold")}</span>
+                      <input
+                        type="number"
+                        min={0}
+                        value={postCountThreshold}
+                        onChange={(event) => setPostCountThreshold(Number(event.target.value) || 0)}
+                      />
+                    </label>
+                    <label className="ue-toggle-field">
+                      <span>{t("workbenchCustomFormat")}</span>
+                      <button
+                        className={`ue-chip-toggle ue-chip-toggle--icon ${enableCustomFormat ? "active" : ""}`}
+                        onClick={() => setEnableCustomFormat((current) => !current)}
+                        type="button"
+                        aria-label={t("workbenchCustomFormat")}
+                        title={enableCustomFormat ? t("commonEnabled") : t("commonDisabled")}
+                      >
+                        {enableCustomFormat ? <ToggleRight size={15} /> : <ToggleLeft size={15} />}
+                      </button>
+                    </label>
+                  </div>
+
+                  {mode === "standard" ? (
+                    <div className="ue-tool-grid ue-tool-grid--wide">
+                      <label>
+                        <span>{t("workbenchWeightMin")}</span>
+                        <input type="number" min={0} max={2} step={0.1} value={standardWeightMin} onChange={(event) => setStandardWeightMin(Number(event.target.value) || 0)} />
+                      </label>
+                      <label>
+                        <span>{t("workbenchWeightMax")}</span>
+                        <input type="number" min={0} max={2} step={0.1} value={standardWeightMax} onChange={(event) => setStandardWeightMax(Number(event.target.value) || 0)} />
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {mode === "nai" ? (
+                    <div className="ue-tool-grid ue-tool-grid--wide">
+                      <label>
+                        <span>{t("workbenchWeightMin")}</span>
+                        <input type="number" min={0} max={2} step={0.1} value={naiWeightMin} onChange={(event) => setNaiWeightMin(Number(event.target.value) || 0)} />
+                      </label>
+                      <label>
+                        <span>{t("workbenchWeightMax")}</span>
+                        <input type="number" min={0} max={2} step={0.1} value={naiWeightMax} onChange={(event) => setNaiWeightMax(Number(event.target.value) || 0)} />
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {mode === "creative" ? (
+                    <div className="ue-tool-grid ue-tool-grid--wide">
+                      <label>
+                        <span>{t("workbenchBracketStyle")}</span>
+                        <select value={creativeBracketStyle} onChange={(event) => setCreativeBracketStyle(event.target.value as BracketStyle)}>
+                          <option value="paren">( )</option>
+                          <option value="curly">{"{ }"}</option>
+                          <option value="square">[ ]</option>
+                        </select>
+                      </label>
+                      <label>
+                        <span>{t("workbenchNestLevels")}</span>
+                        <input type="number" min={0} max={5} value={creativeNestLevels} onChange={(event) => setCreativeNestLevels(Number(event.target.value) || 0)} />
+                      </label>
+                    </div>
+                  ) : null}
+
+                  {enableCustomFormat ? (
+                    <label>
+                      <span>{t("workbenchFormatString")}</span>
+                      <input value={customFormatString} onChange={(event) => setCustomFormatString(event.target.value)} />
+                    </label>
+                  ) : null}
+
+                  <div className="ue-tool-subsection">
+                    <span>02</span>
+                    <strong>{t("workbenchOutputSection")}</strong>
+                  </div>
+                  <div className="ue-tool-actions">
+                    <button
+                      className="ue-icon-action ue-icon-action--filled"
+                      onClick={() => void handleGenerate()}
+                      aria-label={t("artistGenerate")}
+                      title={t("artistGenerate")}
+                    >
+                      <Wand2 size={15} />
+                    </button>
+                    <button
+                      className="ue-icon-action"
+                      onClick={() => void handleCopy()}
+                      disabled={!finalResult}
+                      aria-label={t("artistCopyResult")}
+                      title={t("artistCopyResult")}
+                    >
+                      <Copy size={15} />
+                    </button>
+                  </div>
+
+                  <label>
+                    <span>{t("artistResult")}</span>
+                    <textarea
+                      className="ue-tool-result"
+                      value={finalResult}
+                      onChange={(event) => setFinalResult(event.target.value)}
+                    />
+                  </label>
+
+                  <div className="ue-tool-divider" />
+
+                  <div className="ue-tool-subsection">
+                    <span>03</span>
+                    <strong>{t("workbenchFormatSection")}</strong>
+                  </div>
+                  <div className="ue-tool-grid ue-tool-grid--wide">
+                    <label>
+                      <span>{t("workbenchFormatTool")}</span>
+                      <select value={formatToolMode} onChange={(event) => setFormatToolMode(event.target.value as FormatToolMode)}>
+                        <option value="anima">{t("workbenchFormatToolAnima")}</option>
+                        <option value="custom">{t("workbenchFormatToolCustom")}</option>
+                      </select>
+                    </label>
+                    {formatToolMode === "custom" ? (
+                      <label>
+                        <span>{t("workbenchFormatToolTemplate")}</span>
+                        <input value={customFormatToolString} onChange={(event) => setCustomFormatToolString(event.target.value)} />
+                      </label>
+                    ) : (
+                      <div className="ue-tool-helper ue-tool-helper--inline">{t("workbenchFormatToolAnimaHint")}</div>
+                    )}
+                  </div>
+
+                  <div className="ue-tool-actions">
+                    <button
+                      className="ue-icon-action ue-icon-action--accent"
+                      onClick={applyFormatTool}
+                      disabled={!finalResult}
+                      aria-label={t("workbenchFormatToolApply")}
+                      title={t("workbenchFormatToolApply")}
+                    >
+                      <Sparkles size={14} />
+                    </button>
+                    <button
+                      className="ue-icon-action"
+                      onClick={() => void handleCopy(formattedOutput)}
+                      disabled={!formattedOutput}
+                      aria-label={t("artistCopyResult")}
+                      title={t("artistCopyResult")}
+                    >
+                      <Copy size={14} />
+                    </button>
+                  </div>
+
+                  <label>
+                    <span>{t("workbenchFormatToolResult")}</span>
+                    <textarea className="ue-tool-result" value={formattedOutput} readOnly />
+                  </label>
+                  {formattedOutput ? (
+                    <div className="ue-workbench-result-meta">
+                      <Sparkles size={13} />
+                      <span>{t("workbenchFormattedTokens", { count: formattedTokenCount })}</span>
+                    </div>
+                  ) : null}
+                </div>
+              </article>
+
+              <div className="ue-workbench-stack">
+                <article className="ue-tool-panel ue-tool-panel--summary ue-workbench-queue-card">
+                  <div className="ue-tool-panel-head ue-tool-panel-head--split">
+                    <div>
+                      <div className="ue-section-kicker">
+                        <Sparkles size={14} />
+                        <span>{t("workbenchPreselected")}</span>
+                      </div>
+                    </div>
+                    <span className="ue-workbench-count-pill">{preselectedNames.length}</span>
+                  </div>
+                  <div className="ue-generated-list">
+                    {preselectedNames.length ? (
+                      preselectedNames.map((name, index) => (
+                        <div key={`${name}-${index}`} className="ue-generated-chip">
+                          <span>{name}</span>
+                          <button
+                            className="ue-chip-remove"
+                            onClick={() => setPreselectedNames((current) => current.filter((_, currentIndex) => currentIndex !== index))}
+                            aria-label={t("commonDelete")}
+                            title={t("commonDelete")}
+                          >
+                            <X size={12} />
+                          </button>
+                        </div>
+                      ))
+                    ) : (
+                      <p className="ue-tool-helper">{t("workbenchPreselectedEmpty")}</p>
+                    )}
+                  </div>
+                </article>
+
+                <article className="ue-tool-panel ue-tool-panel--source">
+                  <div className="ue-tool-panel-head ue-tool-panel-head--split">
+                    <div>
+                      <div className="ue-section-kicker">
+                        <Search size={14} />
+                        <span>{t("workbenchArtistPool")}</span>
+                      </div>
+                      <p>{t("workbenchArtistPoolHint")}</p>
+                    </div>
+                    <span className="ue-workbench-count-pill">{previewTotal}</span>
+                  </div>
+
+                  <div className="ue-tool-form">
+                    <label>
+                      <span>{t("navSearchLibraryPlaceholder")}</span>
+                      <input value={query} onChange={(event) => setQuery(event.target.value)} />
+                    </label>
+                  </div>
+
+                  <div className="ue-tool-helper">
+                    {isLoadingPreview ? t("commonLoading") : `${previewTotal} ${t("commonEntries", { count: previewTotal })}`}
+                  </div>
+
+                  <div className="ue-preview-list">
+                    {previewCandidates.map((candidate) => (
+                      <article key={candidate.name} className="ue-preview-row">
+                        <div className="ue-preview-row-main">
+                          <strong>{candidate.name}</strong>
+                          {Array.isArray(candidate.other_names) && candidate.other_names.length ? (
+                            <span>{candidate.other_names.slice(0, 4).join(" · ")}</span>
+                          ) : typeof candidate.other_names === "string" && candidate.other_names.trim() ? (
+                            <span>{candidate.other_names}</span>
+                          ) : null}
+                        </div>
+                        <div className="ue-preview-row-side">
+                          <span>{candidate.post_count ?? 0}</span>
+                          <button
+                            className="ue-icon-action ue-icon-action--tiny"
+                            onClick={() => {
+                              if (!preselectedNames.includes(candidate.name)) {
+                                setPreselectedNames((current) => [...current, candidate.name].slice(0, 20));
+                              }
+                            }}
+                            aria-label={t("commonCreate")}
+                            title={t("commonCreate")}
+                          >
+                            <Plus size={13} />
+                          </button>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                </article>
+              </div>
+            </div>
+          ) : (
+            <div className="ue-inspiration-workspace">
+              <article className="ue-tool-panel ue-inspiration-hero">
+                <div className="ue-tool-panel-head">
+                  <div className="ue-section-kicker">
+                    <Compass size={14} />
+                    <span>{t("toolInspirationHub")}</span>
+                  </div>
+                  <h3>{t("inspirationHubTitle")}</h3>
+                  <p>{t("inspirationHubDesc")}</p>
+                </div>
+                <div className="ue-inspiration-hero-metrics">
+                  <div>
+                    <Images size={15} />
+                    <strong>{inspirationSites.length}</strong>
+                    <span>{t("inspirationMetricSites")}</span>
+                  </div>
+                  <div>
+                    <Star size={15} />
+                    <strong>{selectedInspiration.recommendation}</strong>
+                    <span>{t("inspirationRecommendation")}</span>
+                  </div>
+                  <div>
+                    <Gauge size={15} />
+                    <strong>{selectedInspiration.frequency}</strong>
+                    <span>{t("inspirationFrequency")}</span>
+                  </div>
+                </div>
+              </article>
+
+              <div className="ue-inspiration-controls">
+                <label className="ue-inspiration-search">
+                  <Search size={14} />
+                  <input
+                    value={inspirationQuery}
+                    onChange={(event) => setInspirationQuery(event.target.value)}
+                    placeholder={t("inspirationSearchPlaceholder")}
+                  />
+                </label>
+                <label className="ue-inspiration-select">
+                  <SlidersHorizontal size={14} />
+                  <select value={inspirationSort} onChange={(event) => setInspirationSort(event.target.value as InspirationSort)}>
+                    <option value="recommendation">{t("inspirationSortRecommendation")}</option>
+                    <option value="frequency">{t("inspirationSortFrequency")}</option>
+                    <option value="name">{t("inspirationSortName")}</option>
+                  </select>
+                </label>
+                <label className="ue-inspiration-select">
+                  <Globe2 size={14} />
+                  <select value={inspirationType} onChange={(event) => setInspirationType(event.target.value as InspirationType)}>
+                    <option value="all">{t("inspirationType_all")}</option>
+                    <option value="moodboard">{t("inspirationType_moodboard")}</option>
+                    <option value="portfolio">{t("inspirationType_portfolio")}</option>
+                    <option value="illustration">{t("inspirationType_illustration")}</option>
+                    <option value="product">{t("inspirationType_product")}</option>
+                    <option value="ai">{t("inspirationType_ai")}</option>
+                  </select>
+                </label>
+              </div>
+
+              <div className="ue-inspiration-layout">
+                <div className="ue-inspiration-list">
+                  {filteredInspirationSites.map((site, index) => (
+                    <button
+                      key={site.id}
+                      className={`ue-inspiration-card ${selectedInspirationId === site.id ? "is-active" : ""}`}
+                      onClick={() => setSelectedInspirationId(site.id)}
+                    >
+                      <span className="ue-inspiration-rank">{String(index + 1).padStart(2, "0")}</span>
+                      <div className="ue-inspiration-card-main">
+                        <div className="ue-inspiration-card-title">
+                          <strong>{site.title}</strong>
+                          <span>{t(`inspirationType_${site.type}`)}</span>
+                        </div>
+                        <p>{t(site.descriptionKey)}</p>
+                        <div className="ue-inspiration-score-row">
+                          <span>{t("inspirationRecommendation")}</span>
+                          <i>
+                            <b style={{ width: `${site.recommendation}%` }} />
+                          </i>
+                          <em>{site.recommendation}</em>
+                        </div>
+                        <div className="ue-inspiration-score-row">
+                          <span>{t("inspirationFrequency")}</span>
+                          <i>
+                            <b style={{ width: `${site.frequency}%` }} />
+                          </i>
+                          <em>{site.frequency}</em>
+                        </div>
+                      </div>
+                      <ArrowUpRight size={15} />
+                    </button>
+                  ))}
+                </div>
+
+                <aside className="ue-inspiration-detail">
+                  <div className="ue-inspiration-detail-head">
+                    <div>
+                      <p className="ue-pane-kicker">{t(selectedInspiration.regionKey)}</p>
+                      <h3>{selectedInspiration.title}</h3>
+                    </div>
+                    <a
+                      className="ue-icon-action ue-icon-action--filled"
+                      href={selectedInspiration.url}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={t("inspirationOpenSite")}
+                      title={t("inspirationOpenSite")}
+                    >
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                  <p>{t(selectedInspiration.descriptionKey)}</p>
+                  <div className="ue-inspiration-detail-tags">
+                    <span>
+                      <BookmarkPlus size={13} />
+                      {t(selectedInspiration.bestForKey)}
+                    </span>
+                    <span>
+                      <Link2 size={13} />
+                      {selectedInspiration.url.replace(/^https?:\/\//, "").replace(/\/$/, "")}
+                    </span>
+                  </div>
+                  <div className="ue-inspiration-detail-grid">
+                    <div>
+                      <strong>{selectedInspiration.recommendation}</strong>
+                      <span>{t("inspirationRecommendation")}</span>
+                    </div>
+                    <div>
+                      <strong>{selectedInspiration.frequency}</strong>
+                      <span>{t("inspirationFrequency")}</span>
+                    </div>
+                  </div>
+                </aside>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </section>
+  );
+};

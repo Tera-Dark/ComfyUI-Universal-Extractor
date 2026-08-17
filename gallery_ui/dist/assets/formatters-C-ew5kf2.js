@@ -1,0 +1,1 @@
+var e=e=>e<1024?`${e} B`:e<1024*1024?`${(e/1024).toFixed(0)} KB`:`${(e/(1024*1024)).toFixed(2)} MB`,t=e=>new Date(e*1e3).toLocaleDateString(),n=e=>new Date(e*1e3).toLocaleString();export{e as n,n as r,t};
