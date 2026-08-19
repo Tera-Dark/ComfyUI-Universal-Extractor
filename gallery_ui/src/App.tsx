@@ -866,6 +866,8 @@ function App() {
               hasPendingLiveRefresh={gallery.hasPendingLiveRefresh}
               error={gallery.error}
               boards={gallery.boards}
+              searchValue={gallery.searchTerm}
+              onSearchChange={gallery.setSearchTerm}
               defaultSelectionMode={uiPreferences.defaultSelectionMode}
               enableImagePrefetch={uiPreferences.enableImagePrefetch}
               onSelectionModeActiveChange={setGallerySelectionModeActive}

@@ -36,6 +36,142 @@
   padding-bottom: 4px;
 }
 
+/* Unified Command Search in Gallery Toolbar */
+.ue-gallery-search-box {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 220px;
+  max-width: 360px;
+  flex: 1;
+  height: 32px;
+  padding: 0 8px 0 10px;
+  border-radius: 999px;
+  background: var(--ue-surface-alt);
+  border: 1px solid var(--ue-line);
+  color: var(--ue-ink);
+  transition: all var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-gallery-search-box:focus-within {
+  background: #ffffff;
+  border-color: #2563eb;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+}
+
+.ue-gallery-search-icon {
+  color: var(--ue-ink-muted);
+  flex-shrink: 0;
+  margin-right: 6px;
+}
+
+.ue-gallery-search-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: transparent;
+  padding: 0;
+  color: var(--ue-ink);
+  font-size: 12px;
+  outline: none;
+}
+
+.ue-gallery-search-input::placeholder {
+  color: var(--ue-ink-muted);
+}
+
+.ue-gallery-search-shortcut {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--ue-ink-ghost);
+  font-size: 10px;
+  font-family: inherit;
+  font-weight: 550;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.ue-gallery-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  border: none;
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--ue-ink-muted);
+  cursor: pointer;
+  padding: 0;
+  margin-left: 4px;
+  flex-shrink: 0;
+  transition: background var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-gallery-search-clear:hover {
+  background: rgba(0, 0, 0, 0.12);
+  color: var(--ue-ink);
+}
+
+/* Active Filter Chips Row */
+.ue-active-filters-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: 100%;
+  padding: 2px 0 2px;
+}
+
+.ue-filter-active-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  background: rgba(37, 99, 235, 0.08);
+  border: 1px solid rgba(37, 99, 235, 0.18);
+  color: #2563eb;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.ue-filter-active-chip button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1px;
+  border: none;
+  background: transparent;
+  color: #2563eb;
+  cursor: pointer;
+  border-radius: 999px;
+  opacity: 0.75;
+}
+
+.ue-filter-active-chip button:hover {
+  opacity: 1;
+  background: rgba(37, 99, 235, 0.15);
+}
+
+.ue-filter-clear-all-btn {
+  border: none;
+  background: transparent;
+  color: var(--ue-ink-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 4px;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.ue-filter-clear-all-btn:hover {
+  color: var(--ue-ink);
+}
+
 .ue-filter-copy {
   display: flex;
   flex-direction: column;

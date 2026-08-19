@@ -106,6 +106,8 @@ interface GalleryWorkspaceProps {
   onMoveImages: (relativePaths: string[], targetSubfolder: string, targetSourceId?: string) => Promise<MoveImagesResult>;
   onImportFiles: (files: File[], targetSourceId?: string) => Promise<unknown>;
   onApplyPendingLiveRefresh: () => void;
+  searchValue?: string;
+  onSearchChange?: (value: string) => void;
   onRestoreTrashItem: (id: string) => Promise<void>;
   onRestoreTrashItems: (ids: string[]) => Promise<void>;
   onPurgeTrashItem: (id: string) => Promise<void>;
@@ -175,6 +177,8 @@ export const GalleryWorkspace = ({
   onMoveImages,
   onImportFiles,
   onApplyPendingLiveRefresh,
+  searchValue,
+  onSearchChange,
   onRestoreTrashItem,
   onRestoreTrashItems,
   onPurgeTrashItem,
@@ -1220,6 +1224,8 @@ export const GalleryWorkspace = ({
           colorIndexStatus={colorIndexStatus}
           sortBy={sortBy}
           sortOrder={sortOrder}
+          searchValue={searchValue}
+          onSearchChange={onSearchChange}
           onApplyPendingLiveRefresh={onApplyPendingLiveRefresh}
           onToggleFiltersMenu={() => setShowFiltersMenu((current) => !current)}
           onCloseFiltersMenu={() => setShowFiltersMenu(false)}

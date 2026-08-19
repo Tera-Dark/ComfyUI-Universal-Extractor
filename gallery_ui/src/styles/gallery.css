@@ -215,38 +215,40 @@
   flex-direction: column;
   min-width: 0;
   padding: 6px;
-  border: 1px solid transparent;
+  border: 1px solid rgba(0, 0, 0, 0.04);
   border-radius: 12px;
-  background: transparent;
+  background: rgba(255, 255, 255, 0.5);
   content-visibility: auto;
-  contain-intrinsic-size: 320px 450px;
+  contain-intrinsic-size: 240px 320px;
   transform: translateY(0);
   transition:
     background-color var(--ue-duration-base) var(--ue-ease),
     border-color var(--ue-duration-base) var(--ue-ease),
     box-shadow var(--ue-duration-base) var(--ue-ease),
     transform var(--ue-duration-base) var(--ue-ease),
-    filter var(--ue-duration-base) var(--ue-ease),
     opacity var(--ue-duration-base) var(--ue-ease);
   will-change: transform;
 }
 
 .ue-gallery-card:hover {
   transform: translateY(-3px);
-  border-color: rgba(228, 228, 231, 0.8);
-  background: rgba(255, 255, 255, 0.7);
-  box-shadow: 0 12px 24px rgba(24, 24, 27, 0.06);
+  border-color: rgba(212, 212, 216, 0.85);
+  background: #ffffff;
+  box-shadow:
+    0 12px 28px -6px rgba(0, 0, 0, 0.08),
+    0 4px 10px -2px rgba(0, 0, 0, 0.04);
 }
 
 .ue-gallery-card.is-selected {
-  border-color: rgba(37, 99, 235, 0.36);
-  background: rgba(239, 246, 255, 0.58);
-  box-shadow: 0 12px 26px rgba(37, 99, 235, 0.1);
+  border-color: #2563eb;
+  background: rgba(239, 246, 255, 0.65);
+  box-shadow:
+    0 0 0 1.5px #2563eb,
+    0 12px 24px -4px rgba(37, 99, 235, 0.14);
 }
 
 .ue-gallery-card.is-selected .ue-gallery-media {
-  background: rgba(37, 99, 235, 0.06);
-  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.68);
+  box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.4);
 }
 
 .ue-gallery-card.is-selected .ue-gallery-image-shell {
@@ -260,23 +262,12 @@
 
 .ue-gallery-media {
   position: relative;
+  width: 100%;
+  min-height: 100px;
   overflow: hidden;
-  border-radius: 8px;
-  background: #f5f5f5;
-  aspect-ratio: 3 / 4;
+  border-radius: 9px;
+  background: rgba(244, 244, 245, 0.8);
   contain: layout paint;
-}
-
-.ue-gallery-media::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 2;
-  border-radius: inherit;
-  background: linear-gradient(180deg, rgba(37, 99, 235, 0.14), transparent 42%);
-  opacity: 0;
-  pointer-events: none;
-  transition: opacity var(--ue-duration-base) var(--ue-ease);
 }
 
 .ue-gallery-media::after {
@@ -286,8 +277,8 @@
   bottom: 0;
   left: 0;
   z-index: 1;
-  height: 30%;
-  background: linear-gradient(180deg, transparent, rgba(12, 12, 14, 0.16));
+  height: 28%;
+  background: linear-gradient(180deg, transparent, rgba(0, 0, 0, 0.18));
   opacity: 0;
   pointer-events: none;
   transition: opacity var(--ue-duration-base) var(--ue-ease);
@@ -297,27 +288,13 @@
   opacity: 1;
 }
 
-/* Removed blue tint overlay for a cleaner look */
-.ue-gallery-card.is-selected .ue-gallery-media::after {
-  opacity: 0.88;
-}
-
-.ue-gallery-media img {
-  display: block;
-  width: 100%;
-  height: auto;
-  cursor: zoom-in;
-  transition:
-    transform var(--ue-duration-slow) var(--ue-ease),
-    filter var(--ue-duration-slow) var(--ue-ease);
-}
-
 .ue-gallery-image-shell {
   position: relative;
   width: 100%;
   height: 100%;
+  min-height: 100px;
   overflow: hidden;
-  background: #f4f4f5;
+  background: rgba(244, 244, 245, 0.85);
   transition: transform var(--ue-duration-base) var(--ue-ease), border-radius var(--ue-duration-base) var(--ue-ease);
 }
 
@@ -353,16 +330,16 @@
 }
 
 .ue-gallery-card:hover .ue-gallery-media img {
-  transform: scale(1.012);
+  transform: scale(1.02);
 }
 
 .ue-gallery-actions {
   position: absolute;
-  top: 8px;
-  right: 8px;
+  top: 7px;
+  right: 7px;
   z-index: 4;
   display: flex;
-  gap: 6px;
+  gap: 5px;
 }
 
 .ue-select-btn,
@@ -375,12 +352,15 @@
   width: 28px;
   height: 28px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.92);
+  background: rgba(255, 255, 255, 0.88);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   color: var(--ue-ink-muted);
-  box-shadow: var(--ue-shadow-1);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.08);
   cursor: pointer;
   opacity: 0;
-  transform: translateY(-4px);
+  transform: translateY(-3px) scale(0.95);
   transition:
     opacity var(--ue-duration-fast) var(--ue-ease),
     transform var(--ue-duration-fast) var(--ue-ease),
@@ -396,7 +376,7 @@
 .ue-gallery-card.is-selected .ue-select-btn,
 .ue-pin-btn.active {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
 }
 
 .ue-select-btn:hover,
@@ -405,79 +385,85 @@
 .ue-send-btn:hover {
   background: #ffffff;
   color: var(--ue-ink);
-  transform: translateY(0) scale(1.06);
+  transform: translateY(0) scale(1.08);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.12);
 }
 
 .ue-select-btn.active {
   background: #2563eb;
   color: #ffffff;
+  border-color: #2563eb;
   box-shadow:
-    0 0 0 3px rgba(255, 255, 255, 0.94),
-    0 12px 24px rgba(37, 99, 235, 0.32);
+    0 0 0 2px rgba(255, 255, 255, 0.94),
+    0 4px 10px rgba(37, 99, 235, 0.35);
 }
 
 .ue-gallery-card.is-selected .ue-select-btn.active {
   opacity: 1;
-  transform: translateY(0) scale(1.08);
+  transform: translateY(0) scale(1.06);
 }
 
 .ue-pin-btn.active {
   color: var(--ue-favorite);
+  background: rgba(255, 255, 255, 0.95);
 }
 
 .ue-gallery-open {
   position: absolute;
-  right: 10px;
-  bottom: 10px;
+  right: 8px;
+  bottom: 8px;
   z-index: 4;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
-  padding: 0 10px;
+  width: 28px;
+  height: 28px;
   border-radius: 999px;
-  background: rgba(24, 24, 27, 0.82);
+  background: rgba(24, 24, 27, 0.76);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.15);
   color: #ffffff;
-  font-size: 11px;
-  font-weight: 500;
   cursor: pointer;
   opacity: 0;
-  transform: translateY(4px);
+  transform: translateY(3px) scale(0.95);
   transition:
     opacity var(--ue-duration-fast) var(--ue-ease),
     transform var(--ue-duration-fast) var(--ue-ease),
-    background-color var(--ue-duration-fast) var(--ue-ease);
+    background-color var(--ue-duration-fast) var(--ue-ease),
+    box-shadow var(--ue-duration-fast) var(--ue-ease);
 }
 
 .ue-gallery-open--icon {
-  width: 30px;
-  height: 30px;
-  min-height: 30px;
+  width: 28px;
+  height: 28px;
   padding: 0;
 }
 
 .ue-gallery-open:hover {
   background: rgba(24, 24, 27, 0.92);
+  transform: translateY(0) scale(1.08);
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
 }
 
 .ue-gallery-card:hover .ue-gallery-open {
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
 }
 
 .ue-gallery-card.is-selected .ue-gallery-open {
   background: rgba(37, 99, 235, 0.92);
   opacity: 1;
-  transform: translateY(0);
+  transform: translateY(0) scale(1);
 }
 
 .ue-gallery-body {
   display: flex;
   width: 100%;
-  padding: 9px 2px 1px;
+  padding: 7px 3px 2px;
   flex-direction: column;
   align-items: flex-start;
-  gap: 2px;
+  gap: 3px;
   color: inherit;
   text-align: left;
   cursor: pointer;
@@ -490,26 +476,55 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  font-weight: 650;
-  line-height: 1.4;
+  font-weight: 500;
+  line-height: 1.35;
+  color: var(--ue-ink);
+  letter-spacing: -0.01em;
 }
 
 .ue-gallery-card.is-selected .ue-gallery-title {
   color: #2563eb;
+  font-weight: 600;
 }
 
 .ue-gallery-meta {
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 4px 6px;
   color: var(--ue-ink-muted);
   font-size: 11px;
+  line-height: 1.2;
 }
 
 .ue-gallery-meta i {
   font-style: normal;
   color: var(--ue-line);
+  opacity: 0.7;
+}
+
+.ue-gallery-resolution-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5px 5px;
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.04);
+  color: var(--ue-ink-muted);
+  font-size: 10px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.01em;
+}
+
+.ue-gallery-category-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.5px 5px;
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .ue-drop-overlay {
@@ -733,9 +748,97 @@
 
 .ue-dual-layout {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 14px;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
   min-height: 520px;
+  align-items: stretch;
+}
+
+.ue-dual-transfer-rail {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 12px 2px;
+  user-select: none;
+  z-index: 10;
+}
+
+.ue-dual-transfer-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 4px;
+  border-radius: 14px;
+  background: rgba(244, 244, 245, 0.72);
+  border: 1px solid rgba(228, 228, 231, 0.8);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.03);
+}
+
+.ue-dual-transfer-group--actions {
+  padding: 6px 4px;
+  gap: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.06);
+}
+
+.ue-dual-transfer-btn {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: none;
+  background: transparent;
+  color: var(--ue-ink-muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.ue-dual-transfer-btn:hover:not(:disabled) {
+  background: rgba(0, 0, 0, 0.06);
+  color: var(--ue-ink);
+  transform: scale(1.05);
+}
+
+.ue-dual-transfer-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
+}
+
+.ue-dual-transfer-btn--action.is-active {
+  background: #2563eb;
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+
+.ue-dual-transfer-btn--action.is-active:hover:not(:disabled) {
+  background: #1d4ed8;
+  color: #ffffff;
+  transform: scale(1.08);
+}
+
+.ue-dual-transfer-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #ef4444;
+  color: #ffffff;
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 1;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.15);
 }
 
 .ue-dual-pane {
@@ -1236,6 +1339,16 @@
 @media (max-width: 960px) {
   .ue-dual-layout {
     grid-template-columns: 1fr;
+  }
+
+  .ue-dual-transfer-rail {
+    flex-direction: row;
+    justify-content: center;
+    padding: 4px 0;
+  }
+
+  .ue-dual-transfer-group {
+    flex-direction: row;
   }
 
   .ue-gallery-list-actions {

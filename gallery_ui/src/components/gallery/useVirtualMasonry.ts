@@ -29,7 +29,15 @@ export const getEffectiveMasonryColumns = (requestedColumns: number, availableWi
 export const getMasonryColumnWidth = (availableWidth: number, columnCount: number, gap: number) =>
   Math.max(MIN_COLUMN_WIDTH, (availableWidth - gap * (columnCount - 1)) / columnCount);
 
-export const estimateMasonryCardHeight = (columnWidth: number) => Math.round(columnWidth * DEFAULT_CARD_RATIO + CARD_CHROME_HEIGHT);
+export const estimateMasonryCardHeight = (columnWidth: number, image?: ImageRecord) => {
+  const width = Number(image?.width ?? 0);
+  const height = Number(image?.height ?? 0);
+  if (width > 0 && height > 0) {
+    const ratio = Math.max(0.4, Math.min(2.2, height / width));
+    return Math.round(columnWidth * ratio + CARD_CHROME_HEIGHT);
+  }
+  return Math.round(columnWidth * DEFAULT_CARD_RATIO + CARD_CHROME_HEIGHT);
+};
 
 export const mapVirtualMasonryItems = ({
   images,
@@ -83,14 +91,13 @@ export const useVirtualMasonry = ({
     () => getMasonryColumnWidth(availableWidth, columnCount, gap),
     [availableWidth, columnCount, gap],
   );
-  const estimatedCardHeight = useMemo(() => estimateMasonryCardHeight(columnWidth), [columnWidth]);
 
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual intentionally returns imperative measurement functions.
   const virtualizer = useVirtualizer<HTMLElement, HTMLElement>({
     count: images.length,
     getScrollElement: () => scrollElement,
     getItemKey: (index) => images[index]?.relative_path ?? index,
-    estimateSize: () => estimatedCardHeight,
+    estimateSize: (index) => estimateMasonryCardHeight(columnWidth, images[index]),
     gap,
     lanes: columnCount,
     overscan: Math.max(columnCount * 3, 8),

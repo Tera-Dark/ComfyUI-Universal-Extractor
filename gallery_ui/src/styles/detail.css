@@ -392,6 +392,231 @@
   margin-top: 12px;
 }
 
+/* Modern Recipe Card & Parameters Grid */
+.ue-recipe-container {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.ue-recipe-card {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  border-radius: 14px;
+  background: rgba(250, 250, 252, 0.9);
+  transition: border-color var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-recipe-card:hover {
+  border-color: rgba(0, 0, 0, 0.12);
+}
+
+.ue-recipe-card--positive {
+  border-left: 3px solid #10b981;
+}
+
+.ue-recipe-card--negative {
+  border-left: 3px solid #f43f5e;
+}
+
+.ue-recipe-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ue-recipe-card-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ue-ink);
+}
+
+.ue-recipe-indicator {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+}
+
+.ue-recipe-indicator--positive {
+  background: #10b981;
+  box-shadow: 0 0 6px rgba(16, 185, 129, 0.45);
+}
+
+.ue-recipe-indicator--negative {
+  background: #f43f5e;
+  box-shadow: 0 0 6px rgba(244, 63, 94, 0.45);
+}
+
+.ue-recipe-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--ue-ink-muted);
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-recipe-copy-btn:hover {
+  background: var(--ue-surface-alt);
+  color: var(--ue-ink);
+  border-color: rgba(0, 0, 0, 0.16);
+}
+
+.ue-recipe-copy-btn.is-copied {
+  background: #ecfdf5;
+  color: #059669;
+  border-color: #a7f3d0;
+}
+
+.ue-recipe-prompt-body {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--ue-ink-soft);
+  word-break: break-word;
+  white-space: pre-wrap;
+  user-select: text;
+  max-height: 220px;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.ue-recipe-model-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  font-size: 11.5px;
+  font-weight: 550;
+  color: var(--ue-ink);
+  word-break: break-all;
+}
+
+.ue-recipe-lora-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.ue-recipe-lora-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.07);
+  font-size: 11.5px;
+}
+
+.ue-recipe-lora-name {
+  font-weight: 550;
+  color: var(--ue-ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ue-recipe-lora-weights {
+  display: flex;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.ue-recipe-lora-weight-tag {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(37, 99, 235, 0.08);
+  color: #2563eb;
+  font-size: 10px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.ue-recipe-params-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ue-recipe-param-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #ffffff;
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  transition: background-color var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-recipe-param-item:hover {
+  background: #fafafa;
+}
+
+.ue-recipe-param-label {
+  font-size: 10px;
+  font-weight: 500;
+  color: var(--ue-ink-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.ue-recipe-param-value {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ue-ink);
+  font-variant-numeric: tabular-nums;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ue-recipe-param-copy-btn {
+  opacity: 0;
+  padding: 2px;
+  border: none;
+  background: transparent;
+  color: var(--ue-ink-muted);
+  cursor: pointer;
+  transition: opacity var(--ue-duration-fast) var(--ue-ease), color var(--ue-duration-fast) var(--ue-ease);
+}
+
+.ue-recipe-param-item:hover .ue-recipe-param-copy-btn {
+  opacity: 1;
+}
+
+.ue-recipe-param-copy-btn:hover {
+  color: var(--ue-ink);
+}
+
+.ue-recipe-bottom-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
 .ue-metadata-backdrop {
   z-index: 95;
   background: rgba(15, 15, 18, 0.48);

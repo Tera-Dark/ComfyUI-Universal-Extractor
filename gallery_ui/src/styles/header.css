@@ -193,8 +193,8 @@
 .ue-update-popover {
   position: fixed;
   z-index: 80;
-  width: min(360px, calc(100vw - 24px));
-  max-height: min(560px, calc(100vh - 24px));
+  width: min(400px, calc(100vw - 24px));
+  max-height: min(620px, calc(100vh - 80px));
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -212,6 +212,7 @@
   gap: 12px;
   padding: 14px;
   border-bottom: 1px solid var(--ue-line-soft);
+  flex-shrink: 0;
 }
 
 .ue-update-popover-head > div {
@@ -237,6 +238,7 @@
   gap: 10px;
   padding: 14px;
   border-bottom: 1px solid var(--ue-line-soft);
+  flex-shrink: 0;
 }
 
 .ue-update-version-box > div {
@@ -280,12 +282,27 @@
   color: var(--ue-red);
   font-size: 12px;
   line-height: 1.4;
+  flex-shrink: 0;
 }
 
 .ue-update-log {
-  min-height: 0;
+  flex: 1 1 auto;
+  min-height: 100px;
+  max-height: 380px;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 14px;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(161, 161, 170, 0.4) transparent;
+}
+
+.ue-update-log::-webkit-scrollbar {
+  width: 6px;
+}
+
+.ue-update-log::-webkit-scrollbar-thumb {
+  background: rgba(161, 161, 170, 0.4);
+  border-radius: 999px;
 }
 
 .ue-update-log h2 {
@@ -334,13 +351,9 @@
   margin: 0;
   color: var(--ue-ink-soft);
   font-size: 12px;
-  line-height: 1.55;
+  line-height: 1.6;
   white-space: pre-wrap;
-}
-
-.ue-update-release p {
-  max-height: 118px;
-  overflow: hidden;
+  word-break: break-word;
 }
 
 .ue-spin {

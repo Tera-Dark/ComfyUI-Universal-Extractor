@@ -4,6 +4,8 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
+  ChevronsDownUp,
+  ChevronsUpDown,
   Folder,
   FolderOpen,
   FolderPlus,
@@ -33,6 +35,7 @@ import {
   filterSubfoldersBySource,
   FOLDER_SORT_STORAGE_KEY,
   formatFolderLabel,
+  getAllNodePaths,
   getAncestorPaths,
   getFolderBaseName,
   getFolderPinAliases,
@@ -121,13 +124,11 @@ const TreeBranch = ({
   const hasChildren = node.children.length > 0;
   const expanded = searchActive || expandedPaths.has(node.path);
   const pinned = isFolderPinned(node.path, pinnedFolders);
+  const FolderIcon = hasChildren && expanded ? FolderOpen : Folder;
 
   return (
     <div className="ue-tree-branch">
-      <div
-        className={`ue-tree-row ${selectedSubfolder === node.path ? "active" : ""}`}
-        style={{ paddingLeft: `${depth * 12}px` }}
-      >
+      <div className={`ue-tree-row ${selectedSubfolder === node.path ? "active" : ""}`}>
         {hasChildren ? (
           <button
             className={`ue-tree-toggle ${expanded ? "is-expanded" : ""}`}
@@ -151,7 +152,7 @@ const TreeBranch = ({
           onDrop={(event) => onFolderDrop(event, node.path)}
           title={node.path}
         >
-          <Folder size={15} />
+          <FolderIcon size={15} />
           <span>{node.name}</span>
           {pinned ? <span className="ue-pin-dot" aria-hidden="true" /> : null}
         </button>
@@ -178,7 +179,7 @@ const TreeBranch = ({
               searchActive={searchActive}
               draggingPath={draggingPath}
               dropTargetPath={dropTargetPath}
-              />
+            />
           ))}
         </div>
       ) : null}
@@ -347,6 +348,10 @@ export const WorkspaceSidebar = ({
 
   const collapseAllFolders = () => {
     setExpandedPaths(new Set());
+  };
+
+  const expandAllFolders = () => {
+    setExpandedPaths(new Set(getAllNodePaths(folderTree)));
   };
 
   const handleFolderContextMenu = (event: MouseEvent, path: string) => {
@@ -551,11 +556,10 @@ export const WorkspaceSidebar = ({
                 <span className="ue-sidebar-group-icon">
                   {currentSource?.kind === "input" ? <Images size={14} /> : currentSource?.kind === "custom" ? <FolderOpen size={14} /> : <HardDrive size={14} />}
                 </span>
-                <span className="ue-sidebar-group-copy">
-                  <strong>{folderPanelTitle}</strong>
-                  <em>{t("sidebarFolderCount", { count: scopedSubfolders.length })}</em>
-                </span>
+                <strong className="ue-sidebar-group-name">{folderPanelTitle}</strong>
+                <span className="ue-sidebar-count-badge">{scopedSubfolders.length}</span>
               </button>
+
               <div className="ue-sidebar-subactions">
                 {currentSourceWritable ? (
                   <button
@@ -564,7 +568,7 @@ export const WorkspaceSidebar = ({
                     title={t("sidebarCreateFolder")}
                     aria-label={t("sidebarCreateFolder")}
                   >
-                    <FolderPlus size={13} />
+                    <FolderPlus size={14} />
                   </button>
                 ) : (
                   <button
@@ -573,27 +577,9 @@ export const WorkspaceSidebar = ({
                     title={readOnlyFolderTitle}
                     aria-label={readOnlyFolderTitle}
                   >
-                    <FolderPlus size={13} />
+                    <FolderPlus size={14} />
                   </button>
                 )}
-                <div className="ue-sidebar-viewmodes" role="group" aria-label={t("sidebarFolderViewMode")}>
-                  <button
-                    className={folderViewMode === "list" ? "active" : ""}
-                    onClick={() => onFolderViewModeChange("list")}
-                    title={t("sidebarListView")}
-                    aria-label={t("sidebarListView")}
-                  >
-                    <ListTree size={14} />
-                  </button>
-                  <button
-                    className={folderViewMode === "tree" ? "active" : ""}
-                    onClick={() => onFolderViewModeChange("tree")}
-                    title={t("sidebarTreeView")}
-                    aria-label={t("sidebarTreeView")}
-                  >
-                    <FolderTree size={14} />
-                  </button>
-                </div>
                 <div className="ue-sidebar-more">
                   <button
                     className={`ue-sidebar-subaction ${folderActionsMenu ? "active" : ""}`}
@@ -601,31 +587,76 @@ export const WorkspaceSidebar = ({
                     title={t("sidebarMoreActions")}
                     aria-label={t("sidebarMoreActions")}
                   >
-                    <MoreHorizontal size={13} />
+                    <MoreHorizontal size={14} />
                   </button>
                 </div>
               </div>
             </div>
+
             {expandedSidebarGroups.has("folders") ? (
               <>
-                <label className="ue-sidebar-search">
-                  <Search size={13} />
-                  <input
-                    value={folderSearchQuery}
-                    placeholder={t("sidebarFolderSearch")}
-                    onChange={(event) => setFolderSearchQuery(event.target.value)}
-                  />
-                  {folderSearchActive ? (
-                    <button
-                      type="button"
-                      onClick={() => setFolderSearchQuery("")}
-                      title={t("sidebarClearFolderSearch")}
-                      aria-label={t("sidebarClearFolderSearch")}
-                    >
-                      <X size={12} />
-                    </button>
-                  ) : null}
-                </label>
+                <div className="ue-sidebar-folder-toolbar">
+                  <label className="ue-sidebar-search">
+                    <Search size={13} />
+                    <input
+                      value={folderSearchQuery}
+                      placeholder={t("sidebarFolderSearch")}
+                      onChange={(event) => setFolderSearchQuery(event.target.value)}
+                    />
+                    {folderSearchActive ? (
+                      <button
+                        type="button"
+                        onClick={() => setFolderSearchQuery("")}
+                        title={t("sidebarClearFolderSearch")}
+                        aria-label={t("sidebarClearFolderSearch")}
+                      >
+                        <X size={12} />
+                      </button>
+                    ) : null}
+                  </label>
+
+                  <div className="ue-sidebar-folder-tools">
+                    {folderViewMode === "tree" ? (
+                      <>
+                        <button
+                          className="ue-sidebar-subaction"
+                          onClick={expandAllFolders}
+                          title={t("sidebarExpandAll")}
+                          aria-label={t("sidebarExpandAll")}
+                        >
+                          <ChevronsUpDown size={13} />
+                        </button>
+                        <button
+                          className="ue-sidebar-subaction"
+                          onClick={collapseAllFolders}
+                          title={t("sidebarCollapseAll")}
+                          aria-label={t("sidebarCollapseAll")}
+                        >
+                          <ChevronsDownUp size={13} />
+                        </button>
+                      </>
+                    ) : null}
+
+                    <div className="ue-sidebar-viewmodes" role="group" aria-label={t("sidebarFolderViewMode")}>
+                      <button
+                        className={folderViewMode === "list" ? "active" : ""}
+                        onClick={() => onFolderViewModeChange("list")}
+                        title={t("sidebarListView")}
+                        aria-label={t("sidebarListView")}
+                      >
+                        <ListTree size={13} />
+                      </button>
+                      <button
+                        className={folderViewMode === "tree" ? "active" : ""}
+                        onClick={() => onFolderViewModeChange("tree")}
+                        title={t("sidebarTreeView")}
+                        aria-label={t("sidebarTreeView")}
+                      >
+                        <FolderTree size={13} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
                 {folderSearchActive && visibleSubfolders.length === 0 ? (
                   <div className="ue-sidebar-empty">{t("sidebarNoFolderMatches")}</div>
@@ -691,14 +722,18 @@ export const WorkspaceSidebar = ({
           <div className="ue-sidebar-group">
             <div className="ue-sidebar-group-header">
               <button
-                className="ue-sidebar-group-toggle"
+                className="ue-sidebar-group-title"
                 onClick={() => toggleSidebarGroup("boards")}
                 aria-expanded={expandedSidebarGroups.has("boards")}
               >
-                {expandedSidebarGroups.has("boards") ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                <Images size={14} />
-                <span>{t("sidebarBoards")}</span>
-                <em>{t("sidebarBoardCount", { count: boards.length })}</em>
+                <span className="ue-sidebar-group-chevron">
+                  {expandedSidebarGroups.has("boards") ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                </span>
+                <span className="ue-sidebar-group-icon">
+                  <Images size={14} />
+                </span>
+                <strong className="ue-sidebar-group-name">{t("sidebarBoards")}</strong>
+                <span className="ue-sidebar-count-badge">{boards.length}</span>
               </button>
               <div className="ue-sidebar-subactions">
                 <button
@@ -707,7 +742,7 @@ export const WorkspaceSidebar = ({
                   title={t("sidebarCreateBoard")}
                   aria-label={t("sidebarCreateBoard")}
                 >
-                  <FolderPlus size={12} />
+                  <FolderPlus size={14} />
                 </button>
               </div>
             </div>
@@ -745,14 +780,18 @@ export const WorkspaceSidebar = ({
           <div className="ue-sidebar-group">
             <div className="ue-sidebar-group-header">
               <button
-                className="ue-sidebar-group-toggle"
+                className="ue-sidebar-group-title"
                 onClick={() => toggleSidebarGroup("categories")}
                 aria-expanded={expandedSidebarGroups.has("categories")}
               >
-                {expandedSidebarGroups.has("categories") ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-                <Tag size={14} />
-                <span>{t("galleryAllCategories")}</span>
-                <em>{t("sidebarCategoryCount", { count: galleryContext?.categories.length ?? 0 })}</em>
+                <span className="ue-sidebar-group-chevron">
+                  {expandedSidebarGroups.has("categories") ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+                </span>
+                <span className="ue-sidebar-group-icon">
+                  <Tag size={14} />
+                </span>
+                <strong className="ue-sidebar-group-name">{t("galleryAllCategories")}</strong>
+                <span className="ue-sidebar-count-badge">{galleryContext?.categories.length ?? 0}</span>
               </button>
             </div>
 

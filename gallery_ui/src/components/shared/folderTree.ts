@@ -244,3 +244,17 @@ export const collectFolderSearchPaths = (subfolders: string[], query: string) =>
 
 export const filterSubfoldersBySource = (subfolders: string[], sourceId: string) =>
   subfolders.filter((subfolder) => getFolderSourceId(subfolder) === sourceId);
+
+export const getAllNodePaths = (nodes: TreeNode[]): string[] => {
+  const result: string[] = [];
+  const traverse = (list: TreeNode[]) => {
+    for (const node of list) {
+      if (node.children.length > 0) {
+        result.push(node.path);
+        traverse(node.children);
+      }
+    }
+  };
+  traverse(nodes);
+  return result;
+};

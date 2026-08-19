@@ -63,7 +63,7 @@ describe("TopNavigation", () => {
 
   it("keeps active tab, scope badge, search, refresh, and sidebar controls wired", () => {
     mockUpdateStatus();
-    const { container, props } = renderNavigation();
+    const { container, props } = renderNavigation({ activeTab: "library" });
     const scope = container.querySelector(".ue-topbar-scope");
     const tabs = Array.from(container.querySelectorAll<HTMLButtonElement>(".ue-topbar-tab"));
     const sidebarToggle = container.querySelector<HTMLButtonElement>("[data-tour-id='topbar-sidebar-toggle']");
@@ -72,10 +72,10 @@ describe("TopNavigation", () => {
     const refreshButton = container.querySelector<HTMLButtonElement>("[data-tour-id='topbar-refresh']");
 
     expect(scope).toBeInTheDocument();
-    expect(tabs[0]).toHaveClass("active");
+    expect(tabs[1]).toHaveClass("active");
 
-    fireEvent.click(tabs[1]);
-    expect(props.onTabChange).toHaveBeenCalledWith("library");
+    fireEvent.click(tabs[0]);
+    expect(props.onTabChange).toHaveBeenCalledWith("gallery");
 
     fireEvent.click(sidebarToggle!);
     expect(props.onSidebarToggle).toHaveBeenCalled();

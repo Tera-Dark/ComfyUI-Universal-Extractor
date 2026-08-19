@@ -269,17 +269,44 @@
   background: rgba(244, 244, 245, 0.82);
 }
 
+.ue-sidebar-group-name {
+  overflow: hidden;
+  color: var(--ue-ink);
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1.2;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ue-sidebar-count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: rgba(24, 24, 27, 0.06);
+  color: var(--ue-ink-ghost);
+  font-size: 10px;
+  font-weight: 650;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
 .ue-sidebar-group-copy {
-  display: grid;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
-  gap: 1px;
 }
 
 .ue-sidebar-group-copy strong {
   overflow: hidden;
   color: var(--ue-ink);
   font-size: 13px;
-  font-weight: 760;
+  font-weight: 650;
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -482,6 +509,27 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.ue-sidebar-folder-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  width: 100%;
+}
+
+.ue-sidebar-folder-toolbar .ue-sidebar-search {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-bottom: 0;
+}
+
+.ue-sidebar-folder-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex: 0 0 auto;
 }
 
 .ue-sidebar-search {
@@ -765,28 +813,37 @@
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
-.ue-tree-branch,
-.ue-tree-children {
+.ue-tree-branch {
   display: flex;
   flex-direction: column;
   position: relative;
 }
 
-.ue-tree-children::before {
-  content: "";
-  position: absolute;
-  top: 4px;
-  bottom: 16px;
-  left: 16px;
-  width: 1px;
-  background: var(--ue-line-soft);
+.ue-tree-children {
+  display: flex;
+  flex-direction: column;
+  position: relative;
+  margin-left: 10px;
+  padding-left: 8px;
+  border-left: 1px dashed rgba(24, 24, 27, 0.15);
 }
 
 .ue-tree-row {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
+}
+
+.ue-tree-children .ue-tree-row::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  left: -8px;
+  width: 6px;
+  border-top: 1px dashed rgba(24, 24, 27, 0.15);
+  pointer-events: none;
 }
 
 .ue-tree-toggle {

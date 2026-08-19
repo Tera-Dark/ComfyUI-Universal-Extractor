@@ -10,9 +10,12 @@ import {
 import {
   BookOpen,
   Boxes,
+  Check,
   ChevronLeft,
   ChevronRight,
   ClipboardCopy,
+  Copy,
+  Cpu,
   Expand,
   ExternalLink,
   FileJson,
@@ -21,7 +24,10 @@ import {
   PencilLine,
   Pin,
   Save,
+  Send,
   Shrink,
+  Sliders,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -473,14 +479,20 @@ export const ImageDetailModal = ({
     onClose();
   };
 
-  const copyText = async (value: string, successMessage: string) => {
-    if (!value.trim()) {
+  const [copiedField, setCopiedField] = useState<string | null>(null);
+
+  const copyText = async (value: string, successMessage: string, fieldKey?: string) => {
+    if (!value || !value.trim()) {
       pushToast(t("metadataNoPositivePrompt"), "info");
       return;
     }
 
     try {
       await navigator.clipboard.writeText(value);
+      if (fieldKey) {
+        setCopiedField(fieldKey);
+        setTimeout(() => setCopiedField((current) => (current === fieldKey ? null : current)), 1500);
+      }
       pushToast(successMessage, "success");
     } catch (copyError) {
       pushToast(copyError instanceof Error ? copyError.message : t("contextCopyError"), "error");
@@ -489,7 +501,40 @@ export const ImageDetailModal = ({
 
   const handleCopyPositivePrompt = async () => {
     const prompt = getPositivePromptText(metadata);
-    await copyText(prompt, t("metadataCopyPositiveSuccess"));
+    await copyText(prompt, t("metadataCopyPositiveSuccess"), "positive");
+  };
+
+  const handleCopyNegativePrompt = async () => {
+    const neg = metadata?.recipe?.negative_prompt || metadata?.summary?.negative_prompt || "";
+    await copyText(neg, t("recipeCopiedSuccess"), "negative");
+  };
+
+  const handleCopySeed = async (seedVal: number | string) => {
+    await copyText(String(seedVal), t("recipeCopiedSuccess"), "seed");
+  };
+
+  const handleCopyFullRecipe = async () => {
+    if (!metadata) return;
+    const recipe = metadata.recipe;
+    const positive = getPositivePromptText(metadata);
+    const negative = recipe?.negative_prompt || metadata.summary?.negative_prompt || "";
+    const parts: string[] = [];
+    if (positive) parts.push(positive);
+    if (negative) parts.push(`Negative prompt: ${negative}`);
+    const params: string[] = [];
+    if (recipe?.steps) params.push(`Steps: ${recipe.steps}`);
+    if (recipe?.sampler) params.push(`Sampler: ${recipe.sampler}${recipe.scheduler ? ` ${recipe.scheduler}` : ""}`);
+    if (recipe?.cfg) params.push(`CFG scale: ${recipe.cfg}`);
+    if (recipe?.seed !== null && recipe?.seed !== undefined) params.push(`Seed: ${recipe.seed}`);
+    if (recipe?.width && recipe?.height) params.push(`Size: ${recipe.width}x${recipe.height}`);
+    if (recipe?.checkpoint) params.push(`Model: ${recipe.checkpoint}`);
+    if (recipe?.denoise !== null && recipe?.denoise !== undefined) params.push(`Denoise: ${recipe.denoise}`);
+    if (recipe?.loras?.length) {
+      const lorasStr = recipe.loras.map((l) => `<lora:${l.name}:${l.strength_model}>`).join(" ");
+      params.push(`Lora: ${lorasStr}`);
+    }
+    if (params.length) parts.push(params.join(", "));
+    await copyText(parts.join("\n\n"), t("recipeCopiedSuccess"), "full");
   };
 
   const handleRequestClose = async () => {
@@ -682,11 +727,204 @@ export const ImageDetailModal = ({
             ) : error ? (
               <div className="ue-inline-error">{error}</div>
             ) : (
-              <>
+              <div className="ue-recipe-container">
+                {/* Positive Prompt Card */}
+                {getPositivePromptText(metadata) ? (
+                  <div className="ue-recipe-card ue-recipe-card--positive">
+                    <div className="ue-recipe-card-head">
+                      <div className="ue-recipe-card-title">
+                        <span className="ue-recipe-indicator ue-recipe-indicator--positive" />
+                        <span>{t("metadataPositivePrompt")}</span>
+                      </div>
+                      <button
+                        className={`ue-recipe-copy-btn ${copiedField === "positive" ? "is-copied" : ""}`}
+                        onClick={() => void handleCopyPositivePrompt()}
+                        type="button"
+                        aria-label={t("metadataCopyPositive")}
+                      >
+                        {copiedField === "positive" ? <Check size={12} /> : <Copy size={12} />}
+                        <span>{copiedField === "positive" ? t("recipeCopiedSuccess") : t("recipeCopyPositive")}</span>
+                      </button>
+                    </div>
+                    <div className="ue-recipe-prompt-body">{getPositivePromptText(metadata)}</div>
+                  </div>
+                ) : null}
+
+                {/* Negative Prompt Card */}
+                {(metadata?.recipe?.negative_prompt || metadata?.summary?.negative_prompt) ? (
+                  <div className="ue-recipe-card ue-recipe-card--negative">
+                    <div className="ue-recipe-card-head">
+                      <div className="ue-recipe-card-title">
+                        <span className="ue-recipe-indicator ue-recipe-indicator--negative" />
+                        <span>{t("metadataNegativePrompt")}</span>
+                      </div>
+                      <button
+                        className={`ue-recipe-copy-btn ${copiedField === "negative" ? "is-copied" : ""}`}
+                        onClick={() => void handleCopyNegativePrompt()}
+                        type="button"
+                        aria-label={t("recipeCopyNegative")}
+                      >
+                        {copiedField === "negative" ? <Check size={12} /> : <Copy size={12} />}
+                        <span>{copiedField === "negative" ? t("recipeCopiedSuccess") : t("recipeCopyNegative")}</span>
+                      </button>
+                    </div>
+                    <div className="ue-recipe-prompt-body">
+                      {metadata.recipe?.negative_prompt || metadata.summary.negative_prompt}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Checkpoint Model & LoRAs */}
+                {(metadata?.recipe?.checkpoint || (metadata?.recipe?.loras && metadata.recipe.loras.length > 0)) ? (
+                  <div className="ue-recipe-card">
+                    <div className="ue-recipe-card-head">
+                      <div className="ue-recipe-card-title">
+                        <Cpu size={14} />
+                        <span>{t("recipeCheckpoint")} & {t("recipeLoras")}</span>
+                      </div>
+                    </div>
+                    {metadata.recipe?.checkpoint ? (
+                      <div className="ue-recipe-model-badge" title={metadata.recipe.checkpoint}>
+                        <Boxes size={13} />
+                        <span>{metadata.recipe.checkpoint}</span>
+                      </div>
+                    ) : null}
+                    {metadata.recipe?.loras && metadata.recipe.loras.length > 0 ? (
+                      <div className="ue-recipe-lora-list">
+                        {metadata.recipe.loras.map((lora, idx) => (
+                          <div key={`${lora.name}-${idx}`} className="ue-recipe-lora-chip">
+                            <span className="ue-recipe-lora-name" title={lora.name}>
+                              {lora.name}
+                            </span>
+                            <div className="ue-recipe-lora-weights">
+                              <span className="ue-recipe-lora-weight-tag" title="Model Weight">
+                                M:{lora.strength_model}
+                              </span>
+                              {lora.strength_clip !== lora.strength_model ? (
+                                <span className="ue-recipe-lora-weight-tag" title="Clip Weight">
+                                  C:{lora.strength_clip}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+
+                {/* Generation Parameters Grid */}
+                {metadata?.recipe && (
+                  metadata.recipe.steps ||
+                  metadata.recipe.cfg ||
+                  metadata.recipe.sampler ||
+                  metadata.recipe.seed !== null ||
+                  metadata.recipe.width
+                ) ? (
+                  <div className="ue-recipe-card">
+                    <div className="ue-recipe-card-head">
+                      <div className="ue-recipe-card-title">
+                        <Sliders size={14} />
+                        <span>{t("recipeParams")}</span>
+                      </div>
+                      <button
+                        className={`ue-recipe-copy-btn ${copiedField === "full" ? "is-copied" : ""}`}
+                        onClick={() => void handleCopyFullRecipe()}
+                        type="button"
+                        aria-label={t("recipeCopyFull")}
+                      >
+                        {copiedField === "full" ? <Check size={12} /> : <Copy size={12} />}
+                        <span>{copiedField === "full" ? t("recipeCopiedSuccess") : t("recipeCopyFull")}</span>
+                      </button>
+                    </div>
+
+                    <div className="ue-recipe-params-grid">
+                      {metadata.recipe.seed !== null && metadata.recipe.seed !== undefined ? (
+                        <div className="ue-recipe-param-item">
+                          <span className="ue-recipe-param-label">{t("recipeSeed")}</span>
+                          <div className="ue-recipe-param-value">
+                            <span title={String(metadata.recipe.seed)}>{String(metadata.recipe.seed)}</span>
+                            <button
+                              className="ue-recipe-param-copy-btn"
+                              onClick={() => void handleCopySeed(metadata.recipe!.seed!)}
+                              title={t("recipeCopySeed")}
+                              type="button"
+                            >
+                              <Copy size={11} />
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {metadata.recipe.steps ? (
+                        <div className="ue-recipe-param-item">
+                          <span className="ue-recipe-param-label">{t("recipeSteps")}</span>
+                          <div className="ue-recipe-param-value">{metadata.recipe.steps}</div>
+                        </div>
+                      ) : null}
+
+                      {metadata.recipe.cfg ? (
+                        <div className="ue-recipe-param-item">
+                          <span className="ue-recipe-param-label">{t("recipeCfg")}</span>
+                          <div className="ue-recipe-param-value">{metadata.recipe.cfg}</div>
+                        </div>
+                      ) : null}
+
+                      {metadata.recipe.sampler ? (
+                        <div className="ue-recipe-param-item">
+                          <span className="ue-recipe-param-label">{t("recipeSampler")}</span>
+                          <div className="ue-recipe-param-value" title={`${metadata.recipe.sampler} / ${metadata.recipe.scheduler || "normal"}`}>
+                            {metadata.recipe.sampler}
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {metadata.recipe.width && metadata.recipe.height ? (
+                        <div className="ue-recipe-param-item">
+                          <span className="ue-recipe-param-label">{t("recipeSize")}</span>
+                          <div className="ue-recipe-param-value">{`${metadata.recipe.width} × ${metadata.recipe.height}`}</div>
+                        </div>
+                      ) : null}
+
+                      {metadata.recipe.denoise !== null && metadata.recipe.denoise !== undefined ? (
+                        <div className="ue-recipe-param-item">
+                          <span className="ue-recipe-param-label">{t("recipeDenoise")}</span>
+                          <div className="ue-recipe-param-value">{metadata.recipe.denoise}</div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="ue-recipe-bottom-actions">
+                      {canOpenWorkflow ? (
+                        <button
+                          className="ue-secondary-btn"
+                          type="button"
+                          onClick={() => void onOpenWorkflow(image)}
+                        >
+                          <Send size={13} />
+                          <span>{t("recipeSendWorkflow")}</span>
+                        </button>
+                      ) : null}
+
+                      {metadata.recipe.loras && metadata.recipe.loras.length > 0 ? (
+                        <button
+                          className="ue-secondary-btn"
+                          type="button"
+                          onClick={() => void onApplyLoraStack(image)}
+                        >
+                          <Layers size={13} />
+                          <span>{t("recipeApplyLoraStack")}</span>
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
+
+                {/* Artist Prompt Library Tokens (if any) */}
                 {metadata?.artist_prompts?.length ? (
                   <details className="ue-detail-disclosure">
                     <summary>
-                      <Palette size={15} />
+                      <Sparkles size={14} />
                       <span>{t("modalPromptSection")}</span>
                       <strong>{metadata.artist_prompts.length}</strong>
                     </summary>
@@ -700,52 +938,83 @@ export const ImageDetailModal = ({
                   </details>
                 ) : null}
 
-                {metadata?.summary?.positive_prompt || metadata?.summary?.negative_prompt ? (
-                  <details className="ue-detail-disclosure" open>
-                    <summary>
-                      <ClipboardCopy size={15} />
-                      <span>{t("metadataPromptSummary")}</span>
-                    </summary>
-                    <div className="ue-metadata-summary ue-metadata-summary--detail">
-                      <label>
-                        <span>{t("metadataPositivePrompt")}</span>
-                        <textarea value={getPositivePromptText(metadata) || t("metadataNoPositivePrompt")} readOnly />
-                      </label>
-                      <label>
-                        <span>{t("metadataNegativePrompt")}</span>
-                        <textarea value={metadata.summary.negative_prompt || t("metadataNoNegativePrompt")} readOnly />
-                      </label>
+                {/* Image Edit & Notes Section */}
+                <details className="ue-detail-disclosure">
+                  <summary>
+                    <Palette size={14} />
+                    <span>{t("modalEditSection")}</span>
+                  </summary>
+
+                  <div className="ue-detail-form" style={{ marginTop: "12px" }}>
+                    <label>
+                      <span>{t("modalTitleField")}</span>
+                      <input
+                        value={draftTitle}
+                        onChange={(event) => setDraftTitle(event.target.value)}
+                        placeholder={t("galleryTitlePlaceholder")}
+                      />
+                    </label>
+                    <label>
+                      <span>{t("modalFilenameField")}</span>
+                      <input value={draftFilename} onChange={(event) => setDraftFilename(event.target.value)} />
+                    </label>
+                    <label>
+                      <span>{t("modalCategory")}</span>
+                      <input
+                        value={draftCategory}
+                        onChange={(event) => setDraftCategory(event.target.value)}
+                        placeholder={t("galleryCategoryPlaceholder")}
+                      />
+                    </label>
+                    <label>
+                      <span>{t("modalNotesField")}</span>
+                      <textarea
+                        value={draftNotes}
+                        onChange={(event) => setDraftNotes(event.target.value)}
+                        placeholder={t("galleryNotesPlaceholder")}
+                      />
+                    </label>
+                  </div>
+
+                  <div className="ue-detail-savebar">
+                    <div className="ue-detail-savecopy">
+                      <strong>{isStateDirty ? t("modalUnsavedStateBadge") : t("modalSavedStateBadge")}</strong>
+                      <span>{t("modalSaveHint")}</span>
                     </div>
                     <button
-                      className="ue-secondary-btn ue-detail-copy-prompt"
-                      type="button"
-                      onClick={() => void handleCopyPositivePrompt()}
+                      className="ue-icon-action ue-icon-action--filled"
+                      onClick={() => void handleSave()}
+                      disabled={!isStateDirty || isSavingState}
+                      aria-label={isSavingState ? t("commonLoading") : t("modalSaveState")}
+                      title={isSavingState ? t("commonLoading") : t("modalSaveState")}
                     >
-                      <ClipboardCopy size={14} />
-                      <span>{t("metadataCopyPositive")}</span>
+                      <Save size={14} />
                     </button>
-                  </details>
-                ) : null}
+                  </div>
+                  {stateSaveError ? <div className="ue-inline-error">{stateSaveError}</div> : null}
+                </details>
 
+                {/* Raw Metadata */}
                 {metadata?.metadata && metadataKeys.length ? (
                   <details className="ue-detail-disclosure">
                     <summary>
-                      <FileJson size={15} />
+                      <FileJson size={14} />
                       <span>{t("modalMetadataSection")}</span>
                       <strong>{metadataKeys.length}</strong>
                     </summary>
                     <pre className="ue-meta-raw">{JSON.stringify(metadata.metadata, null, 2)}</pre>
                   </details>
-                ) : (
+                ) : !getPositivePromptText(metadata) && !metadata?.recipe ? (
                   <div className="ue-detail-state ue-detail-state--empty">
                     <p>{t("modalNoMetadata")}</p>
                   </div>
-                )}
+                ) : null}
 
+                {/* Related Variants */}
                 {relatedVariantGroups.length ? (
                   <details className="ue-detail-disclosure">
                     <summary>
-                      <Boxes size={15} />
+                      <Boxes size={14} />
                       <span>{t("variantRelated")}</span>
                       <strong>{relatedVariantGroups.length}</strong>
                     </summary>
@@ -762,7 +1031,7 @@ export const ImageDetailModal = ({
                     </div>
                   </details>
                 ) : null}
-              </>
+              </div>
             )}
           </aside>
         </div>

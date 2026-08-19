@@ -17,7 +17,7 @@ import { useI18n } from "../../i18n/I18nProvider";
 import { galleryApi } from "../../services/galleryApi";
 import type { Locale } from "../../i18n/translations";
 import type { UpdateStatus, WorkspaceTab } from "../../types/universal-gallery";
-import { FloatingLayerPortal, placeMenuNearRect, useDismissableLayer, type FloatingMenuPosition } from "../../utils/interaction";
+import { FloatingLayerPortal, useDismissableLayer, type FloatingMenuPosition } from "../../utils/interaction";
 
 interface TopNavigationProps {
   activeTab: WorkspaceTab;
@@ -49,7 +49,7 @@ export const TopNavigation = ({
   const [updatesPosition, setUpdatesPosition] = useState<FloatingMenuPosition>({ x: 12, y: 56 });
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const updatesButtonRef = useRef<HTMLButtonElement | null>(null);
-  const searchEnabled = activeTab === "gallery" || activeTab === "library";
+  const searchEnabled = activeTab === "library";
   const searchOpen = searchEnabled && (searchExpanded || Boolean(searchValue.trim()));
   const updateAvailable = Boolean(updateStatus?.update_available);
 
@@ -100,7 +100,11 @@ export const TopNavigation = ({
     event.stopPropagation();
     const rect = updatesButtonRef.current?.getBoundingClientRect();
     if (rect) {
-      setUpdatesPosition(placeMenuNearRect(rect, { width: 360, height: 520 }));
+      const popoverWidth = Math.min(400, window.innerWidth - 24);
+      const popoverHeight = 560;
+      const x = Math.max(12, Math.min(window.innerWidth - popoverWidth - 12, rect.right - popoverWidth));
+      const y = Math.min(Math.max(12, window.innerHeight - popoverHeight - 12), rect.bottom + 8);
+      setUpdatesPosition({ x, y });
     }
     setUpdatesOpen((current) => !current);
   };
@@ -164,49 +168,39 @@ export const TopNavigation = ({
       </nav>
 
       <div className="ue-topbar-tools">
-        <div className={`ue-topbar-search-wrap ${searchOpen ? "is-open" : ""}`} data-tour-id="topbar-search">
-          <button
-            className={`ue-topbar-icon-btn ${searchOpen ? "is-active" : ""}`}
-            onClick={() => {
-              if (!searchEnabled) {
-                return;
-              }
-              setSearchExpanded((current) => !current);
-            }}
-            aria-label={t("navToggleSearch")}
-            title={t("navToggleSearch")}
-            disabled={!searchEnabled}
-          >
-            <Search size={16} />
-          </button>
+        {searchEnabled ? (
+          <div className={`ue-topbar-search-wrap ${searchOpen ? "is-open" : ""}`} data-tour-id="topbar-search">
+            <button
+              className={`ue-topbar-icon-btn ${searchOpen ? "is-active" : ""}`}
+              onClick={() => setSearchExpanded((current) => !current)}
+              aria-label={t("navToggleSearch")}
+              title={t("navToggleSearch")}
+            >
+              <Search size={16} />
+            </button>
 
-          <label className="ue-topbar-search" htmlFor="ue-topbar-search">
-            <input
-              ref={searchInputRef}
-              id="ue-topbar-search"
-              value={inputValue}
-              placeholder={
-                activeTab === "gallery"
-                  ? t("navSearchGalleryPlaceholder")
-                  : activeTab === "library"
-                    ? t("navSearchLibraryPlaceholder")
-                    : ""
-              }
-              onCompositionStart={() => setIsComposing(true)}
-              onCompositionEnd={(event) => {
-                setIsComposing(false);
-                setInputValue(event.currentTarget.value);
-                onSearchChange(event.currentTarget.value);
-              }}
-              onChange={(event) => {
-                setInputValue(event.target.value);
-                if (!isComposing) {
-                  onSearchChange(event.target.value);
-                }
-              }}
-            />
-          </label>
-        </div>
+            <label className="ue-topbar-search" htmlFor="ue-topbar-search">
+              <input
+                ref={searchInputRef}
+                id="ue-topbar-search"
+                value={inputValue}
+                placeholder={t("navSearchLibraryPlaceholder")}
+                onCompositionStart={() => setIsComposing(true)}
+                onCompositionEnd={(event) => {
+                  setIsComposing(false);
+                  setInputValue(event.currentTarget.value);
+                  onSearchChange(event.currentTarget.value);
+                }}
+                onChange={(event) => {
+                  setInputValue(event.target.value);
+                  if (!isComposing) {
+                    onSearchChange(event.target.value);
+                  }
+                }}
+              />
+            </label>
+          </div>
+        ) : null}
 
         <button
           className="ue-topbar-icon-btn ue-locale-toggle"

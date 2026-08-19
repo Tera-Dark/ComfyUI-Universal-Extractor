@@ -10,6 +10,7 @@ import {
   FolderPlus,
   Image as ImageIcon,
   Loader2,
+  MoveLeft,
   MoveRight,
   Pin,
   RefreshCcw,
@@ -325,6 +326,10 @@ export const DualFolderWorkspace = ({
         deleteSuccess: "Deleted",
         deleteError: "Failed to delete images",
         metadataError: "Failed to load metadata",
+        swapFolders: "Swap left and right folders",
+        moveToRight: "Move selected to right folder",
+        moveToLeft: "Move selected to left folder",
+        refreshBoth: "Refresh both folders",
       })
     : ({
         title: "双栏目录整理",
@@ -375,6 +380,10 @@ export const DualFolderWorkspace = ({
         deleteSuccess: "已删除",
         deleteError: "删除图片失败",
         metadataError: "Metadata 加载失败",
+        swapFolders: "左右目录对调",
+        moveToRight: "将选中项移入右侧目录",
+        moveToLeft: "将选中项移入左侧目录",
+        refreshBoth: "同时刷新双栏",
       }), [locale]);
 
   const folderRefs = useMemo(() => {
@@ -1047,6 +1056,79 @@ export const DualFolderWorkspace = ({
     );
   };
 
+  const swapFolders = () => {
+    const prevLeft = leftFolder;
+    const prevRight = rightFolder;
+    setLeftFolder(prevRight);
+    setRightFolder(prevLeft);
+  };
+
+  const renderTransferRail = () => {
+    const leftSelection = getPaneSelection("left");
+    const rightSelection = getPaneSelection("right");
+    const leftCount = leftSelection.selectedPaths.length;
+    const rightCount = rightSelection.selectedPaths.length;
+
+    const rightSource = getFolderSource(rightFolder, context);
+    const leftSource = getFolderSource(leftFolder, context);
+    const canMoveRight = Boolean(rightSource?.writable) && leftFolder !== rightFolder;
+    const canMoveLeft = Boolean(leftSource?.writable) && leftFolder !== rightFolder;
+
+    return (
+      <aside className="ue-dual-transfer-rail" aria-label="Transfer Actions">
+        <div className="ue-dual-transfer-group">
+          <button
+            type="button"
+            className="ue-dual-transfer-btn"
+            onClick={swapFolders}
+            title={text.swapFolders}
+            aria-label={text.swapFolders}
+          >
+            <ArrowRightLeft size={15} />
+          </button>
+        </div>
+
+        <div className="ue-dual-transfer-group ue-dual-transfer-group--actions">
+          <button
+            type="button"
+            className={`ue-dual-transfer-btn ue-dual-transfer-btn--action ${leftCount > 0 && canMoveRight ? "is-active" : ""}`}
+            disabled={leftCount === 0 || !canMoveRight}
+            onClick={() => void moveActiveSelectionToOtherPane("left")}
+            title={text.moveToRight}
+            aria-label={text.moveToRight}
+          >
+            <MoveRight size={17} />
+            {leftCount > 0 ? <span className="ue-dual-transfer-badge">{leftCount}</span> : null}
+          </button>
+
+          <button
+            type="button"
+            className={`ue-dual-transfer-btn ue-dual-transfer-btn--action ${rightCount > 0 && canMoveLeft ? "is-active" : ""}`}
+            disabled={rightCount === 0 || !canMoveLeft}
+            onClick={() => void moveActiveSelectionToOtherPane("right")}
+            title={text.moveToLeft}
+            aria-label={text.moveToLeft}
+          >
+            <MoveLeft size={17} />
+            {rightCount > 0 ? <span className="ue-dual-transfer-badge">{rightCount}</span> : null}
+          </button>
+        </div>
+
+        <div className="ue-dual-transfer-group">
+          <button
+            type="button"
+            className="ue-dual-transfer-btn"
+            onClick={() => void reloadBothPanes(true)}
+            title={text.refreshBoth}
+            aria-label={text.refreshBoth}
+          >
+            <RefreshCcw size={14} />
+          </button>
+        </div>
+      </aside>
+    );
+  };
+
   return (
     <div className="ue-dual-workspace">
       <div className="ue-dual-intro">
@@ -1062,6 +1144,7 @@ export const DualFolderWorkspace = ({
 
       <div className="ue-dual-layout">
         {renderPane("left", leftFolder, setLeftFolder, leftState)}
+        {renderTransferRail()}
         {renderPane("right", rightFolder, setRightFolder, rightState)}
       </div>
 

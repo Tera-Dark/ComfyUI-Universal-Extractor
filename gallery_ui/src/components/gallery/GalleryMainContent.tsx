@@ -265,135 +265,136 @@ export const GalleryMainContent = ({
             {masonryLayout.items.map(({ image, index, top, left, width, lane }) => {
               const selected = pageSelectedPaths.includes(image.relative_path);
 
-              return (
-                <article
-                  key={image.relative_path}
-                  className={`ue-gallery-card ${selected ? "is-selected" : ""}`}
-                  data-tour-id={index === 0 ? "gallery-card" : undefined}
-                  data-index={index}
-                  data-lane={lane}
-                  style={{ top: `${top}px`, left: `${left}px`, width: `${width}px` }}
-                  onContextMenu={(event) => onOpenContextMenu(event, image)}
-                  ref={(element) => {
-                    cardRefs.current[image.relative_path] = element;
-                    masonryLayout.measureElement(element);
-                  }}
-                >
-                <div className="ue-gallery-media">
-                  <GalleryCardImage
-                    image={image}
-                    priority={index < effectiveColumns * 2}
-                    onOpenDetail={(nextImage, event) => {
-                      if (selectionMode) {
-                        onImageSelectionClick(nextImage.relative_path, event);
-                        return;
-                      }
-                      if (isDraggingSelectionRef.current) {
-                        return;
-                      }
-                      onOpenDetail(nextImage);
+                const imgWidth = Number(image.width ?? 0);
+                const imgHeight = Number(image.height ?? 0);
+                const resolution = imgWidth > 0 && imgHeight > 0 ? `${imgWidth} × ${imgHeight}` : "";
+                const mediaAspectStyle = imgWidth > 0 && imgHeight > 0 ? { aspectRatio: `${imgWidth} / ${imgHeight}` } : undefined;
+
+                return (
+                  <article
+                    key={image.relative_path}
+                    className={`ue-gallery-card ${selected ? "is-selected" : ""}`}
+                    data-tour-id={index === 0 ? "gallery-card" : undefined}
+                    data-index={index}
+                    data-lane={lane}
+                    style={{ top: `${top}px`, left: `${left}px`, width: `${width}px` }}
+                    onContextMenu={(event) => onOpenContextMenu(event, image)}
+                    ref={(element) => {
+                      cardRefs.current[image.relative_path] = element;
+                      masonryLayout.measureElement(element);
                     }}
-                  />
-
-                  <div className="ue-gallery-actions">
-                    <button
-                      className="ue-send-btn"
-                      data-tour-id={index === 0 ? "gallery-workflow" : undefined}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void onOpenWorkflow(image);
-                      }}
-                      aria-label={t("modalOpenWorkflow")}
-                      title={t("modalOpenWorkflow")}
-                    >
-                      <Send size={13} />
-                    </button>
-                    <button
-                      className={`ue-select-btn ${selected ? "active" : ""}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onImageSelectionClick(image.relative_path, event);
-                      }}
-                      aria-label={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
-                      title={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
-                    >
-                      {selected ? <CheckSquare size={13} /> : <Square size={13} />}
-                    </button>
-
-                    <button
-                      className="ue-board-btn"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        openBoardPickerForImage(image, selected);
-                      }}
-                      aria-label={t("bulkAddToBoard")}
-                      title={t("bulkAddToBoard")}
-                    >
-                      <FolderPlus size={13} />
-                    </button>
-
-                    <button
-                      className={`ue-pin-btn ${image.pinned ? "active" : ""}`}
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        void onUpdateImageState(image.relative_path, { pinned: !image.pinned });
-                      }}
-                      aria-label={image.pinned ? t("galleryUnpin") : t("galleryPin")}
-                      title={image.pinned ? t("galleryUnpin") : t("galleryPin")}
-                    >
-                      <Pin size={13} fill={image.pinned ? "currentColor" : "none"} />
-                    </button>
-                  </div>
-
-                  <button
-                    className="ue-gallery-open ue-gallery-open--icon"
-                    onClick={(event) => {
-                      if (selectionMode) {
-                        onImageSelectionClick(image.relative_path, event);
-                        return;
-                      }
-                      if (isDraggingSelectionRef.current) {
-                        return;
-                      }
-                      onOpenDetail(image);
-                    }}
-                    aria-label={t("galleryInspect")}
-                    title={t("galleryInspect")}
                   >
-                    <Eye size={14} />
-                  </button>
-                </div>
+                    <div className="ue-gallery-media" style={mediaAspectStyle}>
+                      <GalleryCardImage
+                        image={image}
+                        priority={index < effectiveColumns * 2}
+                        onOpenDetail={(nextImage, event) => {
+                          if (selectionMode) {
+                            onImageSelectionClick(nextImage.relative_path, event);
+                            return;
+                          }
+                          if (isDraggingSelectionRef.current) {
+                            return;
+                          }
+                          onOpenDetail(nextImage);
+                        }}
+                      />
 
-                <button
-                  className="ue-gallery-body"
-                  onClick={(event) => {
-                    if (selectionMode) {
-                      onImageSelectionClick(image.relative_path, event);
-                      return;
-                    }
-                    if (isDraggingSelectionRef.current) {
-                      return;
-                    }
-                    onOpenDetail(image);
-                  }}
-                >
-                  <span className="ue-gallery-title" title={image.title || image.filename}>
-                    {image.title || image.filename}
-                  </span>
-                  <span className="ue-gallery-meta">
-                    {formatCompactDate(image.created_at)}
-                    <i aria-hidden="true">/</i>
-                    {formatFileSize(image.size)}
-                    {image.category ? (
-                      <>
-                        <i aria-hidden="true">/</i>
-                        {image.category}
-                      </>
-                    ) : null}
-                  </span>
-                </button>
-                </article>
-              );
+                      <div className="ue-gallery-actions">
+                        <button
+                          className="ue-send-btn"
+                          data-tour-id={index === 0 ? "gallery-workflow" : undefined}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onOpenWorkflow(image);
+                          }}
+                          aria-label={t("modalOpenWorkflow")}
+                          title={t("modalOpenWorkflow")}
+                        >
+                          <Send size={13} />
+                        </button>
+                        <button
+                          className={`ue-select-btn ${selected ? "active" : ""}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onImageSelectionClick(image.relative_path, event);
+                          }}
+                          aria-label={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
+                          title={selected ? t("galleryDeselectImage") : t("gallerySelectImage")}
+                        >
+                          {selected ? <CheckSquare size={13} /> : <Square size={13} />}
+                        </button>
+
+                        <button
+                          className="ue-board-btn"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            openBoardPickerForImage(image, selected);
+                          }}
+                          aria-label={t("bulkAddToBoard")}
+                          title={t("bulkAddToBoard")}
+                        >
+                          <FolderPlus size={13} />
+                        </button>
+
+                        <button
+                          className={`ue-pin-btn ${image.pinned ? "active" : ""}`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            void onUpdateImageState(image.relative_path, { pinned: !image.pinned });
+                          }}
+                          aria-label={image.pinned ? t("galleryUnpin") : t("galleryPin")}
+                          title={image.pinned ? t("galleryUnpin") : t("galleryPin")}
+                        >
+                          <Pin size={13} fill={image.pinned ? "currentColor" : "none"} />
+                        </button>
+                      </div>
+
+                      <button
+                        className="ue-gallery-open ue-gallery-open--icon"
+                        onClick={(event) => {
+                          if (selectionMode) {
+                            onImageSelectionClick(image.relative_path, event);
+                            return;
+                          }
+                          if (isDraggingSelectionRef.current) {
+                            return;
+                          }
+                          onOpenDetail(image);
+                        }}
+                        aria-label={t("galleryInspect")}
+                        title={t("galleryInspect")}
+                      >
+                        <Eye size={14} />
+                      </button>
+                    </div>
+
+                    <button
+                      className="ue-gallery-body"
+                      onClick={(event) => {
+                        if (selectionMode) {
+                          onImageSelectionClick(image.relative_path, event);
+                          return;
+                        }
+                        if (isDraggingSelectionRef.current) {
+                          return;
+                        }
+                        onOpenDetail(image);
+                      }}
+                    >
+                      <span className="ue-gallery-title" title={image.title || image.filename}>
+                        {image.title || image.filename}
+                      </span>
+                      <span className="ue-gallery-meta">
+                        <span>{formatCompactDate(image.created_at)}</span>
+                        <i aria-hidden="true">·</i>
+                        <span>{formatFileSize(image.size)}</span>
+                        {resolution ? <span className="ue-gallery-resolution-chip">{resolution}</span> : null}
+                        {image.category ? <span className="ue-gallery-category-chip">{image.category}</span> : null}
+                      </span>
+                    </button>
+                  </article>
+                );
             })}
           </div>
           <SelectionBoxOverlay selectionEnabled={selectionEnabled} selectionBox={selectionBox} />

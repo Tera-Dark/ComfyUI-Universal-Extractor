@@ -85,6 +85,20 @@ export const useDismissableLayer = (
       }
     };
 
+    const handleScroll = (event: Event) => {
+      if (
+        event.target instanceof HTMLElement &&
+        (event.target.closest(".ue-update-popover") ||
+          event.target.closest(".ue-floating-layer") ||
+          event.target.closest(".ue-filter-popover") ||
+          event.target.closest(".ue-select-field__menu") ||
+          event.target.closest(".ue-context-menu"))
+      ) {
+        return;
+      }
+      onDismiss();
+    };
+
     window.addEventListener("click", onDismiss);
     window.addEventListener("resize", onDismiss);
     window.addEventListener("keydown", handleKeyDown);
@@ -92,7 +106,7 @@ export const useDismissableLayer = (
       window.addEventListener("contextmenu", onDismiss);
     }
     if (options.closeOnScroll) {
-      window.addEventListener("scroll", onDismiss, true);
+      window.addEventListener("scroll", handleScroll, true);
     }
 
     return () => {
@@ -103,7 +117,7 @@ export const useDismissableLayer = (
         window.removeEventListener("contextmenu", onDismiss);
       }
       if (options.closeOnScroll) {
-        window.removeEventListener("scroll", onDismiss, true);
+        window.removeEventListener("scroll", handleScroll, true);
       }
     };
   }, [active, onDismiss, options.closeOnContextMenu, options.closeOnScroll]);

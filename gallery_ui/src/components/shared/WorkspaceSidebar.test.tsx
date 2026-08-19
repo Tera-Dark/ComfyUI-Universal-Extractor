@@ -157,8 +157,9 @@ describe("WorkspaceSidebar folder tree", () => {
     });
 
     const quickActive = container.querySelector(".ue-sidebar-quick .ue-tree-item.active");
+    const folderGroup = container.querySelector(".ue-sidebar-group[data-tour-id='sidebar-folders']");
     const folderHeader = container.querySelector(".ue-sidebar-group-header--folders");
-    const folderActions = folderHeader?.querySelectorAll("button[aria-label], .ue-sidebar-viewmodes button");
+    const folderActions = folderGroup?.querySelectorAll(".ue-sidebar-subaction, .ue-sidebar-viewmodes button");
 
     expect(quickActive).toHaveAttribute("title", "D:/ComfyUI/output");
     expect(folderHeader?.querySelector(".ue-sidebar-subactions")).toBeInTheDocument();
