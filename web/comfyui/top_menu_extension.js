@@ -585,8 +585,10 @@ const createExtensionObject = (useActionBar) => {
                     }
 
                     console.warn("Universal Extractor: no supported workflow payload was found.");
+                    notifyChannelDelivered(payload, WORKFLOW_DELIVERED_TYPE, { ok: false, error: "No supported workflow payload." });
                 } catch (error) {
                     console.warn("Universal Extractor: failed to load pending workflow:", error);
+                    notifyChannelDelivered(payload, WORKFLOW_DELIVERED_TYPE, { ok: false, error: error?.message || "Failed to load workflow." });
                 }
             };
 
@@ -699,6 +701,16 @@ const createExtensionObject = (useActionBar) => {
 
             window.addEventListener("storage", (event) => {
                 if (event.key === PENDING_WORKFLOW_KEY && event.newValue) {
+                    void tryLoadPendingWorkflow();
+                }
+            });
+
+            window.addEventListener("focus", () => {
+                void tryLoadPendingWorkflow();
+            });
+
+            document.addEventListener("visibilitychange", () => {
+                if (document.visibilityState === "visible") {
                     void tryLoadPendingWorkflow();
                 }
             });

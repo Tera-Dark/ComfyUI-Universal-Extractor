@@ -39,8 +39,8 @@ const WORKFLOW_PROBE_TYPE = "universal-extractor:workflow-probe";
 const WORKFLOW_ACK_TYPE = "universal-extractor:workflow-ack";
 const WORKFLOW_DELIVERED_TYPE = "universal-extractor:workflow-delivered";
 const LORA_STACK_DELIVERED_TYPE = "universal-extractor:lora-stack-delivered";
-const EXISTING_COMFY_PROBE_TIMEOUT_MS = 450;
-const WORKFLOW_DELIVERY_TIMEOUT_MS = 900;
+const EXISTING_COMFY_PROBE_TIMEOUT_MS = 900;
+const WORKFLOW_DELIVERY_TIMEOUT_MS = 8000;
 const UI_PREFERENCES_KEY = "universal-extractor:ui-preferences";
 const DEFAULT_OUTPUT_SOURCE_ROOT = "default_output::";
 const FOLDER_REF_SEPARATOR = "::";
@@ -687,11 +687,10 @@ function App() {
         throw new Error(t("modalNoMetadata"));
       }
 
-      clearPendingWorkflowPayload();
+      storeUndeliveredWorkflowPayload(payload);
       const sentToExistingPage = await trySendWorkflowToExistingComfyPage(payload);
 
       if (!sentToExistingPage) {
-        storeUndeliveredWorkflowPayload(payload);
         throw new Error(t("workflowNoComfyPage"));
       }
       clearPendingWorkflowPayload();
