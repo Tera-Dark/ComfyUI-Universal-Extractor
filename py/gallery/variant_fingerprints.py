@@ -6,7 +6,7 @@ import os
 import re
 from typing import Any
 
-from .image_safety import DecompressionBombError, guarded_image_open
+from .image_safety import DecompressionBombError, extract_grayscale_pixels, guarded_image_open
 from .metadata import read_image_metadata
 from .recipe import build_prompt_summary
 
@@ -67,7 +67,10 @@ def dhash(image_path: str) -> str:
         with guarded_image_open(image_path) as image:
             resample = getattr(Image, "Resampling", Image).LANCZOS
             grayscale = image.convert("L").resize((DHASH_SIZE + 1, DHASH_SIZE), resample)
-            pixels = list(grayscale.getdata())
+            try:
+                pixels = extract_grayscale_pixels(grayscale)
+            finally:
+                grayscale.close()
     except DecompressionBombError:
         raise
     except Exception:

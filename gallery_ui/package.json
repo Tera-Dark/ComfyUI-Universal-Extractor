@@ -11,7 +11,7 @@
     "lint": "eslint .",
     "test": "vitest",
     "test:run": "vitest run",
-    "audit:security": "npm audit --audit-level=moderate",
+    "audit:security": "node scripts/audit-security.mjs",
     "verify": "npm run typecheck && npm run lint && npm run test:run && npm run audit:security && npm run build",
     "audit:dist": "node scripts/audit-dist-assets.mjs",
     "preview": "vite preview"

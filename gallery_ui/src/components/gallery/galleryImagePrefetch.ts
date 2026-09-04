@@ -1,7 +1,47 @@
 import type { ImageRecord } from "../../types/universal-gallery";
 
-const loadedImageUrls = new Set<string>();
-const prefetchedImageUrls = new Set<string>();
+class BoundedSet {
+  private readonly capacity: number;
+  private readonly set = new Set<string>();
+
+  constructor(capacity = 2500) {
+    this.capacity = capacity;
+  }
+
+  has(key: string): boolean {
+    return this.set.has(key);
+  }
+
+  add(key: string): void {
+    if (this.set.has(key)) {
+      this.set.delete(key);
+      this.set.add(key);
+      return;
+    }
+    if (this.set.size >= this.capacity) {
+      const oldest = this.set.values().next().value;
+      if (oldest !== undefined) {
+        this.set.delete(oldest);
+      }
+    }
+    this.set.add(key);
+  }
+
+  delete(key: string): boolean {
+    return this.set.delete(key);
+  }
+
+  clear(): void {
+    this.set.clear();
+  }
+
+  get size(): number {
+    return this.set.size;
+  }
+}
+
+const loadedImageUrls = new BoundedSet(2500);
+const prefetchedImageUrls = new BoundedSet(2500);
 const queuedImageUrls = new Set<string>();
 const imagePrefetchQueue: string[] = [];
 const MAX_IMAGE_PREFETCH_CONCURRENCY = 4;
@@ -27,6 +67,13 @@ const pumpImagePrefetchQueue = () => {
     const preloadImage = new Image();
     preloadImage.decoding = "async";
     const finish = (loaded: boolean) => {
+      preloadImage.onload = null;
+      preloadImage.onerror = null;
+      try {
+        preloadImage.src = "";
+      } catch {
+        // Safe fallback
+      }
       if (loaded) {
         loadedImageUrls.add(imageUrl);
       } else {

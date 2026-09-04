@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import warnings
 from contextlib import contextmanager
-from typing import Iterator
+from typing import Any, Iterator
 
 try:
     from PIL import Image
@@ -59,3 +59,29 @@ def guarded_image_open(path: str) -> Iterator:
         warnings.simplefilter("error", DecompressionBombWarning)
         with Image.open(path) as image:
             yield image
+
+
+def extract_rgba_pixels(image: Any) -> list[tuple[int, int, int, int]]:
+    """Safely extract RGBA tuples from an RGBA Pillow image across Pillow 10-14+."""
+    if hasattr(image, "get_flattened_data"):
+        try:
+            flat = list(image.get_flattened_data())
+            return [(flat[i], flat[i + 1], flat[i + 2], flat[i + 3]) for i in range(0, len(flat), 4)]
+        except Exception:
+            pass
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        return list(image.getdata())
+
+
+def extract_grayscale_pixels(image: Any) -> list[int]:
+    """Safely extract integer grayscale pixels from a 1-channel 'L' Pillow image across Pillow 10-14+."""
+    if hasattr(image, "get_flattened_data"):
+        try:
+            return [int(val) for val in image.get_flattened_data()]
+        except Exception:
+            pass
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", category=DeprecationWarning)
+        return [int(val) for val in image.getdata()]
+

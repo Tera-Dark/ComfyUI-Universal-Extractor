@@ -19,10 +19,13 @@ import {
   Expand,
   ExternalLink,
   FileJson,
+  Film,
+  ImageOff,
   Layers,
   Palette,
   PencilLine,
   Pin,
+  RotateCcw,
   Save,
   Send,
   Shrink,
@@ -158,6 +161,10 @@ export const ImageDetailModal = ({
   const dragStateRef = useRef<DragState | null>(null);
   const previousOverflowRef = useRef<string>("");
   const [activeVisual, setActiveVisual] = useState<LightboxVisual>(() => makeLightboxVisual(image));
+  const [showFilmstrip, setShowFilmstrip] = useState(true);
+  const [imageLoadFailed, setImageLoadFailed] = useState(false);
+  const [detailRetryKey, setDetailRetryKey] = useState(0);
+  const activeThumbRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     setDraftTitle(image.title || "");
@@ -170,11 +177,25 @@ export const ImageDetailModal = ({
     setIsExpandedView(false);
     setIsDragging(false);
     dragStateRef.current = null;
+    setImageLoadFailed(false);
+    setDetailRetryKey(0);
   }, [image.relative_path, image.title, image.category, image.notes, image.pinned, image.favorite, image.filename]);
 
   useEffect(() => {
     setActiveVisual(makeLightboxVisual(image));
+    setImageLoadFailed(false);
+    setDetailRetryKey(0);
   }, [image]);
+
+  useEffect(() => {
+    if (showFilmstrip && activeThumbRef.current) {
+      activeThumbRef.current.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+        inline: "center",
+      });
+    }
+  }, [navigation?.currentIndex, showFilmstrip]);
 
   useEffect(() => {
     const items = navigation?.items ?? [];
@@ -632,18 +653,51 @@ export const ImageDetailModal = ({
             onDoubleClick={handleDoubleClick}
           >
             <div className="ue-lightbox-gesture-hint">{t("modalGestureHint")}</div>
-            <img
-              key={activeVisual.key}
-              className="ue-lightbox-image ue-lightbox-image--active"
-              src={activeVisual.src}
-              alt={activeVisual.alt}
-              draggable={false}
-              style={{
-                "--ue-pan-x": `${pan.x}px`,
-                "--ue-pan-y": `${pan.y}px`,
-                "--ue-zoom": zoomScale,
-              } as CSSProperties}
-            />
+            {imageLoadFailed ? (
+              <div className="ue-lightbox-fallback-card">
+                <div className="ue-lightbox-fallback-icon">
+                  <ImageOff size={44} />
+                </div>
+                <h3>{image.filename}</h3>
+                <p className="ue-lightbox-fallback-path">{image.relative_path}</p>
+                <div className="ue-lightbox-fallback-actions">
+                  <button
+                    type="button"
+                    className="ue-lightbox-retry-btn"
+                    onClick={() => {
+                      setImageLoadFailed(false);
+                      setDetailRetryKey((prev) => prev + 1);
+                    }}
+                  >
+                    <RotateCcw size={14} />
+                    <span>重试加载图片</span>
+                  </button>
+                  <a
+                    href={image.original_url || image.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="ue-lightbox-link-btn"
+                  >
+                    <ExternalLink size={14} />
+                    <span>在新标签页打开</span>
+                  </a>
+                </div>
+              </div>
+            ) : (
+              <img
+                key={`${activeVisual.key}-${detailRetryKey}`}
+                className="ue-lightbox-image ue-lightbox-image--active"
+                src={detailRetryKey > 0 ? `${activeVisual.src}${activeVisual.src.includes("?") ? "&" : "?"}_retry=${detailRetryKey}` : activeVisual.src}
+                alt={activeVisual.alt}
+                draggable={false}
+                onError={() => setImageLoadFailed(true)}
+                style={{
+                  "--ue-pan-x": `${pan.x}px`,
+                  "--ue-pan-y": `${pan.y}px`,
+                  "--ue-zoom": zoomScale,
+                } as CSSProperties}
+              />
+            )}
           </div>
 
           <aside className={`ue-lightbox-inspector ${showInspector ? "is-open" : ""}`}>
@@ -1034,6 +1088,30 @@ export const ImageDetailModal = ({
               </div>
             )}
           </aside>
+
+          {navigation && navigation.items.length > 1 && showFilmstrip ? (
+            <div className="ue-lightbox-filmstrip" role="region" aria-label="胶片缩略图传送带">
+              <div className="ue-lightbox-filmstrip-track">
+                {navigation.items.map((navItem, idx) => {
+                  const isCurrent = idx === currentIndex;
+                  const thumb = navItem.thumb_url || navItem.url;
+                  return (
+                    <button
+                      key={navItem.relative_path || idx}
+                      ref={isCurrent ? activeThumbRef : undefined}
+                      type="button"
+                      className={`ue-lightbox-filmstrip-item ${isCurrent ? "is-active" : ""}`}
+                      onClick={() => onNavigate(idx)}
+                      title={navItem.title || navItem.filename}
+                      aria-label={navItem.title || navItem.filename}
+                    >
+                      <img src={thumb} alt={navItem.filename} loading="lazy" />
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
         </div>
 
         <div className="ue-lightbox-toolbar">
@@ -1060,6 +1138,16 @@ export const ImageDetailModal = ({
             <ChevronRight size={17} />
           </button>
           <span className="ue-toolbar-divider" />
+          {navigation && navigation.items.length > 1 ? (
+            <button
+              className={`ue-toolbar-btn ${showFilmstrip ? "is-active" : ""}`}
+              onClick={() => setShowFilmstrip((current) => !current)}
+              aria-label="切换缩略图传送带"
+              title="切换缩略图传送带"
+            >
+              <Film size={17} />
+            </button>
+          ) : null}
           <button
             className="ue-toolbar-btn"
             onClick={() => setShowInspector((current) => !current)}

@@ -41,7 +41,7 @@ from ..paths import (
 )
 from .metadata import read_image_metadata
 from .recipe import build_prompt_summary, extract_artist_prompts, extract_generation_recipe
-from .image_safety import DecompressionBombError, guarded_image_open
+from .image_safety import DecompressionBombError, extract_rgba_pixels, guarded_image_open
 from .variant_fingerprints import (
     FINGERPRINT_VERSION,
     build_image_fingerprint,
@@ -932,7 +932,10 @@ def _extract_image_color_profile(full_path: str, relative_path: str = "") -> dic
         with guarded_image_open(sample_path) as image:
             image.thumbnail((96, 96))
             rgba_image = image.convert("RGBA")
-            pixels = list(rgba_image.getdata())
+            try:
+                pixels = extract_rgba_pixels(rgba_image)
+            finally:
+                rgba_image.close()
     except DecompressionBombError as error:
         print(f"[Universal Extractor] color profile skipped ({sample_path}): {error}")
         return dict(COLOR_PROFILE_DEFAULT)
