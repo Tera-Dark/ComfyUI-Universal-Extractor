@@ -1,4 +1,4 @@
-import { Activity, Suspense, lazy, startTransition, useMemo, useState } from "react";
+import { Activity, Suspense, lazy, startTransition, useCallback, useEffect, useRef, useMemo, useState } from "react";
 
 import { GalleryWorkspace } from "./components/gallery/GalleryWorkspace";
 import { GalleryInspectorPanel } from "./components/gallery/GalleryInspectorPanel";
@@ -237,6 +237,7 @@ function App() {
     const preferences = getStoredUiPreferences();
     return typeof window !== "undefined" ? window.innerWidth <= 960 || preferences.collapseSidebarOnLaunch : preferences.collapseSidebarOnLaunch;
   });
+  const [galleryDragging,setGalleryDragging] = useState(false);
   const [gallerySelectionModeActive, setGallerySelectionModeActive] = useState(false);
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [boardDialogOpen, setBoardDialogOpen] = useState(false);
@@ -758,11 +759,18 @@ function App() {
     [gallery.boards, gallery.selectedBoardId],
   );
 
+  const [inspectorDuringDrag,setInspectorDuringDrag] = useState(false);
+  const inspectorAvailable=useRef(false);
+  useEffect(()=>{inspectorAvailable.current=gallerySelectionModeActive && selectedGalleryImages.length>0;},[gallerySelectionModeActive,selectedGalleryImages.length]);
+  const handleGalleryDragChange = useCallback((dragging:boolean)=>{
+    if(dragging)setInspectorDuringDrag(inspectorAvailable.current);
+    setGalleryDragging(dragging);
+  },[]);
   const galleryInspectorOpen =
     activeTab === "gallery" &&
     gallerySelectionModeActive &&
     !gallery.isTrashView &&
-    selectedGalleryImages.length > 0;
+    (galleryDragging ? inspectorDuringDrag : selectedGalleryImages.length > 0);
 
   const handleOpenGalleryDetail = (image: ImageRecord) => {
     gallery.setSelectedImage(image);
@@ -874,6 +882,7 @@ function App() {
               onSearchChange={gallery.setSearchTerm}
               defaultSelectionMode={uiPreferences.defaultSelectionMode}
               enableImagePrefetch={uiPreferences.enableImagePrefetch}
+              onSelectionDragChange={handleGalleryDragChange}
               onSelectionModeActiveChange={setGallerySelectionModeActive}
               onOpenDetail={handleOpenGalleryDetail}
               onPageChange={gallery.setPage}

@@ -1,4 +1,5 @@
 export interface SelectionBoxState {
+  scrollDelta?: number;
   startX: number;
   startY: number;
   currentX: number;
@@ -75,7 +76,7 @@ export const getIntersectingSelectionKeys = ({
   getRect: (key: string) => RectLike | null | undefined;
   scrollDelta?: number;
 }) => {
-  const selectionRect = getSelectionBoxRect(selectionBox);
+  const selectionRect = getSelectionBoxRect({...selectionBox,startY:selectionBox.startY-scrollDelta});
   return keys.filter((key) => {
     const rect = getRect(key);
     if (!rect) {

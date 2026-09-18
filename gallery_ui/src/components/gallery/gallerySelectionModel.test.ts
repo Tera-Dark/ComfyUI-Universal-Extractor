@@ -58,4 +58,15 @@ describe("gallerySelectionModel", () => {
 
     expect(keys).toEqual(["visible-after-scroll"]);
   });
+  it("anchors the rectangle in content coordinates while scrolling",()=>{
+    const rects:Record<string,{left:number;right:number;top:number;bottom:number}>={first:{left:10,right:90,top:100,bottom:200},next:{left:10,right:90,top:800,bottom:900}};
+    expect(getIntersectingSelectionKeys({selectionBox:{startX:0,startY:90,currentX:100,currentY:350},keys:["first","next"],scrollDelta:600,getRect:key=>rects[key]})).toEqual(["first","next"]);
+  });
+  it("shrinking the box excludes cards no longer inside its geometry",()=>{
+    const getRect=(key:string)=>key==="a" ? {left:10,right:90,top:100,bottom:200} : {left:110,right:190,top:100,bottom:200};
+    const box={startX:0,startY:90,currentX:200,currentY:210};
+    expect(getIntersectingSelectionKeys({selectionBox:box,keys:["a","b"],getRect})).toEqual(["a","b"]);
+    expect(getIntersectingSelectionKeys({selectionBox:{...box,currentX:100},keys:["a","b"],getRect})).toEqual(["a"]);
+  });
+
 });

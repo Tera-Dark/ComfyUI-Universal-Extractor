@@ -32,7 +32,7 @@
     ]
   },
   "index.html": {
-    "file": "assets/index-yAsYJoYA.js",
+    "file": "assets/index-BrT9QXZi.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
@@ -46,11 +46,11 @@
       "src/components/workbench/WorkbenchWorkspace.tsx"
     ],
     "css": [
-      "assets/index-Bchasl2L.css"
+      "assets/index-BqDHiDQM.css"
     ]
   },
   "src/components/gallery/ImageDetailModal.tsx": {
-    "file": "assets/ImageDetailModal-DATljYZf.js",
+    "file": "assets/ImageDetailModal-Dob98z_k.js",
     "name": "ImageDetailModal",
     "src": "src/components/gallery/ImageDetailModal.tsx",
     "isDynamicEntry": true,
@@ -66,7 +66,7 @@
     ]
   },
   "src/components/library/LibraryWorkspace.tsx": {
-    "file": "assets/LibraryWorkspace-BO2eMViB.js",
+    "file": "assets/LibraryWorkspace-fJdFS4FB.js",
     "name": "LibraryWorkspace",
     "src": "src/components/library/LibraryWorkspace.tsx",
     "isDynamicEntry": true,
@@ -80,7 +80,7 @@
     ]
   },
   "src/components/settings/SettingsWorkspace.tsx": {
-    "file": "assets/SettingsWorkspace-C92s-ArJ.js",
+    "file": "assets/SettingsWorkspace-CqbVoYXl.js",
     "name": "SettingsWorkspace",
     "src": "src/components/settings/SettingsWorkspace.tsx",
     "isDynamicEntry": true,
@@ -94,7 +94,7 @@
     ]
   },
   "src/components/workbench/WorkbenchWorkspace.tsx": {
-    "file": "assets/WorkbenchWorkspace-JmNSphm6.js",
+    "file": "assets/WorkbenchWorkspace-BEyc7MwE.js",
     "name": "WorkbenchWorkspace",
     "src": "src/components/workbench/WorkbenchWorkspace.tsx",
     "isDynamicEntry": true,

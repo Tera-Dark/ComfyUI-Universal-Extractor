@@ -84,6 +84,7 @@ interface GalleryWorkspaceProps {
   boards: BoardSummary[];
   defaultSelectionMode: boolean;
   enableImagePrefetch: boolean;
+  onSelectionDragChange?: (active: boolean) => void;
   onSelectionModeActiveChange?: (active: boolean) => void;
   onOpenDetail: (image: ImageRecord) => void;
   onPageChange: (page: number) => void;
@@ -155,6 +156,7 @@ export const GalleryWorkspace = ({
   boards,
   defaultSelectionMode,
   enableImagePrefetch,
+  onSelectionDragChange,
   onSelectionModeActiveChange,
   onOpenDetail,
   onPageChange,
@@ -257,6 +259,7 @@ export const GalleryWorkspace = ({
   const selectedCount = pageSelectedPaths.length;
   const hasSelection = selectedCount > 0;
   const selectionLayoutLocked = Boolean(selectionBox);
+  useEffect(()=>{onSelectionDragChange?.(selectionLayoutLocked);return ()=>onSelectionDragChange?.(false);},[selectionLayoutLocked,onSelectionDragChange]);
   const selectionEnabled = !dualFolderMode;
   const inspectorSelectionActive = !isTrashView && (selectionMode || selectedCount > 0);
   const selectedTrashItems = useMemo(
@@ -868,18 +871,11 @@ export const GalleryWorkspace = ({
         getEstimatedGridCardRect(key),
     });
 
-    setSelection(
-      (() => {
-        const accumulatedPaths = dedupeVisibleSelection(
-          [...selectionBoxAccumulatedPathsRef.current, ...intersectedPaths],
-          visibleSelectionPaths,
-        );
-        selectionBoxAccumulatedPathsRef.current = accumulatedPaths;
-        return selectionBoxAppendRef.current
-          ? dedupeVisibleSelection([...selectionBoxBasePathsRef.current, ...accumulatedPaths], visibleSelectionPaths)
-          : accumulatedPaths;
-      })(),
-    );
+    setSelectionBox(current=>current && current.scrollDelta !== scrollDelta ? {...current,scrollDelta} : current);
+    setSelection(selectionBoxAppendRef.current
+      ? dedupeVisibleSelection([...selectionBoxBasePathsRef.current,...intersectedPaths],visibleSelectionPaths)
+      : intersectedPaths);
+
   }, [activeImages, getEstimatedGridCardRect, isTrashView, setSelection, trashItems, visibleSelectionPaths]);
 
   const handleSelectionPointerDown = useCallback((event: React.PointerEvent<HTMLElement>) => {
@@ -888,7 +884,7 @@ export const GalleryWorkspace = ({
     }
 
     const target = event.target as HTMLElement;
-    if (target.closest("button, input, select, textarea, a, label")) {
+    if (target.closest("button, input, select, textarea, a, label, .ue-filter-bar")) {
       return;
     }
 
@@ -923,10 +919,11 @@ export const GalleryWorkspace = ({
       return;
     }
 
+    const bounds=scrollContainerRef.current?.getBoundingClientRect();
     const nextBox = {
       ...selectionBox,
-      currentX: event.clientX,
-      currentY: event.clientY,
+      currentX: bounds && bounds.width > 0 ? Math.max(bounds.left,Math.min(event.clientX,bounds.right)) : event.clientX,
+      currentY: bounds && bounds.height > 0 ? Math.max(Math.max(60,bounds.top),Math.min(event.clientY,Math.min(window.innerHeight,bounds.bottom))) : event.clientY,
     };
     const shouldStartDrag =
       Math.abs(nextBox.currentX - nextBox.startX) > 6 ||
@@ -934,9 +931,8 @@ export const GalleryWorkspace = ({
 
     if (shouldStartDrag && !isDraggingSelectionRef.current) {
       isDraggingSelectionRef.current = true;
-      if (typeof event.currentTarget.setPointerCapture === "function") {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      }
+      scrollContainerRef.current?.setPointerCapture?.(event.pointerId);
+
     }
     setSelectionBox(nextBox);
     if (isDraggingSelectionRef.current) {
@@ -1021,7 +1017,8 @@ export const GalleryWorkspace = ({
         return;
       }
 
-      const rect = scrollElement.getBoundingClientRect();
+      const bounds = scrollElement.getBoundingClientRect();
+      const rect = {top:Math.max(60,bounds.top),bottom:Math.min(window.innerHeight,bounds.bottom)};
       const maxScroll = Math.max(0, scrollElement.scrollHeight - scrollElement.clientHeight);
       if (maxScroll <= 0) {
         return;
@@ -1030,10 +1027,10 @@ export const GalleryWorkspace = ({
       let delta = 0;
       if (selectionBox.currentY > rect.bottom - SELECTION_AUTO_SCROLL_EDGE_PX) {
         const distanceIntoEdge = SELECTION_AUTO_SCROLL_EDGE_PX - (rect.bottom - selectionBox.currentY);
-        delta = Math.ceil((distanceIntoEdge / SELECTION_AUTO_SCROLL_EDGE_PX) * SELECTION_AUTO_SCROLL_MAX_STEP_PX);
+        delta = Math.ceil(Math.min(1, distanceIntoEdge / SELECTION_AUTO_SCROLL_EDGE_PX) * SELECTION_AUTO_SCROLL_MAX_STEP_PX);
       } else if (selectionBox.currentY < rect.top + SELECTION_AUTO_SCROLL_EDGE_PX) {
         const distanceIntoEdge = SELECTION_AUTO_SCROLL_EDGE_PX - (selectionBox.currentY - rect.top);
-        delta = -Math.ceil((distanceIntoEdge / SELECTION_AUTO_SCROLL_EDGE_PX) * SELECTION_AUTO_SCROLL_MAX_STEP_PX);
+        delta = -Math.ceil(Math.min(1, distanceIntoEdge / SELECTION_AUTO_SCROLL_EDGE_PX) * SELECTION_AUTO_SCROLL_MAX_STEP_PX);
       }
 
       if (delta === 0) {
@@ -1073,12 +1070,30 @@ export const GalleryWorkspace = ({
       handleSelectionPointerEnd(event as unknown as React.PointerEvent<HTMLElement>);
     };
 
+    const cancel = () => {
+      isDraggingSelectionRef.current=false;
+      setSelectionBox(null);
+      setSelectionFrozenGridWidth(0);
+      selectionBoxCardRectsRef.current={};
+      selectionBoxBasePathsRef.current=[];
+      selectionBoxAccumulatedPathsRef.current=[];
+      selectionBoxAppendRef.current=false;
+    };
+    const escape = (event:KeyboardEvent) => {if(event.key === "Escape")cancel();};
+    window.addEventListener("blur",cancel);
+    window.addEventListener("resize",cancel);
+    window.addEventListener("keydown",escape,true);
+    scrollElement.addEventListener("lostpointercapture",cancel);
     scrollElement.addEventListener("pointerdown", handleMainPointerDown);
     scrollElement.addEventListener("pointermove", handleMainPointerMove);
     scrollElement.addEventListener("pointerup", handleMainPointerEnd);
     scrollElement.addEventListener("pointercancel", handleMainPointerEnd);
 
     return () => {
+      window.removeEventListener("blur",cancel);
+      window.removeEventListener("resize",cancel);
+      window.removeEventListener("keydown",escape,true);
+      scrollElement.removeEventListener("lostpointercapture",cancel);
       scrollElement.removeEventListener("pointerdown", handleMainPointerDown);
       scrollElement.removeEventListener("pointermove", handleMainPointerMove);
       scrollElement.removeEventListener("pointerup", handleMainPointerEnd);

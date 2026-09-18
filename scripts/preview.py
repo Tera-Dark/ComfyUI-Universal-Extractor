@@ -78,8 +78,9 @@ for index in range(18):
 ], ensure_ascii=False))
 
 async def preview_updates(force=False):
-    return {"current_version": "1.3.0-rc.3", "latest_version": "1.3.0-rc.3", "update_available": False,
-            "releases": [], "checked_at": 0, "error": "", "repository_url": "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor", "release_url": ""}
+    return {"current_version": "1.3.0", "latest_version": "1.3.0", "update_available": False,
+            "published_at": None, "release_notes": "", "has_remote_check": False,
+            "checked_at": int(time.time()), "error": None, "repository_url": "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor", "release_url": ""}
 routes.check_update_status = preview_updates
 app = web.Application()
 routes.register_routes(app)

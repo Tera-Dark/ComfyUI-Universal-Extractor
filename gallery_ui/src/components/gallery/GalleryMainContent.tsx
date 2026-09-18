@@ -67,9 +67,9 @@ const SelectionBoxOverlay = ({ selectionEnabled, selectionBox }: { selectionEnab
       className="ue-selection-box"
       style={{
         left: Math.min(selectionBox.startX, selectionBox.currentX),
-        top: Math.min(selectionBox.startY, selectionBox.currentY),
+        top: Math.max(60,Math.min(selectionBox.startY - (selectionBox.scrollDelta ?? 0), selectionBox.currentY)),
         width: Math.abs(selectionBox.currentX - selectionBox.startX),
-        height: Math.abs(selectionBox.currentY - selectionBox.startY),
+        height: Math.max(0,Math.min(window.innerHeight,Math.max(selectionBox.startY - (selectionBox.scrollDelta ?? 0),selectionBox.currentY))-Math.max(60,Math.min(selectionBox.startY - (selectionBox.scrollDelta ?? 0),selectionBox.currentY))),
       }}
     />,
     document.body,

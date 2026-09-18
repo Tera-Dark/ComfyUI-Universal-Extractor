@@ -282,24 +282,24 @@ export const GalleryInspectorPanel = ({
         <div className="ue-gallery-inspector-quick-actions" aria-label={t("bulkActions")}>
           <button className="ue-icon-action" onClick={onClose} aria-label={t("bulkClear")} title={t("bulkClear")}>
             <Square size={14} />
-          </button>
+          <span>{t("bulkClear")}</span></button>
           <button className="ue-icon-action" onClick={() => void handleBatchPin(true)} aria-label={t("bulkPin")} title={t("bulkPin")}>
             <Pin size={14} />
-          </button>
+          <span>{t("bulkPin")}</span></button>
           <button className="ue-icon-action" onClick={() => void handleBatchPin(false)} aria-label={t("bulkUnpin")} title={t("bulkUnpin")}>
             <Pin size={14} />
-          </button>
+          <span>{t("bulkUnpin")}</span></button>
           <button className="ue-icon-action" onClick={() => setBoardPickerPaths(selectedPaths)} aria-label={t("bulkAddToBoard")} title={t("bulkAddToBoard")}>
             <FolderPlus size={14} />
-          </button>
+          <span>{t("bulkAddToBoard")}</span></button>
           {selectedBoard ? (
             <button className="ue-icon-action" onClick={() => void handleRemoveFromSelectedBoard()} aria-label={t("bulkRemoveFromBoard")} title={t("bulkRemoveFromBoard")}>
               <FolderMinus size={14} />
-            </button>
+            <span>{t("bulkRemoveFromBoard")}</span></button>
           ) : null}
           <button className="ue-icon-action ue-icon-action--danger" onClick={() => void handleDeleteSelected()} aria-label={t("bulkDelete")} title={t("bulkDelete")}>
             <Trash2 size={14} />
-          </button>
+          <span>{t("bulkDelete")}</span></button>
         </div>
 
         <div className="ue-gallery-inspector-tools">
@@ -314,7 +314,7 @@ export const GalleryInspectorPanel = ({
               </label>
               <button className="ue-icon-action ue-icon-action--filled" onClick={() => void handleBatchCategory()} aria-label={t("bulkSetCategory")} title={t("bulkSetCategory")} disabled={!bulkCategory.trim()}>
                 <Check size={14} />
-              </button>
+              <span>{t("bulkSetCategory")}</span></button>
             </div>
           </div>
 
@@ -338,7 +338,7 @@ export const GalleryInspectorPanel = ({
               </label>
               <button className="ue-icon-action ue-icon-action--filled" onClick={() => void handleBatchMove()} aria-label={t("bulkMoveTo")} title={t("bulkMoveTo")} disabled={!bulkTargetSubfolder}>
                 <Check size={14} />
-              </button>
+              <span>{t("bulkMoveTo")}</span></button>
             </div>
           </div>
 
@@ -361,7 +361,7 @@ export const GalleryInspectorPanel = ({
               </label>
               <button className="ue-icon-action ue-icon-action--accent" onClick={() => void handleBatchRename()} aria-label={t("bulkRenameApply")} title={t("bulkRenameRuleHint")} disabled={!bulkRenameTemplate.trim()}>
                 <PencilLine size={13} />
-              </button>
+              <span>{t("bulkRenameApply")}</span></button>
             </div>
           </div>
         </div>

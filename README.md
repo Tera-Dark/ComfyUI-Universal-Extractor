@@ -1,12 +1,12 @@
 # ComfyUI Universal Extractor
 
-## 1.3.0-rc.3 · Minimal workspace candidate
+## 1.3.0 · Minimal Workspace & Interaction Update
 
-本地候选版本，基于上游 `87960b0`。极简中性 UI、缓存正确性、日志化文件操作、跨平台回收站、后台执行隔离与可选提示词快照。
+基于上游 `87960b0` 的全新稳定版本。极简中性 UI、高精度框选、视口滚动修复、缓存正确性、日志化文件操作、跨平台回收站、后台执行隔离与可选提示词快照。
 
-**安装、备份、功能变化、恢复方法和已知限制：** [升级说明](docs/UPGRADE-1.3.0-rc.3.zh-CN.md)。请先在小图库验证，不要直接替换唯一生产数据。
+**更新与安装说明：** 请参见 [CHANGELOG.md](CHANGELOG.md)。
 
-开发验证：`python -m pytest -q`，以及 `cd gallery_ui && npm ci && npm run verify && npm run audit:dist`。不再覆盖历史 hash 资源；新版采用干净构建与 manifest 检查。
+开发验证：`powershell -ExecutionPolicy Bypass -File scripts\verify.ps1`。新版采用干净构建与 manifest 检查。
 
 独立 UI 预览（无真实 ComfyUI/GPU）：`python scripts/preview.py`，访问 `http://127.0.0.1:8189/gallery/`。示例数据放在临时目录，不接触用户图源。
 

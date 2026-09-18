@@ -2,6 +2,17 @@
 
 All notable changes to the ComfyUI Universal Extractor project will be documented in this file.
 
+## 1.3.0 - 2026-09-18
+
+Major visual, interaction, and stability update featuring minimal workspace architecture, precision selection, and backend safeguards.
+
+- **Selection & Viewport Repair**: App bound to viewport with dedicated gallery scrolling; box-selection anchors to scrolling content; shrinking selection deselects excluded images; continuous smooth edge auto-scroll with speed limits; Escape/blur/lostpointer cancellation; deferred inspector opening prevents layout shifts during active dragging; true docked inspector avoids obscuring rightmost image column.
+- **Visual Consistency & Neutral Styling**: Neutral typography, outlines, and controls across gallery, workbench, settings, library, and variant surfaces; single-layer neutral card borders and explicit text labels on batch actions.
+- **Z-Index & Hierarchy**: Top navigation raised above desktop and mobile sidebars with confirmed point hit-testing.
+- **Source Management & Dual-Folder**: Lock against dirty source overwrite; paged loading in dual-folder view; conflict-safe move execution with reporting.
+- **Robust Backend Safeguards**: Bounded worker offloading; atomic journaled file operations with recovery inspection; cross-platform Send2Trash integration with collision-safe restore; Universal Prompt Snapshot node for metadata embedding.
+- **Dependency & Cache Integrity**: Upgraded dependencies, strict manifest validation, content-hashed clean builds, and zero-vulnerability security audits.
+
 ## 1.3.0-rc.3 - 2026-09-18
 
 Local QoL and visual-consistency candidate; not an upstream release.

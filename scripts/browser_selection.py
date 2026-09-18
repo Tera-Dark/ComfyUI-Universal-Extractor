@@ -1,0 +1,80 @@
+"""Real pointer regression against scripts/preview.py (isolated demo images only)."""
+import asyncio,json,sys
+from pathlib import Path
+from playwright.async_api import async_playwright,expect
+BASE=sys.argv[1] if len(sys.argv)>1 else 'http://127.0.0.1:8189'
+OUT=Path(sys.argv[2] if len(sys.argv)>2 else 'artifacts/selection');OUT.mkdir(parents=True,exist_ok=True)
+async def main():
+    results=[];errors=[]
+    async with async_playwright() as p:
+        browser=await p.chromium.launch()
+        for width in [1568,1100,390]:
+            page=await browser.new_page(viewport={'width':width,'height':825})
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            await page.add_init_script("localStorage.setItem('universal-extractor:onboarding-tour-v1-completed','true')")
+            await page.goto(BASE+'/gallery/',wait_until='networkidle')
+            if width==390: await page.get_by_role('button',name='切换侧边栏',exact=True).click()
+            await page.locator('[data-tour-id="workspace-switcher"]').click()
+            menu=page.locator('.ue-workspace-switcher .ue-disclosure-panel')
+            await expect(menu).to_be_visible()
+            for button in await menu.locator('button').all():
+                assert await button.evaluate('(e)=>{const r=e.getBoundingClientRect(); return e.contains(document.elementFromPoint(r.left+12,r.top+r.height/2));}'),('menu occluded',width)
+            await page.screenshot(path=str(OUT/f'menu-{width}.png'),animations='disabled')
+            await page.keyboard.press('Escape')
+            if width==390: await page.locator('.ue-mobile-sidebar-close').click()
+            main=page.locator('.ue-main-shell')
+            cards=page.locator('.ue-gallery-card')
+            await expect(cards.first).to_be_visible()
+            first=await cards.first.bounding_box(); box=await main.bounding_box()
+            start=(first['x']-7,first['y']+4)
+            await page.mouse.move(*start);await page.mouse.down()
+            await page.mouse.move(box['x']+box['width']-25,first['y']+100,steps=12)
+            await expect(page.locator('.ue-gallery-card.is-selected').first).to_be_visible()
+            await expect(page.locator('.ue-gallery-inspector')).to_have_count(0)
+            if width>960:
+                wide=await page.locator('.ue-gallery-card.is-selected').count()
+                await page.mouse.move(first['x']+20,first['y']+30,steps=6)
+                assert await page.locator('.ue-gallery-card.is-selected').count()<wide,('shrinking box kept old cards',width)
+                await page.mouse.move(box['x']+box['width']-25,first['y']+100,steps=6)
+            await page.mouse.up()
+            await expect(page.locator('.ue-gallery-inspector')).to_be_visible()
+            await page.wait_for_timeout(200)
+            pane=await page.locator('.ue-gallery-inspector').bounding_box();box=await main.bounding_box()
+            if width>960: assert box['x']+box['width']<=pane['x']+1,('panel overlaps viewport',width,box,pane)
+            else: assert box['y']+box['height']<=pane['y']+1,('bottom panel overlap',box,pane)
+            for card in await cards.all():
+                r=await card.bounding_box()
+                if r and r['y']<box['y']+box['height'] and r['y']+r['height']>box['y']:
+                    assert r['x']+r['width']<=box['x']+box['width']+1,('clipped card',width,r,box)
+            for action in await page.locator('.ue-gallery-inspector .ue-icon-action').all():
+                assert await action.evaluate('(e)=>e.scrollWidth<=e.clientWidth+1'),('clipped action label',width,await action.inner_text())
+            await page.screenshot(path=str(OUT/f'selected-{width}.png'),animations='disabled')
+            first=await cards.first.bounding_box()
+            await page.mouse.move(first['x']-7,max(box['y']+10,first['y']+4));await page.mouse.down()
+            await page.mouse.move(box['x']+box['width']-25,box['y']+box['height']-3,steps=12)
+            before=await main.evaluate('(e)=>e.scrollTop')
+            await page.wait_for_timeout(750)
+            after=await main.evaluate('(e)=>e.scrollTop')
+            assert after>before+30,('autoscroll did not advance',width,before,after)
+            await page.screenshot(path=str(OUT/f'drag-scroll-{width}.png'),animations='disabled')
+            await page.mouse.move(box['x']+20,box['y']+3,steps=5)
+            await page.wait_for_timeout(500)
+            reverse=await main.evaluate('(e)=>e.scrollTop')
+            assert reverse<after,('upward autoscroll failed',width,reverse,after)
+            await page.mouse.up()
+            await page.wait_for_timeout(150)
+            stopped=await main.evaluate('(e)=>e.scrollTop');await page.wait_for_timeout(200)
+            assert abs(await main.evaluate('(e)=>e.scrollTop')-stopped)<2,('scroll continues after release',width)
+            await expect(page.locator('.ue-selection-box')).to_have_count(0)
+            await page.mouse.move(box['x']+8,box['y']+15);await page.mouse.down()
+            await page.mouse.move(box['x']+100,box['y']+90,steps=5)
+            await page.keyboard.press('Escape')
+            await expect(page.locator('.ue-selection-box')).to_have_count(0)
+            await page.mouse.up()
+            results.append({'width':width,'scroll_before':before,'scroll_after':after,'reverse':reverse})
+            await page.close()
+        await browser.close()
+    assert not errors,errors
+    (OUT/'selection.json').write_text(json.dumps({'cases':results,'errors':errors},indent=2))
+    print('PASS: menus hit-test above sidebar; first drag defers panel; panel reserves space; rightmost cards visible; stationary edge scrolling down/up; release stops scrolling.',results)
+asyncio.run(main())
