@@ -2,11 +2,11 @@ import { useEffect, useRef } from "react";
 import {
   Calendar,
   CheckSquare,
-  ChevronDown,
   Columns2,
   LayoutGrid,
   Layers3,
   List,
+  MoreHorizontal,
   Palette,
   Pin,
   RotateCcw,
@@ -18,9 +18,11 @@ import {
   X,
 } from "lucide-react";
 
+import { DisclosureMenu } from "../shared/DisclosureMenu";
 import { useI18n } from "../../i18n/I18nProvider";
 import type { BoardSummary, ColorIndexStatus, GallerySource } from "../../types/universal-gallery";
 import { isEditableTarget } from "../../utils/interaction";
+import { GalleryDensityControl } from "./GalleryDensityControl";
 import { GalleryFilterMenu } from "./GalleryFilterMenu";
 import type { ContentViewMode } from "./galleryWorkspaceModel";
 
@@ -174,6 +176,7 @@ export const GalleryToolbar = ({
       <button
         className={galleryViewMode === "grid" ? "active" : ""}
         onClick={() => onGalleryViewModeChange("grid")}
+        aria-pressed={galleryViewMode === "grid"}
         type="button"
         aria-label={t("viewGrid")}
         title={t("viewGrid")}
@@ -184,6 +187,7 @@ export const GalleryToolbar = ({
       <button
         className={galleryViewMode === "list" ? "active" : ""}
         onClick={() => onGalleryViewModeChange("list")}
+        aria-pressed={galleryViewMode === "list"}
         type="button"
         aria-label={t("viewList")}
         title={t("viewList")}
@@ -195,10 +199,10 @@ export const GalleryToolbar = ({
   );
 
   return (
-    <div className="ue-filter-bar ue-filter-bar--gallery" data-tour-id="gallery-toolbar">
+    <div className={`ue-filter-bar ue-filter-bar--gallery ${dualFolderMode ? "is-organizer" : variantMode ? "is-variants" : ""}`} data-tour-id="gallery-toolbar">
       <div className="ue-filter-copy">
         <p className="ue-filter-kicker">
-          {isTrashView ? t("trashTitle") : selectedBoard ? selectedBoard.name : selectedSubfolder || t("galleryOutputFolder")}
+          {isTrashView ? t("trashTitle") : dualFolderMode ? t("dual_title") : selectedBoard ? selectedBoard.name : selectedSubfolder.split("::").pop() || t("galleryOutputFolder")}
         </p>
         <div className="ue-filter-summary">
           <strong>{resultCount}</strong>
@@ -223,7 +227,7 @@ export const GalleryToolbar = ({
       {!isTrashView ? (
         <>
           {onSearchChange ? (
-            <div className="ue-gallery-search-box">
+            <div className="ue-gallery-search-box" data-tour-id="gallery-search">
               <Search size={14} className="ue-gallery-search-icon" />
               <input
                 ref={searchInputRef}
@@ -259,6 +263,7 @@ export const GalleryToolbar = ({
                     onToggleFiltersMenu();
                   }}
                   type="button"
+                  aria-expanded={showFiltersMenu}
                   aria-label={t("galleryFilters")}
                   title={t("galleryFilters")}
                 >
@@ -294,46 +299,30 @@ export const GalleryToolbar = ({
               </div>
 
               {viewModeToggle}
-              {galleryViewMode === "grid" ? (
-                <div className="ue-select-field ue-select-field--menu">
-                  <span>{t("galleryColumns")}</span>
-                  <button
-                    className={`ue-select-field__menu-trigger ${showColumnsMenu ? "is-open" : ""}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onToggleColumnsMenu();
-                    }}
-                    type="button"
-                  >
-                    <span>{gridColumns}</span>
-                    <ChevronDown size={14} />
-                  </button>
-                  {showColumnsMenu ? (
-                    <div className="ue-select-field__menu" onClick={(event) => event.stopPropagation()}>
-                      {Array.from({ length: 6 }, (_, index) => index + 3).map((count) => (
-                        <button
-                          key={count}
-                          className={gridColumns === count ? "is-active" : ""}
-                          onClick={() => {
-                            onGridColumnsChange(count);
-                            onCloseColumnsMenu();
-                          }}
-                          type="button"
-                        >
-                          {count}
-                        </button>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ) : null}
+              {galleryViewMode === "grid" ? <GalleryDensityControl value={gridColumns} open={showColumnsMenu}
+                onToggle={onToggleColumnsMenu} onClose={onCloseColumnsMenu} onChange={onGridColumnsChange} /> : null}
             </div>
 
+              <button
+                className={`ue-chip-toggle ue-chip-toggle--icon ${selectionMode ? "active" : ""}`}
+                data-tour-id="gallery-selection"
+                aria-pressed={selectionMode}
+                title={t("bulkSelectionHint")}
+                aria-label={t("bulkSelectMode")}
+                onClick={() => {
+                  onSelectionModeChange(!selectionMode);
+                  onClearSelection();
+                }}
+                type="button"
+              >
+                <CheckSquare size={15} /><span>{t("bulkSelectMode")}</span>
+              </button>
+            <DisclosureMenu label={t("moreActions")} icon={<MoreHorizontal size={18} />} className="ue-toolbar-more">
             <div className="ue-toolbar-group ue-toolbar-group--state">
               <button
                 className={`ue-chip-toggle ue-chip-toggle--icon ${dualFolderMode ? "active" : ""}`}
-                title={dualFolderMode ? "关闭双栏目录整理" : "开启双栏目录整理"}
-                aria-label={dualFolderMode ? "关闭双栏目录整理" : "开启双栏目录整理"}
+                title={t(dualFolderMode ? "organizeFoldersClose" : "organizeFoldersOpen")}
+                aria-label={t(dualFolderMode ? "organizeFoldersClose" : "organizeFoldersOpen")}
                 onClick={() => {
                   onDualFolderModeChange(!dualFolderMode);
                   onVariantModeChange?.(false);
@@ -341,7 +330,7 @@ export const GalleryToolbar = ({
                 }}
                 type="button"
               >
-                <Columns2 size={13} />
+                <Columns2 size={15} /><span>{t("organizeFolders")}</span>
               </button>
               <button
                 className={`ue-chip-toggle ue-chip-toggle--icon ${variantMode ? "active" : ""}`}
@@ -354,7 +343,7 @@ export const GalleryToolbar = ({
                 }}
                 type="button"
               >
-                <Layers3 size={13} />
+                <Layers3 size={15} /><span>{t("variantToolbar")}</span>
               </button>
               {selectedBoard ? (
                 <>
@@ -365,7 +354,7 @@ export const GalleryToolbar = ({
                     title={t("boardShareTitle")}
                     type="button"
                   >
-                    <Share2 size={13} />
+                    <Share2 size={15} /><span>{t("boardShareTitle")}</span>
                   </button>
                   <button
                     className="ue-chip-toggle ue-chip-toggle--icon"
@@ -374,23 +363,11 @@ export const GalleryToolbar = ({
                     title={t("boardDeleteTitle")}
                     type="button"
                   >
-                    <Trash2 size={13} />
+                    <Trash2 size={15} /><span>{t("boardDeleteTitle")}</span>
                   </button>
                 </>
               ) : null}
-              <button
-                className={`ue-chip-toggle ue-chip-toggle--icon ${selectionMode ? "active" : ""}`}
-                data-tour-id="gallery-selection"
-                title={t("bulkSelectionHint")}
-                aria-label={t("bulkSelectMode")}
-                onClick={() => {
-                  onSelectionModeChange(!selectionMode);
-                  onClearSelection();
-                }}
-                type="button"
-              >
-                <CheckSquare size={13} />
-              </button>
+
             </div>
             {writableSources.length > 0 ? (
               <div className="ue-toolbar-group ue-toolbar-group--source">
@@ -409,6 +386,7 @@ export const GalleryToolbar = ({
                 </label>
               </div>
             ) : null}
+            </DisclosureMenu>
           </div>
 
           {/* Active Filter Badges */}
@@ -418,7 +396,7 @@ export const GalleryToolbar = ({
                 <div className="ue-filter-active-chip">
                   <Search size={11} />
                   <span>&quot;{searchValue}&quot;</span>
-                  <button onClick={() => onSearchChange?.("")} type="button" aria-label="Clear search">
+                  <button onClick={() => onSearchChange?.("")} type="button" aria-label={t("clearSearch")}>
                     <X size={10} />
                   </button>
                 </div>
@@ -428,7 +406,7 @@ export const GalleryToolbar = ({
                 <div className="ue-filter-active-chip">
                   <Tag size={11} />
                   <span>{selectedCategory}</span>
-                  <button onClick={() => onCategoryChange("")} type="button" aria-label="Clear category">
+                  <button onClick={() => onCategoryChange("")} type="button" aria-label={t("clearCategory")}>
                     <X size={10} />
                   </button>
                 </div>
@@ -438,7 +416,7 @@ export const GalleryToolbar = ({
                 <div className="ue-filter-active-chip">
                   <Palette size={11} />
                   <span>{selectedColorFamily}</span>
-                  <button onClick={() => onColorFamilyChange("")} type="button" aria-label="Clear color">
+                  <button onClick={() => onColorFamilyChange("")} type="button" aria-label={t("clearColor")}>
                     <X size={10} />
                   </button>
                 </div>
@@ -454,7 +432,7 @@ export const GalleryToolbar = ({
                       onDateToChange("");
                     }}
                     type="button"
-                    aria-label="Clear date"
+                    aria-label={t("clearDate")}
                   >
                     <X size={10} />
                   </button>
@@ -465,7 +443,7 @@ export const GalleryToolbar = ({
                 <div className="ue-filter-active-chip">
                   <Pin size={11} />
                   <span>{t("galleryPinnedOnly")}</span>
-                  <button onClick={() => onFavoritesOnlyChange(false)} type="button" aria-label="Clear pin filter">
+                  <button onClick={() => onFavoritesOnlyChange(false)} type="button" aria-label={t("clearPinned")}>
                     <X size={10} />
                   </button>
                 </div>

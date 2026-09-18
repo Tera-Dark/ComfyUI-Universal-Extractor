@@ -74,7 +74,10 @@ describe("TopNavigation", () => {
     expect(scope).toBeInTheDocument();
     expect(tabs[1]).toHaveClass("active");
 
+    fireEvent.click(screen.getByLabelText("切换工作区", { selector: "summary" }));
+    expect(container.querySelector("details")).toHaveAttribute("open");
     fireEvent.click(tabs[0]);
+    expect(container.querySelector("details")).not.toHaveAttribute("open");
     expect(props.onTabChange).toHaveBeenCalledWith("gallery");
 
     fireEvent.click(sidebarToggle!);

@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 from py.gallery.recipe import build_prompt_summary, extract_generation_recipe
 
@@ -51,6 +51,7 @@ def test_generation_recipe_extracts_lora_ready_fields():
     recipe = extract_generation_recipe(comfy_prompt_metadata())
 
     assert recipe == {
+        "warnings": [],
         "source_format": "comfy_prompt",
         "has_workflow": True,
         "positive_prompt": "best quality",

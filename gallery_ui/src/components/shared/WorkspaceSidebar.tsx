@@ -4,7 +4,6 @@ import {
   BookOpen,
   ChevronDown,
   ChevronRight,
-  ChevronsDownUp,
   ChevronsUpDown,
   Folder,
   FolderOpen,
@@ -368,7 +367,7 @@ export const WorkspaceSidebar = ({
   const handleFolderActionsMenu = (event: MouseEvent<HTMLElement>) => {
     event.preventDefault();
     event.stopPropagation();
-    const position = placeMenuForEvent(event, { width: 220, height: folderViewMode === "tree" ? 240 : 204 });
+    const position = placeMenuForEvent(event, { width: 220, height: folderViewMode === "tree" ? 340 : 250 });
     setFolderActionsMenu((current) => current ? null : position);
   };
 
@@ -488,7 +487,8 @@ export const WorkspaceSidebar = ({
   const currentSourceRootRef = makeSourceRootRef(currentSourceId);
 
   return (
-    <aside className={`ue-sidebar ${collapsed ? "is-collapsed" : ""}`} data-tour-id="sidebar">
+    <aside className={`ue-sidebar ${collapsed ? "is-collapsed" : ""}`} data-tour-id="sidebar" inert={collapsed} aria-hidden={collapsed}>
+      <button className="ue-mobile-sidebar-close" onClick={onToggle} aria-label={t("navToggleSidebar")}><X size={18} /></button>
       <button 
         className="ue-sidebar-toggle-edge"
         onClick={onToggle}
@@ -615,47 +615,6 @@ export const WorkspaceSidebar = ({
                     ) : null}
                   </label>
 
-                  <div className="ue-sidebar-folder-tools">
-                    {folderViewMode === "tree" ? (
-                      <>
-                        <button
-                          className="ue-sidebar-subaction"
-                          onClick={expandAllFolders}
-                          title={t("sidebarExpandAll")}
-                          aria-label={t("sidebarExpandAll")}
-                        >
-                          <ChevronsUpDown size={13} />
-                        </button>
-                        <button
-                          className="ue-sidebar-subaction"
-                          onClick={collapseAllFolders}
-                          title={t("sidebarCollapseAll")}
-                          aria-label={t("sidebarCollapseAll")}
-                        >
-                          <ChevronsDownUp size={13} />
-                        </button>
-                      </>
-                    ) : null}
-
-                    <div className="ue-sidebar-viewmodes" role="group" aria-label={t("sidebarFolderViewMode")}>
-                      <button
-                        className={folderViewMode === "list" ? "active" : ""}
-                        onClick={() => onFolderViewModeChange("list")}
-                        title={t("sidebarListView")}
-                        aria-label={t("sidebarListView")}
-                      >
-                        <ListTree size={13} />
-                      </button>
-                      <button
-                        className={folderViewMode === "tree" ? "active" : ""}
-                        onClick={() => onFolderViewModeChange("tree")}
-                        title={t("sidebarTreeView")}
-                        aria-label={t("sidebarTreeView")}
-                      >
-                        <FolderTree size={13} />
-                      </button>
-                    </div>
-                  </div>
                 </div>
 
                 {folderSearchActive && visibleSubfolders.length === 0 ? (
@@ -885,6 +844,13 @@ export const WorkspaceSidebar = ({
             onClick={(event) => event.stopPropagation()}
             onContextMenu={(event) => event.preventDefault()}
           >
+            <button onClick={() => runFolderAction(() => onFolderViewModeChange(folderViewMode === "tree" ? "list" : "tree"))}>
+              <FolderTree size={14} />
+              <span>{t(folderViewMode === "tree" ? "sidebarListView" : "sidebarTreeView")}</span>
+            </button>
+            {folderViewMode === "tree" ? <button onClick={() => runFolderAction(expandAllFolders)}>
+              <ChevronsUpDown size={14} /><span>{t("sidebarExpandAll")}</span>
+            </button> : null}
             <button onClick={() => runFolderAction(toggleFolderSortMode)}>
               <ListTree size={14} />
               <span>{folderSortMode === "modified" ? t("folderSortByName") : t("folderSortByModified")}</span>

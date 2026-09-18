@@ -1,4 +1,4 @@
-import { Suspense, lazy, startTransition, useMemo, useState } from "react";
+import { Activity, Suspense, lazy, startTransition, useMemo, useState } from "react";
 
 import { GalleryWorkspace } from "./components/gallery/GalleryWorkspace";
 import { GalleryInspectorPanel } from "./components/gallery/GalleryInspectorPanel";
@@ -227,6 +227,8 @@ function App() {
   const { confirm } = useConfirm();
   const { pushToast } = useToast();
   const { runOperation } = useOperationStatus();
+  const [workbenchVisited,setWorkbenchVisited] = useState(false);
+  const [settingsDirty,setSettingsDirty] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>("gallery");
   const [librarySearchTerm, setLibrarySearchTerm] = useState("");
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(() => getStoredUiPreferences());
@@ -298,10 +300,12 @@ function App() {
   };
 
   const handleTabChange = async (tab: WorkspaceTab) => {
+    if (activeTab === "settings" && tab !== "settings" && settingsDirty && !await confirm({title:t("qolDiscardTitle"),message:t("qolDiscardBody"),tone:"warning",confirmLabel:t("modalDiscardChanges"),cancelLabel:t("libraryCancel")})) return;
     if (activeTab === "library" && tab !== "library" && !(await confirmDiscardLibraryEdits())) {
       return;
     }
     startTransition(() => {
+      if(tab === "workbench")setWorkbenchVisited(true);
       setActiveTab(tab);
     });
   };
@@ -323,6 +327,7 @@ function App() {
   };
 
   const handleLibrarySelect = async (name: string) => {
+    if (activeTab === "settings" && settingsDirty && !await confirm({title:t("qolDiscardTitle"),message:t("qolDiscardBody"),tone:"warning",confirmLabel:t("modalDiscardChanges"),cancelLabel:t("libraryCancel")})) return;
     if (activeTab === "library" && library.activeLibraryName !== name && !(await confirmDiscardLibraryEdits())) {
       return;
     }
@@ -1055,7 +1060,19 @@ function App() {
                 }}
               />
             </Suspense>
-          ) : activeTab === "workbench" ? (
+          ) : activeTab === "workbench" ? null : (
+            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
+              <SettingsWorkspace
+                sources={gallery.context?.sources ?? []}
+                preferences={uiPreferences}
+                onDirtyChange={setSettingsDirty}
+                onPreferencesChange={updateUiPreferences}
+                onSourcesChange={() => gallery.refresh()}
+                onRestartOnboarding={() => setOnboardingOpen(true)}
+              />
+            </Suspense>
+          )}
+          {workbenchVisited ? <Activity mode={activeTab === "workbench" ? "visible" : "hidden"}>
             <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
               <WorkbenchWorkspace
                 libraries={library.libraries}
@@ -1063,17 +1080,7 @@ function App() {
                 onLibrarySelect={handleWorkbenchLibrarySelect}
               />
             </Suspense>
-          ) : (
-            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
-              <SettingsWorkspace
-                sources={gallery.context?.sources ?? []}
-                preferences={uiPreferences}
-                onPreferencesChange={updateUiPreferences}
-                onSourcesChange={() => gallery.refresh()}
-                onRestartOnboarding={() => setOnboardingOpen(true)}
-              />
-            </Suspense>
-          )}
+          </Activity> : null}
         </main>
 
         {galleryInspectorOpen ? (
@@ -1180,6 +1187,7 @@ function App() {
           void handleTabChange(tab);
         }}
         onRequestSidebarOpen={() => setSidebarCollapsed(false)}
+        onRequestSidebarClose={() => setSidebarCollapsed(true)}
         onSkip={closeOnboardingTour}
         onComplete={closeOnboardingTour}
       />

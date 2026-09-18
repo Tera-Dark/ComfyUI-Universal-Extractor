@@ -6,7 +6,6 @@ import json
 import os
 import sqlite3
 import shutil
-import subprocess
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
@@ -39,7 +38,10 @@ from ..paths import (
     save_trash_state,
     to_posix,
 )
+from .similarity import near_hash_pairs
 from .metadata import read_image_metadata
+from .file_transactions import FILE_OPERATION_LOCK, execute_moves
+from . import state_store as _state_store
 from .recipe import build_prompt_summary, extract_artist_prompts, extract_generation_recipe
 from .image_safety import DecompressionBombError, extract_rgba_pixels, guarded_image_open
 from .variant_fingerprints import (
@@ -503,30 +505,10 @@ def send_to_system_recycle_bin(path: str):
     if not os.path.exists(normalized_path):
         return
 
-    escaped_path = normalized_path.replace("'", "''")
-    if os.path.isdir(normalized_path):
-        command = (
-            "Add-Type -AssemblyName Microsoft.VisualBasic; "
-            "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteDirectory("
-            f"'{escaped_path}', "
-            "[Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs, "
-            "[Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)"
-        )
-    else:
-        command = (
-            "Add-Type -AssemblyName Microsoft.VisualBasic; "
-            "[Microsoft.VisualBasic.FileIO.FileSystem]::DeleteFile("
-            f"'{escaped_path}', "
-            "[Microsoft.VisualBasic.FileIO.UIOption]::OnlyErrorDialogs, "
-            "[Microsoft.VisualBasic.FileIO.RecycleOption]::SendToRecycleBin)"
-        )
+    from send2trash import send2trash
 
-    subprocess.run(
-        ["powershell", "-NoProfile", "-NonInteractive", "-Command", command],
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    send2trash(normalized_path)
+
 
 
 def add_trash_item(
@@ -621,14 +603,19 @@ def move_path_to_trash(*, full_path: str, kind: str, original_path: str, state_s
     target_path = os.path.join(storage_dir, storage_name)
     shutil.move(full_path, target_path)
 
-    return add_trash_item(
-        kind=kind,
-        name=os.path.basename(original_path.rstrip("/")) or os.path.basename(full_path),
-        original_path=original_path,
-        storage_path=os.path.relpath(target_path, TRASH_DIR),
-        state_snapshot=state_snapshot,
-        image_count=image_count,
-    )
+    try:
+        return add_trash_item(
+            kind=kind,
+            name=os.path.basename(original_path.rstrip("/")) or os.path.basename(full_path),
+            original_path=original_path,
+            storage_path=os.path.relpath(target_path, TRASH_DIR),
+            state_snapshot=state_snapshot,
+            image_count=image_count,
+        )
+    except Exception:
+        if not os.path.lexists(full_path) and os.path.exists(target_path):
+            shutil.move(target_path, full_path)
+        raise
 
 
 def restore_trash_item(item_id: str) -> dict[str, Any]:
@@ -642,23 +629,40 @@ def restore_trash_item(item_id: str) -> dict[str, Any]:
         raise FileNotFoundError("trash storage not found")
 
     if kind in {"image", "folder"}:
-        output_dir = _ensure_output_dir()
         original_path = normalize_relative_path(item.get("original_path", ""))
-        target_path = _ensure_within_output(output_dir, os.path.join(output_dir, original_path))
+        source_id, source_relative = parse_image_ref(original_path)
+        source = get_gallery_source(source_id)
+        if not source.get("writable"):
+            raise ValueError("restore source is read-only")
+        output_dir = source["path"]
+        target_path = _ensure_within_directory(output_dir, os.path.join(output_dir, source_relative))
+        if os.path.lexists(target_path):
+            raise FileExistsError("restore target already exists; rename it before restoring")
         parent_dir = os.path.dirname(target_path)
         if parent_dir:
             os.makedirs(parent_dir, exist_ok=True)
-        shutil.move(storage_path, target_path)
-        if item.get("state_snapshot"):
-            restore_image_states(item["state_snapshot"])
-        invalidate_image_index_cache()
-        remove_trash_item(item_id)
+        with FILE_OPERATION_LOCK, _state_store.GALLERY_STATE_LOCK:
+            state_before, trash_before = _state_store.load_gallery_state(), load_trash_state()
+            def commit_restore():
+                if item.get("state_snapshot"):
+                    restore_image_states(item["state_snapshot"])
+                remove_trash_item(item_id)
+            def rollback_restore():
+                _state_store.save_gallery_state(state_before)
+                save_trash_state(trash_before)
+            try:
+                execute_moves([(storage_path, target_path)], os.path.join(DATA_DIR, "operation_journal"),
+                              commit_restore, rollback_restore, {"gallery": state_before, "trash": trash_before})
+            finally:
+                invalidate_image_index_cache()
         return {"ok": True, "id": item_id, "subfolders": collect_subfolders(output_dir), "categories": collect_categories()}
 
     if kind == "library":
         ensure_data_dir()
         original_name = normalize_library_filename(item.get("original_path", ""))
         target_path = os.path.join(DATA_DIR, original_name)
+        if os.path.lexists(target_path):
+            raise FileExistsError("restore target already exists")
         shutil.move(storage_path, target_path)
         invalidate_library_cache(original_name)
         remove_trash_item(item_id)
@@ -3244,13 +3248,13 @@ def _build_variant_groups_from_items(items: list[dict[str, Any]]) -> list[dict[s
         if left_root != right_root:
             parent[right_root] = left_root
 
-    for left_index, left in enumerate(visual_items):
-        for right_index in range(left_index + 1, len(visual_items)):
-            right = visual_items[right_index]
-            if left.get("exact_key") == right.get("exact_key"):
-                continue
-            if hamming_distance_hex(str(left["visual_hash"]), str(right["visual_hash"])) <= NEAR_DUPLICATE_HASH_DISTANCE:
-                union(left_index, right_index)
+    for left_index, right_index in near_hash_pairs(
+        [str(item["visual_hash"]) for item in visual_items], NEAR_DUPLICATE_HASH_DISTANCE
+    ):
+        left, right = visual_items[left_index], visual_items[right_index]
+        if left.get("exact_key") and left.get("exact_key") == right.get("exact_key"):
+            continue
+        union(left_index, right_index)
 
     near_buckets: dict[int, list[dict[str, Any]]] = {}
     for index, item in enumerate(visual_items):
@@ -3364,6 +3368,10 @@ def list_variant_groups(
     return {
         "groups": public_groups,
         "total": len(groups),
+        "scanned": len(rows),
+        "scan_limit": VARIANT_GROUP_SCAN_LIMIT,
+        "scan_limit_reached": len(rows) >= VARIANT_GROUP_SCAN_LIMIT,
+        "score_kind": "heuristic_not_probability",
         "fingerprint_status": get_fingerprint_index_status(),
         "sync_status": sync_status,
         "source_signature": signature,
@@ -4253,6 +4261,19 @@ def persist_image_state(relative_path: str, updates: dict) -> dict:
     return {"ok": True, "state": state, "categories": categories}
 
 
+def _execute_image_moves(path_mapping: dict[str, str], full_moves: list[tuple[str, str]]):
+    with FILE_OPERATION_LOCK, _state_store.GALLERY_STATE_LOCK:
+        snapshot = _state_store.load_gallery_state()
+        try:
+            return execute_moves(
+                full_moves, os.path.join(DATA_DIR, "operation_journal"),
+                lambda: move_image_states(path_mapping),
+                lambda: _state_store.save_gallery_state(snapshot), snapshot,
+            )
+        finally:
+            invalidate_image_index_cache()
+
+
 def rename_image(relative_path: str, new_filename: str) -> dict:
     source_id, source_relative_path = parse_image_ref(relative_path)
     normalized = make_image_ref(source_id, source_relative_path)
@@ -4277,9 +4298,8 @@ def rename_image(relative_path: str, new_filename: str) -> dict:
     if os.path.exists(target_full_path):
         raise FileExistsError("target filename already exists")
 
-    os.rename(full_path, target_full_path)
-    state, categories = rename_image_state(normalized, target_relative)
-    invalidate_image_index_cache()
+    categories = _execute_image_moves({normalized: target_relative}, [(full_path, target_full_path)])
+    state = get_image_state(target_relative)
     url, subfolder = build_view_url(target_relative)
     stat = os.stat(target_full_path)
 
@@ -4315,6 +4335,8 @@ def batch_rename_images(
     if not relative_paths:
         raise ValueError("relative_paths required")
 
+    if len(set(relative_paths)) != len(relative_paths):
+        raise ValueError("duplicate image paths")
     clean_template = str(template or "").strip()
     if not clean_template:
         raise ValueError("template required")
@@ -4383,31 +4405,12 @@ def batch_rename_images(
 
         target_mapping[source_relative] = target_relative
 
-    temporary_mapping: dict[str, str] = {}
-    for source_relative, source_relative_path, _, extension in source_paths:
-        temp_filename = f".ue-rename-{uuid.uuid4().hex}{extension}"
-        temp_source_relative = normalize_relative_path(os.path.join(os.path.dirname(source_relative_path), temp_filename))
-        temp_relative = make_image_ref(source_id, temp_source_relative)
-        temporary_mapping[source_relative] = temp_relative
-        os.rename(os.path.join(source_root, source_relative_path), os.path.join(source_root, temp_source_relative))
-
-    try:
-        for source_relative, temp_relative in temporary_mapping.items():
-            _, temp_source_relative = parse_image_ref(temp_relative)
-            _, target_source_relative = parse_image_ref(target_mapping[source_relative])
-            os.rename(os.path.join(source_root, temp_source_relative), os.path.join(source_root, target_source_relative))
-    except Exception:
-        for source_relative, temp_relative in temporary_mapping.items():
-            _, temp_source_relative = parse_image_ref(temp_relative)
-            _, source_relative_path = parse_image_ref(source_relative)
-            temp_full_path = os.path.join(source_root, temp_source_relative)
-            source_full_path = os.path.join(source_root, source_relative_path)
-            if os.path.exists(temp_full_path) and not os.path.exists(source_full_path):
-                os.rename(temp_full_path, source_full_path)
-        raise
-
-    categories = move_image_states(target_mapping)
-    invalidate_image_index_cache()
+    full_moves = [
+        (os.path.join(source_root, parse_image_ref(old)[1]),
+         os.path.join(source_root, parse_image_ref(new)[1]))
+        for old, new in target_mapping.items()
+    ]
+    categories = _execute_image_moves(target_mapping, full_moves)
     return {
         "ok": True,
         "renamed": list(target_mapping.values()),
@@ -4436,15 +4439,11 @@ def delete_folder(subfolder: str) -> dict[str, Any]:
         raise FileNotFoundError("folder not found")
 
     normalized_folder_ref = _normalize_folder_ref_for_source(source["id"], normalized_subfolder)
-    state_snapshot, categories = extract_image_states_by_prefix(_image_state_folder_prefix(source["id"], normalized_subfolder))
-    image_count = len(state_snapshot)
-    move_path_to_trash(
-        full_path=full_path,
-        kind="folder",
-        original_path=normalized_folder_ref,
-        state_snapshot=state_snapshot,
-        image_count=image_count,
-    )
+    prefix = _image_state_folder_prefix(source["id"], normalized_subfolder)
+    state_snapshot = {key: value for key, value in get_image_state_map().items()
+                      if key == prefix or key.startswith(prefix + "/")}
+    categories = _trash_batch([{"full_path": full_path, "kind": "folder",
+                               "original_path": normalized_folder_ref, "state_snapshot": state_snapshot}])
     invalidate_image_index_cache()
     return {
         "ok": True,
@@ -4471,10 +4470,18 @@ def merge_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any]
         raise ValueError("source and target folder must be different")
     if not os.path.exists(source_full_path):
         raise FileNotFoundError("source folder not found")
+    if target_relative.startswith(source_relative + "/"):
+        raise ValueError("target folder cannot be inside source folder")
     os.makedirs(target_full_path, exist_ok=True)
 
     path_mapping: dict[str, str] = {}
-    for root, dirs, files in os.walk(source_full_path):
+    full_moves = []
+    # Materialize and validate before creating descendants or moving any files.
+    tree = list(os.walk(source_full_path))
+    for root, dirs, files in tree:
+        if any(os.path.islink(os.path.join(root, name)) for name in dirs + files):
+            raise ValueError("folder merge does not follow symbolic links")
+    for root, dirs, files in tree:
         relative_root = os.path.relpath(root, source_full_path)
         relative_root = "" if relative_root == "." else normalize_relative_path(relative_root)
         destination_root = os.path.join(target_full_path, relative_root) if relative_root else target_full_path
@@ -4486,15 +4493,19 @@ def merge_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any]
         for filename in files:
             source_file = os.path.join(root, filename)
             destination_file = ensure_unique_path(destination_root, filename)
-            shutil.move(source_file, destination_file)
+            full_moves.append((source_file, destination_file))
 
             source_rel_path = normalize_relative_path(os.path.relpath(source_file, source["path"]))
             destination_rel_path = normalize_relative_path(os.path.relpath(destination_file, target_source["path"]))
             path_mapping[make_image_ref(source["id"], source_rel_path)] = make_image_ref(target_source["id"], destination_rel_path)
 
-    shutil.rmtree(source_full_path, ignore_errors=True)
-    categories = move_image_states(path_mapping)
-    invalidate_image_index_cache()
+    categories = _execute_image_moves(path_mapping, full_moves)
+    # Remove only empty directories. Never delete files created by another app.
+    for root, _dirs, _files in reversed(tree):
+        try:
+            os.rmdir(root)
+        except OSError:
+            pass
     return {
         "ok": True,
         "source_path": _normalize_folder_ref_for_source(source["id"], source_relative),
@@ -4539,9 +4550,7 @@ def rename_folder(source_subfolder: str, target_subfolder: str) -> dict[str, Any
             destination_rel_path = normalize_relative_path(os.path.join(target_relative, relative_to_source))
             path_mapping[make_image_ref(source["id"], source_rel_path)] = make_image_ref(target_source["id"], destination_rel_path)
 
-    os.rename(source_full_path, target_full_path)
-    categories = move_image_states(path_mapping)
-    invalidate_image_index_cache()
+    categories = _execute_image_moves(path_mapping, [(source_full_path, target_full_path)])
     return {
         "ok": True,
         "source_path": _normalize_folder_ref_for_source(source["id"], source_relative),
@@ -4566,8 +4575,10 @@ def move_images(relative_paths: list[str], target_subfolder: str, target_source_
     missing: list[str] = []
     blocked: list[str] = []
     path_mapping: dict[str, str] = {}
+    full_moves: list[tuple[str, str]] = []
+    reserved: set[str] = set()
 
-    for relative_path in relative_paths:
+    for relative_path in dict.fromkeys(relative_paths):
         source_id, source_relative_path = parse_image_ref(relative_path)
         source = get_gallery_source(source_id)
         if not source.get("writable"):
@@ -4580,14 +4591,21 @@ def move_images(relative_paths: list[str], target_subfolder: str, target_source_
             continue
 
         destination_file = ensure_unique_path(target_full_path, os.path.basename(source_relative_path))
-        shutil.move(source_full_path, destination_file)
+        if os.path.dirname(source_full_path) == os.path.abspath(target_full_path):
+            continue  # Moving into the same folder is a no-op, not a rename.
+        stem, ext = os.path.splitext(os.path.basename(source_relative_path))
+        counter = 1
+        while os.path.normcase(destination_file) in reserved or os.path.exists(destination_file):
+            destination_file = os.path.join(target_full_path, f"{stem}_{counter}{ext}")
+            counter += 1
+        reserved.add(os.path.normcase(destination_file))
+        full_moves.append((source_full_path, destination_file))
         destination_source_relative = normalize_relative_path(os.path.relpath(destination_file, target_source["path"]))
         destination_relative = make_image_ref(target_source["id"], destination_source_relative)
         path_mapping[normalized_source] = destination_relative
         moved.append(destination_relative)
 
-    categories = move_image_states(path_mapping)
-    invalidate_image_index_cache()
+    categories = _execute_image_moves(path_mapping, full_moves)
     return {
         "ok": True,
         "moved": moved,
@@ -4600,32 +4618,57 @@ def move_images(relative_paths: list[str], target_subfolder: str, target_source_
     }
 
 
-def delete_images(relative_paths: list[str]) -> dict:
-    deleted = []
-    missing = []
+def _trash_batch(entries):
+    with FILE_OPERATION_LOCK, _state_store.GALLERY_STATE_LOCK:
+        state_before = _state_store.load_gallery_state()
+        trash_before = load_trash_state()
+        storage = ensure_trash_storage_dir()
+        moves = []
+        for entry in entries:
+            extension = os.path.splitext(entry["full_path"])[1] if entry["kind"] == "image" else ""
+            entry["storage_full"] = os.path.join(storage, uuid.uuid4().hex + extension)
+            moves.append((entry["full_path"], entry["storage_full"]))
 
-    for relative_path in relative_paths:
-        source_id, source_relative_path = parse_image_ref(relative_path)
+        def commit():
+            removed = []
+            for entry in entries:
+                add_trash_item(
+                    kind=entry["kind"], name=os.path.basename(entry["full_path"]),
+                    original_path=entry["original_path"],
+                    storage_path=os.path.relpath(entry["storage_full"], TRASH_DIR),
+                    state_snapshot=entry["state_snapshot"], image_count=len(entry["state_snapshot"]),
+                )
+                removed.extend(entry["state_snapshot"])
+            return remove_image_states(removed) if removed else collect_categories()
+
+        def rollback():
+            _state_store.save_gallery_state(state_before)
+            save_trash_state(trash_before)
+
+        try:
+            return execute_moves(moves, os.path.join(DATA_DIR, "operation_journal"), commit, rollback,
+                                 {"gallery": state_before, "trash": trash_before})
+        finally:
+            invalidate_image_index_cache()
+
+
+def delete_images(relative_paths: list[str]) -> dict:
+    entries, deleted, missing = [], [], []
+    for relative_path in dict.fromkeys(relative_paths):
+        source_id, source_relative = parse_image_ref(relative_path)
         source = get_gallery_source(source_id)
-        normalized = make_image_ref(source_id, source_relative_path)
+        normalized = make_image_ref(source_id, source_relative)
         if not source.get("writable"):
             missing.append(normalized)
             continue
         _, full_path = resolve_image_path(normalized)
-        if os.path.exists(full_path):
-            image_state = get_image_state(normalized)
-            move_path_to_trash(
-                full_path=full_path,
-                kind="image",
-                original_path=normalized,
-                state_snapshot={normalized: image_state},
-            )
-            deleted.append(normalized)
-        else:
+        if not os.path.exists(full_path):
             missing.append(normalized)
-
-    categories = remove_image_states(deleted) if deleted else collect_categories()
-    invalidate_image_index_cache()
+            continue
+        entries.append({"full_path": full_path, "kind": "image", "original_path": normalized,
+                        "state_snapshot": {normalized: get_image_state(normalized)}})
+        deleted.append(normalized)
+    categories = _trash_batch(entries) if entries else collect_categories()
     return {"ok": True, "deleted": deleted, "missing": missing, "categories": categories}
 
 

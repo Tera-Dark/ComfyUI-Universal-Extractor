@@ -1,3 +1,21 @@
+# 1.3.0-rc.1 architecture addendum
+
+The baseline architecture below remains relevant, except for these release changes:
+
+- `py/gallery/execution.py`: bounded serialized service worker; request cancellation does not abort writes.
+- `py/gallery/file_transactions.py`: stage/transfer/state commit, durable recovery evidence, conservative rollback; not cross-filesystem ACID.
+- `py/gallery/similarity.py`: exact-radius candidate generation using disjoint Hamming bands.
+- `py/nodes/prompt_snapshot.py`: optional resolved-text PNG metadata pass-through.
+- `gallery_ui/src/components/shared/DisclosureMenu.tsx`: accessible native disclosure for progressive actions.
+- `gallery_ui/src/styles/minimal.css`: isolated visual tokens and workspace restyling.
+- `UNIVERSAL_EXTRACTOR_DATA_DIR`: opt-in external data root, no automatic migration.
+- Release builds now clean dist and validate Vite manifest; old hash names are never rewritten. `sync-dist` is a non-mutating compatibility alias for the audit.
+- `scripts/check_release.py` is the portable metadata checker; PowerShell delegates to it.
+
+See the RC upgrade guide for supported transactions, limitations, and platform validation status.
+
+---
+
 # Universal Gallery Architecture
 
 This document summarizes the runtime architecture that matters for future backend and frontend work.

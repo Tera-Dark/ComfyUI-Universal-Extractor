@@ -46,7 +46,18 @@ def _version_parts(value: str) -> list[int]:
 def _compare_versions(left: str, right: str) -> int:
     left_parts = _version_parts(left)
     right_parts = _version_parts(right)
-    return (left_parts > right_parts) - (left_parts < right_parts)
+    if left_parts != right_parts:
+        return (left_parts > right_parts) - (left_parts < right_parts)
+    def prerelease_key(value):
+        clean = str(value).strip().lstrip("vV").split("+", 1)[0]
+        match = re.match(r"^\d+(?:\.\d+){0,2}(.*)$", clean)
+        suffix = match.group(1).lstrip("-.") if match else ""
+        # SemVer stable releases outrank prereleases; numeric identifiers sort numerically.
+        identifiers = tuple((0, int(part)) if part.isdigit() else (1, part)
+                            for part in suffix.split(".")) if suffix else ()
+        return (not bool(suffix), identifiers)
+    left_key, right_key = prerelease_key(left), prerelease_key(right)
+    return (left_key > right_key) - (left_key < right_key)
 
 
 def _release_version(release: dict[str, Any]) -> str:

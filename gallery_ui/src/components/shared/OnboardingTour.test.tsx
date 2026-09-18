@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -66,12 +66,12 @@ describe("OnboardingTour", () => {
     await user.click(screen.getByRole("button", { name: "Next" }));
 
     expect(screen.getByText("Move between workspaces")).toBeInTheDocument();
-    expect(await screen.findByText("This area is not visible right now, so the tour is showing the explanation here.")).toBeInTheDocument();
+    expect(await screen.findByText("There is no visible target here yet, possibly because no images or library are loaded. You can continue to the next step.", {}, { timeout: 2500 })).toBeInTheDocument();
   });
 
   it("tracks a real target and requests cross-tab navigation", async () => {
     const user = userEvent.setup();
-    createTourTarget("topbar-tabs");
+    createTourTarget("workspace-switcher");
     const { props } = renderTour();
 
     await user.click(screen.getByRole("button", { name: "Next" }));
@@ -90,11 +90,22 @@ describe("OnboardingTour", () => {
     const user = userEvent.setup();
     const { props } = renderTour();
 
-    for (let index = 0; index < 9; index += 1) {
+    for (let index = 0; index < 10; index += 1) {
       await user.click(screen.getByRole("button", { name: "Next" }));
     }
 
     await user.click(screen.getByRole("button", { name: "Finish" }));
     expect(props.onComplete).toHaveBeenCalledTimes(1);
   });
+  it("keeps keyboard focus inside the portal and restores inert on unmount", async () => {
+    const root=document.createElement("div"); root.id="root"; document.body.appendChild(root);
+    const {props,unmount}=renderTour();
+    expect(root.inert).toBe(true);
+    const next=screen.getByRole("button",{name:"Next"}); next.focus();
+    fireEvent.keyDown(document,{key:"Tab"});
+    expect(screen.getByRole("button",{name:"Close tour"})).toHaveFocus();
+    fireEvent.keyDown(document,{key:"Escape"});expect(props.onSkip).toHaveBeenCalledTimes(1);
+    unmount();expect(root.inert).toBe(false);root.remove();
+  });
+
 });

@@ -50,7 +50,7 @@
   background: var(--ue-surface-alt);
   border: 1px solid var(--ue-line);
   color: var(--ue-ink);
-  transition: all var(--ue-duration-fast) var(--ue-ease);
+  transition: background-color var(--ue-duration-fast) var(--ue-ease), color var(--ue-duration-fast) var(--ue-ease), border-color var(--ue-duration-fast) var(--ue-ease), opacity var(--ue-duration-fast) var(--ue-ease);
 }
 
 .ue-gallery-search-box:focus-within {

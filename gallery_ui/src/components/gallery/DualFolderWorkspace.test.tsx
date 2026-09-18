@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "../../i18n/I18nProvider";
@@ -489,4 +489,50 @@ describe("DualFolderWorkspace", () => {
       expect(onMoveImages).not.toHaveBeenCalled();
     });
   });
+  it("loads another page without replacing already loaded images", async () => {
+    vi.mocked(galleryApi.listImages).mockReset()
+      .mockResolvedValueOnce({...imagePage("first.png"),total:2})
+      .mockResolvedValueOnce(imagePage("right.png"))
+      .mockResolvedValueOnce(imagePage("second.png"));
+    const {container}=renderDual();
+    await screen.findByText("first.png");
+    fireEvent.click(screen.getByRole("button",{name:"加载更多"}));
+    await screen.findByText("second.png");
+    expect(container.querySelectorAll(".ue-dual-pane")[0]).toHaveTextContent("first.png");
+    expect(vi.mocked(galleryApi.listImages).mock.calls[2][0]).toBe(2);
+  });
+  it("ignores a stale directory response after a newer refresh", async () => {
+    let finish!:(page:ImageListResponse)=>void;
+    vi.mocked(galleryApi.listImages).mockReset()
+      .mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}))
+      .mockResolvedValueOnce(imagePage("right.png"))
+      .mockResolvedValueOnce(imagePage("new.png"));
+    const {container}=renderDual();
+    const refresh=container.querySelectorAll('.ue-dual-pane-actions button[title="刷新"]')[0];
+    fireEvent.click(refresh);
+    await screen.findByText("new.png");
+    await act(async()=>finish(imagePage("stale.png")));
+    expect(screen.queryByText("stale.png")).not.toBeInTheDocument();
+    expect(screen.getByText("new.png")).toBeInTheDocument();
+  });
+
+  it("blocks repeated moves while pending, reports partial outcomes and retains blocked selection", async () => {
+    let complete!:(result: {ok:boolean;moved:string[];missing:string[];blocked:string[];categories:string[];subfolders:string[]})=>void;
+    const onMoveImages=vi.fn().mockImplementation(()=>new Promise(resolve=>{complete=resolve;}));
+    vi.mocked(galleryApi.listImages).mockReset().mockResolvedValue(imagePageMany(["a.png","b.png"]));
+    const {container}=renderDual({onMoveImages});
+    await screen.findAllByText("a.png");
+    fireEvent.click(container.querySelectorAll(".ue-dual-card")[0]);
+    fireEvent.keyDown(window,{key:"a",ctrlKey:true});
+    fireEvent.keyDown(window,{key:"m",ctrlKey:true});
+    expect(await screen.findByRole("alertdialog")).toHaveTextContent("left");
+    fireEvent.click(screen.getByText("移动"));
+    await waitFor(()=>expect(onMoveImages).toHaveBeenCalledTimes(1));
+    fireEvent.keyDown(window,{key:"m",ctrlKey:true});
+    expect(onMoveImages).toHaveBeenCalledTimes(1);
+    await act(async()=>complete({ok:true,moved:["a.png"],missing:[],blocked:["b.png"],categories:[],subfolders:[]}));
+    await waitFor(()=>expect(container.querySelector(".ue-dual-pane")).toHaveTextContent("已选 1 张"));
+    expect(container.querySelector(".ue-qol-status")).toHaveTextContent("被阻止 1 张");
+  });
+
 });

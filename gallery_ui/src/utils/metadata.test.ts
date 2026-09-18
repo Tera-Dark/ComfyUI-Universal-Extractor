@@ -42,7 +42,7 @@ describe("metadata utilities", () => {
     ).toBe("summary prompt");
   });
 
-  it("falls back to embedded node text when no summary prompt exists", () => {
+  it("does not guess positive text from an unresolved graph", () => {
     expect(
       getPositivePromptText({
         ...baseMetadata,
@@ -52,7 +52,7 @@ describe("metadata utilities", () => {
           },
         },
       }),
-    ).toBe("node prompt");
+    ).toBe("");
   });
 
   it("stringifies the stable metadata inspection shape", () => {

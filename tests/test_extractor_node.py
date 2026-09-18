@@ -294,7 +294,7 @@ def test_old_text_extractor_node_is_not_registered():
 
     node_classes = plugin.load_node_classes()
 
-    assert list(node_classes) == ["UniversalJsonSegmentRandomizer"]
+    assert set(node_classes) == {"UniversalJsonSegmentRandomizer", "UniversalPromptSnapshot"}
     assert "UniversalTextExtractor" not in node_classes
 
 

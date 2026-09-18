@@ -163,7 +163,10 @@ describe("WorkspaceSidebar folder tree", () => {
 
     expect(quickActive).toHaveAttribute("title", "D:/ComfyUI/output");
     expect(folderHeader?.querySelector(".ue-sidebar-subactions")).toBeInTheDocument();
-    expect(folderActions?.length).toBeGreaterThanOrEqual(4);
+    expect(folderActions?.length).toBe(2); // Create + More remain in the quiet header.
+    fireEvent.click(screen.getByRole("button", { name: "更多操作" }));
+    expect(screen.getByRole("button", { name: "列表视图" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "全部展开" })).toBeInTheDocument();
   });
 
   it("opens folder context menus at the pointer without changing the current folder", () => {

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
@@ -66,4 +66,23 @@ describe("SettingsWorkspace onboarding entry", () => {
 
     expect(props.onRestartOnboarding).toHaveBeenCalledTimes(1);
   });
+  it("keeps a new source editable instead of jumping back to the default source", async () => {
+    renderSettings();
+    await userEvent.click(screen.getByRole("button",{name:"Add custom source"}));
+    const name=screen.getByPlaceholderText("Reference drive / archive folder");
+    expect(name).toHaveValue("");
+    await userEvent.type(name,"Archive");
+    expect(name).toHaveValue("Archive");
+    expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
+  });
+  it("warns before discarding source edits and preserves them on cancel", async () => {
+    renderSettings();
+    const name=screen.getByPlaceholderText("Reference drive / archive folder");
+    fireEvent.change(name,{target:{value:"Changed"}});
+    await userEvent.click(screen.getByRole("button",{name:"Add custom source"}));
+    expect(screen.getByRole("alertdialog")).toHaveTextContent("Discard unsaved source settings?");
+    await userEvent.click(screen.getByRole("button",{name:"Cancel"}));
+    expect(name).toHaveValue("Changed");
+  });
+
 });

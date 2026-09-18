@@ -80,20 +80,23 @@ describe("GalleryToolbar", () => {
     await user.click(screen.getByRole("button", { name: "列表" }));
     expect(props.onGalleryViewModeChange).toHaveBeenCalledWith("list");
 
-    await user.click(screen.getByRole("button", { name: "6" }));
+    await user.click(screen.getByRole("button", { name: /紧凑/ }));
     expect(props.onGridColumnsChange).toHaveBeenCalledWith(6);
-    expect(props.onCloseColumnsMenu).toHaveBeenCalled();
+    expect(props.onGridColumnsChange).toHaveBeenCalledWith(6);
+    expect(screen.getByRole("slider")).toBeInTheDocument();
   });
 
   it("toggles organizer and selection modes while clearing selection", async () => {
     const user = userEvent.setup();
     const { props } = renderToolbar();
 
+    await user.click(screen.getByLabelText("更多操作", { selector: "summary" }));
     await user.click(screen.getByRole("button", { name: "开启双栏目录整理" }));
     expect(props.onDualFolderModeChange).toHaveBeenCalledWith(true);
     expect(props.onVariantModeChange).toHaveBeenCalledWith(false);
     expect(props.onClearSelection).toHaveBeenCalledTimes(1);
 
+    await user.click(screen.getByLabelText("更多操作", { selector: "summary" }));
     await user.click(screen.getByRole("button", { name: "变体" }));
     expect(props.onVariantModeChange).toHaveBeenCalledWith(true);
     expect(props.onClearSelection).toHaveBeenCalledTimes(2);
@@ -118,10 +121,12 @@ describe("GalleryToolbar", () => {
 
     expect(browseGroup).toContainElement(container.querySelector(".ue-filter-trigger"));
     expect(browseGroup).toContainElement(container.querySelector(".ue-view-toggle"));
-    expect(browseGroup).toContainElement(container.querySelector(".ue-select-field--menu"));
-    expect(actionGroup?.querySelector("[data-tour-id='gallery-selection']")).toBeInTheDocument();
+    expect(browseGroup).toContainElement(container.querySelector(".ue-density-control"));
+    expect(actionGroup?.querySelector("[data-tour-id='gallery-selection']")).toBeNull();
+    expect(container.querySelector("[data-tour-id='gallery-selection']")).toBeInTheDocument();
     expect(sourceGroup?.querySelector("select")).toBeInTheDocument();
 
+    await user.click(screen.getByLabelText("更多操作", { selector: "summary" }));
     await user.selectOptions(screen.getByRole("combobox"), "import_target");
     expect(props.onImportTargetSourceIdChange).toHaveBeenCalledWith("import_target");
   });

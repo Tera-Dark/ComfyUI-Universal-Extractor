@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Check,
   ChevronsLeft,
@@ -30,6 +30,7 @@ interface SettingsWorkspaceProps {
   onPreferencesChange: (updates: Partial<UiPreferences>) => void;
   onSourcesChange: () => void;
   onRestartOnboarding: () => void;
+  onDirtyChange?: (dirty:boolean) => void;
 }
 
 type DraftSource = Partial<GallerySource> & {
@@ -91,13 +92,16 @@ const preferenceItems = [
   },
 ] as const;
 
-export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, onSourcesChange, onRestartOnboarding }: SettingsWorkspaceProps) => {
+export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, onSourcesChange, onRestartOnboarding, onDirtyChange }: SettingsWorkspaceProps) => {
   const { t } = useI18n();
   const { confirm } = useConfirm();
   const { runOperation } = useOperationStatus();
   const [localSources, setLocalSources] = useState<GallerySource[]>(sources);
   const [selectedId, setSelectedId] = useState<string>(sources[0]?.id ?? "new");
   const [draft, setDraft] = useState<DraftSource>(() => emptyDraft());
+  const [draftBaseline,setDraftBaseline] = useState<DraftSource>(()=>emptyDraft());
+  const dirtyRef = useRef(false);
+  const synchronizedId = useRef<string | null>(null);
   const [isBusy, setIsBusy] = useState(false);
   const [testResult, setTestResult] = useState<string>("");
   const [diagnostics, setDiagnostics] = useState<GallerySourceDiagnostic[]>([]);
@@ -105,10 +109,8 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
 
   useEffect(() => {
     setLocalSources(sources);
-    if (!sources.some((source) => source.id === selectedId) && sources[0]) {
-      setSelectedId(sources[0].id);
-    }
-  }, [selectedId, sources]);
+    setSelectedId(current=>current !== "new" && !sources.some(source=>source.id===current) && sources[0] ? sources[0].id : current);
+  }, [sources]);
 
   const selectedSource = useMemo(
     () => localSources.find((source) => source.id === selectedId) ?? null,
@@ -116,13 +118,17 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
   );
 
   useEffect(() => {
+    if(dirtyRef.current && synchronizedId.current === selectedId) return;
+    synchronizedId.current=selectedId;
     if (selectedSource) {
+      setDraftBaseline({...selectedSource});
       setDraft({ ...selectedSource });
       setTestResult("");
       return;
     }
     setDraft(emptyDraft());
-  }, [selectedSource]);
+    setDraftBaseline(emptyDraft());
+  }, [selectedSource,selectedId]);
 
   useEffect(() => {
     galleryApi.getFingerprintStatus().then(setFingerprintStatus).catch(() => setFingerprintStatus(null));
@@ -151,11 +157,25 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
     }
   };
 
-  const handleAddSource = () => {
-    setSelectedId("new");
-    setDraft(emptyDraft());
+  const sourceFields = ["name","path","enabled","writable","recursive","import_target"] as const;
+  const baseline = draftBaseline;
+  const dirty = sourceFields.some(key=>draft[key] !== baseline[key]);
+  useEffect(()=>{dirtyRef.current=dirty;},[dirty]);
+  useEffect(()=>{onDirtyChange?.(dirty);return ()=>onDirtyChange?.(false);},[dirty,onDirtyChange]);
+  useEffect(()=>{
+    if (!dirty) return;
+    const warn=(event:BeforeUnloadEvent)=>{event.preventDefault();event.returnValue="";};
+    window.addEventListener("beforeunload",warn);
+    return ()=>window.removeEventListener("beforeunload",warn);
+  },[dirty]);
+  const selectSource = async (id:string) => {
+    if (isBusy || id === selectedId) return;
+    if (dirty && !await confirm({title:t("qolDiscardTitle"),message:t("qolDiscardBody"),tone:"warning",confirmLabel:t("modalDiscardChanges"),cancelLabel:t("libraryCancel")})) return;
+    setSelectedId(id);
+    if (id === "new") setDraft(emptyDraft());
     setTestResult("");
   };
+  const handleAddSource = () => {void selectSource("new");};
 
   const handleToggle = (key: keyof Pick<DraftSource, "enabled" | "writable" | "recursive" | "import_target">) => {
     setDraft((current) => ({ ...current, [key]: !current[key] }));
@@ -200,6 +220,8 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
         error: (error) => (error instanceof Error ? error.message : t("settingsSourceSaveError")),
       });
       setLocalSources(result.sources);
+      setDraft({...result.source});
+      setDraftBaseline({...result.source});
       setSelectedId(result.source.id);
       onSourcesChange();
     } catch {
@@ -260,7 +282,10 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
         </div>
       </div>
 
-      <div className="ue-settings-preferences">
+      <nav className="ue-qol-section-nav" aria-label={t("navSettings")}>
+        <a href="#ue-preferences">{t("settingsPreferencesTitle")}</a><a href="#ue-sources">{t("settingsSourcesTitle")}</a><a href="#ue-diagnostics">{t("settingsDiagnostics")}</a>
+      </nav>
+      <div className="ue-settings-preferences" id="ue-preferences">
         <div className="ue-settings-panel-heading">
           <div>
             <h2>{t("settingsPreferencesTitle")}</h2>
@@ -277,7 +302,7 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
             <strong>{t("settingsOnboardingTitle")}</strong>
             <small>{t("settingsOnboardingHint")}</small>
           </span>
-          <button className="ue-secondary-action" type="button" onClick={onRestartOnboarding}>
+          <button className="ue-secondary-action" type="button" disabled={dirty || isBusy} onClick={onRestartOnboarding}>
             <CircleHelp size={16} />
             <span>{t("settingsOnboardingRestart")}</span>
           </button>
@@ -309,14 +334,14 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
         </div>
       </div>
 
-      <div className="ue-settings-layout">
+      <div className="ue-settings-layout" id="ue-sources">
         <aside className="ue-settings-source-list" data-tour-id="settings-sources">
           <div className="ue-settings-panel-heading">
             <div>
               <h2>{t("settingsSourcesTitle")}</h2>
               <p>{t("settingsSourcesHint")}</p>
             </div>
-            <button className="ue-icon-btn" type="button" onClick={() => void refreshSources(true)} title={t("settingsSourceScan")}>
+            <button className="ue-icon-btn" type="button" disabled={isBusy || dirty} onClick={() => {setIsBusy(true);void refreshSources(true).catch(error=>setTestResult(error instanceof Error ? error.message : t("settingsDiagnosticsError"))).finally(()=>setIsBusy(false));}} title={t("settingsSourceScan")}>
               <RefreshCw size={15} />
             </button>
             <button className="ue-icon-btn" type="button" onClick={() => void handleDiagnose()} title={t("settingsDiagnostics")}>
@@ -330,7 +355,9 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
                 key={source.id}
                 className={`ue-source-card ${source.id === selectedId ? "active" : ""} ${!source.exists ? "is-missing" : ""}`}
                 type="button"
-                onClick={() => setSelectedId(source.id)}
+                disabled={isBusy}
+                aria-pressed={source.id === selectedId}
+                onClick={() => void selectSource(source.id)}
               >
                 <span className="ue-source-icon">{sourceIcon(source.kind)}</span>
                 <span className="ue-source-main">
@@ -358,11 +385,12 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
           </div>
 
           <div className="ue-settings-form">
+            <p className="ue-qol-note" role="status">{t(dirty ? "qolUnsaved" : "qolSaved")}</p>
             <label>
               <span>{t("settingsSourceName")}</span>
               <input
                 value={draft.name}
-                disabled={Boolean(selectedSource?.locked)}
+                disabled={isBusy || Boolean(selectedSource?.locked)}
                 onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
                 placeholder={t("settingsSourceNamePlaceholder")}
               />
@@ -371,7 +399,7 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
               <span>{t("settingsSourcePath")}</span>
               <input
                 value={draft.path}
-                disabled={Boolean(selectedSource?.locked)}
+                disabled={isBusy || Boolean(selectedSource?.locked)}
                 onChange={(event) => setDraft((current) => ({ ...current, path: event.target.value }))}
                 placeholder={t("settingsSourcePathPlaceholder")}
               />
@@ -383,6 +411,8 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
                   key={key}
                   className={`ue-toggle-row ${draft[key] ? "active" : ""}`}
                   type="button"
+                  disabled={isBusy}
+                  aria-pressed={draft[key]}
                   onClick={() => handleToggle(key)}
                 >
                   <span>{t(`settingsSource${key === "import_target" ? "ImportTarget" : key[0].toUpperCase() + key.slice(1)}`)}</span>
@@ -398,7 +428,7 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
                 <HardDrive size={16} />
                 <span>{t("settingsSourceTest")}</span>
               </button>
-              <button className="ue-primary-action" type="button" onClick={handleSave} disabled={isBusy}>
+              <button className="ue-primary-action" type="button" onClick={handleSave} disabled={isBusy || !dirty || !draft.path.trim() || !draft.name.trim()}>
                 <Save size={16} />
                 <span>{t("settingsSourceSave")}</span>
               </button>
@@ -413,7 +443,7 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
         </div>
       </div>
 
-      <div className="ue-settings-diagnostics" data-tour-id="settings-diagnostics">
+      <div id="ue-diagnostics" className="ue-settings-diagnostics" data-tour-id="settings-diagnostics">
         <div className="ue-settings-panel-heading">
           <div>
             <h2>{t("settingsDiagnostics")}</h2>

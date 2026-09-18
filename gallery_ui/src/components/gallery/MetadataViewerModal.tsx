@@ -116,6 +116,7 @@ export const MetadataViewerModal = ({ image, onClose }: MetadataViewerModalProps
               </button>
             </div>
 
+            {metadata?.recipe?.warnings?.length ? <p className="ue-metadata-warning" role="status">{t("metadataPartialWarning")}</p> : null}
             <div className="ue-metadata-summary">
               <label>
                 <span>{t("metadataPositivePrompt")}</span>

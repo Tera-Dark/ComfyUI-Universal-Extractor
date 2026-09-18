@@ -300,6 +300,7 @@
 
 .ue-gallery-image-shell::before {
   content: "";
+  pointer-events: none;
   position: absolute;
   inset: 0;
   background: linear-gradient(90deg, rgba(240, 240, 242, 0.8), rgba(255, 255, 255, 0.9), rgba(240, 240, 242, 0.8));
@@ -310,6 +311,7 @@
 
 .ue-gallery-image-shell.is-loaded::before {
   opacity: 0;
+  animation: none;
 }
 
 .ue-gallery-image-shell img {
@@ -796,7 +798,7 @@
   background: transparent;
   color: var(--ue-ink-muted);
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease, opacity 0.15s ease;
 }
 
 .ue-dual-transfer-btn:hover:not(:disabled) {

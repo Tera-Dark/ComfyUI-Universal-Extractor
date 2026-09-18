@@ -13,23 +13,8 @@ export const getPositivePromptText = (metadata: ImageMetadata | null | undefined
     return embeddedPrompt.trim();
   }
 
-  if (embeddedPrompt && typeof embeddedPrompt === "object") {
-    for (const node of Object.values(embeddedPrompt as Record<string, unknown>)) {
-      if (!node || typeof node !== "object") {
-        continue;
-      }
-
-      const inputs = (node as { inputs?: unknown }).inputs;
-      if (!inputs || typeof inputs !== "object") {
-        continue;
-      }
-
-      const text = normalizePromptText((inputs as { text?: unknown }).text);
-      if (text) {
-        return text;
-      }
-    }
-  }
+  // Object-form ComfyUI graphs must be resolved by the backend. Picking the
+  // first text node could copy a negative prompt or the wrong output branch.
 
   return "";
 };
@@ -38,6 +23,7 @@ export const stringifyImageMetadata = (metadata: ImageMetadata | null | undefine
   JSON.stringify(
     {
       summary: metadata?.summary ?? null,
+      recipe: metadata?.recipe ?? null,
       artist_prompts: metadata?.artist_prompts ?? [],
       metadata: metadata?.metadata ?? null,
       workflow: metadata?.workflow ?? null,

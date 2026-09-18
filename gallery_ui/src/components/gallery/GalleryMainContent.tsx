@@ -101,7 +101,7 @@ export const GalleryMainContent = ({
   onPageChange,
   onPageJump,
 }: GalleryMainContentProps) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   const openBoardPickerForImage = (image: ImageRecord, selected: boolean) => {
     if (selected && pageSelectedPaths.length > 1) {
@@ -194,7 +194,7 @@ export const GalleryMainContent = ({
                     </div>
                     <p title={image.relative_path}>{image.relative_path}</p>
                     <div className="ue-gallery-list-meta">
-                      <span>{formatPreciseDateTime(image.created_at)}</span>
+                      <span>{formatPreciseDateTime(image.created_at, locale)}</span>
                       <span>{formatFileSize(image.size)}</span>
                       {image.width && image.height ? <span>{`${image.width} x ${image.height}`}</span> : null}
                       {image.pinned ? <span>{t("galleryPin")}</span> : null}
@@ -386,7 +386,7 @@ export const GalleryMainContent = ({
                         {image.title || image.filename}
                       </span>
                       <span className="ue-gallery-meta">
-                        <span>{formatCompactDate(image.created_at)}</span>
+                        <span>{formatCompactDate(image.created_at, locale)}</span>
                         <i aria-hidden="true">·</i>
                         <span>{formatFileSize(image.size)}</span>
                         {resolution ? <span className="ue-gallery-resolution-chip">{resolution}</span> : null}

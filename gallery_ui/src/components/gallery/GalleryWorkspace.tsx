@@ -1,3 +1,4 @@
+import { preferredScrollBehavior } from "../../utils/imageLoading";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronUp,
@@ -207,6 +208,8 @@ export const GalleryWorkspace = ({
   const [dualFolderMode, setDualFolderMode] = useState(false);
   const [variantMode, setVariantMode] = useState(false);
   const [variantType, setVariantType] = useState<VariantGroupType | "">("");
+  const variantRequest = useRef(0);
+  useEffect(()=>()=>{variantRequest.current++;},[]);
   const [variantGroups, setVariantGroups] = useState<VariantGroup[]>([]);
   const [variantStatus, setVariantStatus] = useState<FingerprintIndexStatus | null>(null);
   const [variantLoading, setVariantLoading] = useState(false);
@@ -307,20 +310,6 @@ export const GalleryWorkspace = ({
     closeOnContextMenu: true,
     closeOnScroll: true,
   });
-
-  useEffect(() => {
-    if (!showColumnsMenu) {
-      return;
-    }
-
-    const closeMenu = () => setShowColumnsMenu(false);
-    window.addEventListener("click", closeMenu);
-    window.addEventListener("resize", closeMenu);
-    return () => {
-      window.removeEventListener("click", closeMenu);
-      window.removeEventListener("resize", closeMenu);
-    };
-  }, [showColumnsMenu]);
 
   useEffect(() => {
     if (!showFiltersMenu) {
@@ -600,6 +589,7 @@ export const GalleryWorkspace = ({
 
   const loadVariantGroups = useCallback(
     async (forceRefresh = false) => {
+      const requestId=++variantRequest.current;
       setVariantLoading(true);
       setVariantError("");
       try {
@@ -609,12 +599,13 @@ export const GalleryWorkspace = ({
           limit: 120,
           forceRefresh,
         });
+        if(requestId!==variantRequest.current)return;
         setVariantGroups(response.groups);
         setVariantStatus(response.fingerprint_status);
       } catch (error) {
-        setVariantError(error instanceof Error ? error.message : t("variantEmptyText"));
+        if(requestId===variantRequest.current)setVariantError(error instanceof Error ? error.message : t("variantEmptyText"));
       } finally {
-        setVariantLoading(false);
+        if(requestId===variantRequest.current)setVariantLoading(false);
       }
     },
     [t, variantQuery, variantType],
@@ -622,6 +613,7 @@ export const GalleryWorkspace = ({
 
   const openVariantGroup = useCallback(
     async (group: VariantGroup, nextPage = 1) => {
+      const requestId=++variantRequest.current;
       setVariantLoading(true);
       setVariantError("");
       try {
@@ -632,15 +624,16 @@ export const GalleryWorkspace = ({
           page: nextPage,
           limit: 60,
         });
+        if(requestId!==variantRequest.current)return;
         setSelectedVariantGroup(response.group ?? group);
         setVariantImages(response.images);
         setVariantTotal(response.total);
         setVariantPage(response.page);
         clearSelection();
       } catch (error) {
-        setVariantError(error instanceof Error ? error.message : t("variantEmptyText"));
+        if(requestId===variantRequest.current)setVariantError(error instanceof Error ? error.message : t("variantEmptyText"));
       } finally {
-        setVariantLoading(false);
+        if(requestId===variantRequest.current)setVariantLoading(false);
       }
     },
     [clearSelection, t, variantQuery],
@@ -655,6 +648,8 @@ export const GalleryWorkspace = ({
 
   useEffect(() => {
     if (!variantMode) {
+      variantRequest.current++;
+      setVariantLoading(false);
       setSelectedVariantGroup(null);
       setVariantImages([]);
       return;
@@ -1178,7 +1173,7 @@ export const GalleryWorkspace = ({
   };
 
   const handleScrollToTop = () => {
-    scrollContainerRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+    scrollContainerRef.current?.scrollTo({ top: 0, behavior: preferredScrollBehavior() });
   };
 
   return (
@@ -1256,6 +1251,7 @@ export const GalleryWorkspace = ({
 
         {dualFolderMode && !isTrashView ? (
           <DualFolderWorkspace
+            onExit={()=>{setDualFolderMode(false);clearSelection();}}
             context={context}
             initialFolder={selectedSubfolder}
             sortBy={sortBy}
@@ -1271,6 +1267,7 @@ export const GalleryWorkspace = ({
           />
         ) : variantMode && !isTrashView && !selectedVariantGroup ? (
           <VariantGroupsView
+            onExit={()=>{setVariantMode(false);clearSelection();}}
             groups={variantGroups}
             selectedType={variantType}
             status={variantStatus}

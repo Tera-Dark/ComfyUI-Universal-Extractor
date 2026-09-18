@@ -6,7 +6,8 @@ import tailwindcss from '@tailwindcss/vite'
 export default defineConfig({
   base: '/gallery/',
   build: {
-    emptyOutDir: false,
+    emptyOutDir: true,
+    manifest: true,
     modulePreload: false,
   },
   plugins: [

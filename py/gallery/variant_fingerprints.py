@@ -18,7 +18,7 @@ except ImportError:
     HAS_PIL = False
 
 
-FINGERPRINT_VERSION = "1"
+FINGERPRINT_VERSION = "2"
 DHASH_SIZE = 8
 FILENAME_SEQUENCE_RE = re.compile(
     r"^(?P<base>.+?)(?:[_\-\s]+(?P<number>\d{3,})(?:[_\-\s]*(?:upscaled?|hires|final|edit|基础生图|最终成图|系数放大))*)$",
@@ -108,7 +108,11 @@ def build_metadata_hashes(image_path: str) -> tuple[str, str]:
         "negative": summary.get("negative_prompt") or "",
         "size": summary.get("size") or "",
     }
-    prompt_hash = stable_json_hash(prompt_payload)
+    prompt_hash = (
+        stable_json_hash(prompt_payload)
+        if summary.get("prompt_resolved") and (prompt_payload["positive"].strip() or prompt_payload["negative"].strip())
+        else ""
+    )
 
     workflow = metadata.get("workflow")
     prompt_graph = metadata.get("prompt")

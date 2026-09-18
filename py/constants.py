@@ -2,7 +2,7 @@ import os
 
 
 PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA_DIR = os.path.join(PLUGIN_DIR, "data")
+DATA_DIR = os.path.abspath(os.path.expanduser(os.environ.get("UNIVERSAL_EXTRACTOR_DATA_DIR") or os.path.join(PLUGIN_DIR, "data")))
 GALLERY_UI_DIR = os.path.join(PLUGIN_DIR, "gallery_ui", "dist")
 GALLERY_INDEX_FILE = os.path.join(GALLERY_UI_DIR, "index.html")
 GALLERY_STATE_FILE = os.path.join(DATA_DIR, "gallery_state.json")

@@ -1,57 +1,27 @@
-import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, statSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { readFileSync, existsSync } from "node:fs";
+import { resolve, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const indexHtmlPath = join(rootDir, "dist", "index.html");
-const indexHtml = existsSync(indexHtmlPath) ? readFileSync(indexHtmlPath, "utf8") : "";
-const entryAssets = [...indexHtml.matchAll(/\/gallery\/assets\/(index-[^"]+\.(?:css|js))/g)].map((match) => `dist/assets/${match[1]}`);
-const trackedSet = new Set(
-  execFileSync("git", ["ls-files", "dist/assets/index-*.*"], {
-    cwd: rootDir,
-    encoding: "utf8",
-  })
-    .split(/\r?\n/)
-    .filter(Boolean),
-);
-const tracked = execFileSync("git", ["ls-files", "dist/assets/index-*.*"], {
-  cwd: rootDir,
-  encoding: "utf8",
-})
-  .split(/\r?\n/)
-  .filter((path) => /\.(css|js)$/.test(path))
-  .map((path) => {
-    const fullPath = join(rootDir, ...path.split("/"));
-    return {
-      path,
-      name: basename(path),
-      bytes: existsSync(fullPath) ? statSync(fullPath).size : 0,
-      mtimeMs: existsSync(fullPath) ? statSync(fullPath).mtimeMs : 0,
-      type: path.endsWith(".css") ? "css" : "js",
-    };
-  });
-
-const totalBytes = tracked.reduce((sum, asset) => sum + asset.bytes, 0);
-const latestByType = new Map();
-for (const asset of tracked) {
-  const current = latestByType.get(asset.type);
-  if (!current || asset.mtimeMs > current.mtimeMs) {
-    latestByType.set(asset.type, asset);
+const dist = fileURLToPath(new URL("../dist/", import.meta.url));
+const manifest = JSON.parse(readFileSync(join(dist, ".vite/manifest.json"), "utf8"));
+let count = 0;
+const verify = (name) => {
+  const fullPath = resolve(dist, name);
+  if (!fullPath.startsWith(resolve(dist) + "/") && !fullPath.startsWith(resolve(dist) + "\\")) {
+    throw new Error(`Asset escapes dist: ${name}`);
+  }
+  if (!existsSync(fullPath)) throw new Error(`Missing built asset: ${name}`);
+  count++;
+};
+for (const item of Object.values(manifest)) {
+  verify(item.file);
+  for (const name of [...(item.css || []), ...(item.assets || [])]) verify(name);
+  for (const name of [...(item.imports || []), ...(item.dynamicImports || [])]) {
+    if (!manifest[name]) throw new Error(`Unresolved chunk: ${name}`);
   }
 }
-
-const formatBytes = (bytes) => `${(bytes / 1024 / 1024).toFixed(2)} MB`;
-
-console.log(`Tracked index assets: ${tracked.length} (${formatBytes(totalBytes)})`);
-console.log(`Index entries: ${entryAssets.length ? entryAssets.map((asset) => basename(asset)).join(", ") : "none"}`);
-for (const type of ["css", "js"]) {
-  const assets = tracked.filter((asset) => asset.type === type);
-  const latest = latestByType.get(type);
-  console.log(`${type.toUpperCase()}: ${assets.length} file(s), latest ${latest ? latest.name : "none"}`);
-}
-for (const entryAsset of entryAssets) {
-  const fullPath = join(rootDir, ...entryAsset.split("/"));
-  const status = existsSync(fullPath) ? (trackedSet.has(entryAsset) ? "tracked" : "untracked") : "missing";
-  console.log(`Entry ${basename(entryAsset)}: ${status}`);
-}
+const html = readFileSync(join(dist, "index.html"), "utf8");
+const entries = [...html.matchAll(/(?:src|href)="\/gallery\/([^"?#]+)"/g)];
+if (!entries.length) throw new Error("No index assets found");
+for (const [, name] of entries) verify(name);
+console.log(`Verified ${count} asset references; no hashed compatibility files were rewritten.`);

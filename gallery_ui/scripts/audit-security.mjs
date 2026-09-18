@@ -38,7 +38,7 @@ for (let attempt = 1; attempt <= maxRetries; attempt++) {
       execSync("node -e \"setTimeout(() => {}, 2000)\"");
       continue;
     }
-    console.warn("npm audit endpoint encountered network timeout; bypassed gracefully.");
-    process.exit(0);
+    console.error("npm audit unavailable: verification is incomplete. Retry with network access.");
+    process.exit(1);
   }
 }

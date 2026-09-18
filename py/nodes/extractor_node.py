@@ -3,10 +3,13 @@ import json
 import os
 import random
 from typing import Any
+from threading import RLock
 
 from ..constants import DATA_DIR, RUNTIME_STATE_FILENAMES
 
 POLLING_STATE: dict[str, int] = {}
+POLLING_LOCK = RLock()
+MAX_POLLING_STATES = 2048
 
 
 def list_json_files():
@@ -27,8 +30,8 @@ def resolve_library_path(file_name: str):
     if clean_name == "None" or not clean_name.endswith(".json") or clean_name in RUNTIME_STATE_FILENAMES:
         return None
 
-    data_dir = os.path.abspath(DATA_DIR)
-    file_path = os.path.abspath(os.path.join(data_dir, clean_name))
+    data_dir = os.path.realpath(DATA_DIR)
+    file_path = os.path.realpath(os.path.join(data_dir, clean_name))
     if os.path.commonpath([data_dir, file_path]) != data_dir:
         return None
     return file_path
@@ -195,6 +198,8 @@ def select_items(
     duplicate_policy: str,
     polling_key: str = "",
 ):
+    if duplicate_policy == "unique_only":
+        items = list(dict.fromkeys(items))
     if not items:
         return []
 
@@ -210,10 +215,12 @@ def select_items(
 
     if mode == "polling":
         key = polling_key or f"default:{len(items)}:{seed}"
-        if key not in POLLING_STATE:
-            POLLING_STATE[key] = seed % len(items)
-        start_index = POLLING_STATE[key] % len(items)
-        POLLING_STATE[key] = (start_index + extract_count) % len(items)
+        with POLLING_LOCK:
+            if key not in POLLING_STATE and len(POLLING_STATE) >= MAX_POLLING_STATES:
+                POLLING_STATE.pop(next(iter(POLLING_STATE)))
+            start_index = POLLING_STATE.pop(key, seed % len(items)) % len(items)
+            advance = min(extract_count, len(items)) if duplicate_policy == "unique_only" else extract_count
+            POLLING_STATE[key] = (start_index + advance) % len(items)
     else:
         start_index = seed % len(items)
 
@@ -335,6 +342,23 @@ def format_segments(
 
 
 class UniversalJsonSegmentRandomizer:
+    @classmethod
+    def IS_CHANGED(cls, file_name, mode="random", **kwargs):
+        # Polling is intentionally stateful: never reuse an executor result.
+        if mode == "polling":
+            return float("nan")
+        path = resolve_library_path(file_name)
+        if not path:
+            return "invalid-library"
+        try:
+            digest = hashlib.sha256()
+            with open(path, "rb") as stream:
+                for chunk in iter(lambda: stream.read(65536), b""):
+                    digest.update(chunk)
+            return digest.hexdigest()
+        except OSError:
+            return "missing-library"
+
     @classmethod
     def INPUT_TYPES(cls):
         return {

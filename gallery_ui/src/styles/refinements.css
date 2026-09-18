@@ -1,0 +1,43 @@
+/* RC2: explicit foregrounds and labels; never rely on a generic button reset. */
+.ue-primary-action, .ue-primary-btn { color:#fff; background:#212121; }
+.ue-primary-action:hover:not(:disabled), .ue-primary-btn:hover:not(:disabled) { background:#3a3a3a; color:#fff; }
+.ue-primary-action svg, .ue-primary-btn svg { color:inherit; }
+.ue-app-shell .ue-workspace-switcher .ue-disclosure-panel { width:284px; max-width:calc(100vw - 24px); }
+.ue-app-shell .ue-workspace-switcher .ue-topbar-tab { height:auto; min-height:64px; width:100%; padding:11px 13px; text-align:left; justify-content:flex-start; gap:13px; }
+.ue-app-shell .ue-workspace-switcher .ue-topbar-tab svg { width:19px; height:19px; flex-shrink:0; }
+.ue-app-shell .ue-workspace-switcher .ue-topbar-tab .ue-workspace-option-copy { display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
+.ue-workspace-option-copy strong { font-size:14px; font-weight:550; color:#242424; }
+.ue-workspace-option-copy small { font-size:12px; font-weight:400; color:#757575; line-height:1.5; white-space:normal; }
+.ue-density-control { flex:0 0 auto; }
+.ue-density-trigger { display:flex; align-items:center; justify-content:center; gap:6px; min-height:36px; padding:0 10px; border:0; border-radius:10px; color:#505050; background:transparent; font-size:12px; cursor:pointer; }
+.ue-density-trigger:hover, .ue-density-trigger.is-open { background:#f0f0f0; }
+.ue-density-panel { position:fixed; z-index:75; width:min(320px,calc(100vw - 24px)); max-height:calc(100dvh - 24px); overflow:auto; background:#fff; color:#242424; border:1px solid #e7e7e7; border-radius:16px; padding:17px; box-shadow:0 10px 35px #00000014; outline:none; }
+.ue-density-panel header { display:flex; justify-content:space-between; gap:12px; align-items:flex-start; }
+.ue-density-panel header strong { font-size:14px; font-weight:600; }
+.ue-density-panel header p { margin:5px 0 0; font-size:12px; line-height:1.5; color:#777; }
+.ue-density-panel header > button { display:flex; flex-shrink:0; justify-content:center; align-items:center; width:28px; height:28px; border-radius:8px; color:#666; background:transparent; }
+.ue-density-presets { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:7px; margin:16px 0; }
+.ue-density-presets > button { border:1px solid #e7e7e7; border-radius:10px; padding:10px 7px; display:flex; flex-direction:column; gap:4px; align-items:center; background:#fff; color:#555; cursor:pointer; }
+.ue-density-presets > button[aria-pressed="true"] { border-color:#454545; background:#f4f4f4; color:#212121; box-shadow:inset 0 0 0 1px #454545; }
+.ue-density-presets strong { font-size:12px; font-weight:500; }
+.ue-density-presets small { font-size:10px; color:#777; }
+.ue-density-preview { display:grid; gap:3px; width:100%; height:30px; margin-bottom:6px; }
+.ue-density-preview i { display:block; border-radius:2px; background:#c4c4c4; }
+.ue-density-presets [aria-pressed="true"] i { background:#686868; }
+.ue-density-adjust { display:flex; gap:8px; align-items:center; }
+.ue-density-adjust > button { background:#f5f5f5; color:#444; width:30px; height:30px; flex-shrink:0; border-radius:8px; display:flex; justify-content:center; align-items:center; }
+.ue-density-adjust > button:disabled { opacity:.35; cursor:default; }
+.ue-density-adjust input { min-width:0; width:100%; height:24px; padding:0; margin:0; accent-color:#333; cursor:pointer; border:0; }
+.ue-density-adjust output { color:#5d5d5d; font-size:12px; min-width:12px; font-variant-numeric:tabular-nums; }
+.ue-density-panel .ue-density-note { margin:13px 0 0; color:#777; font-size:11px; line-height:1.6; }
+.ue-density-panel button { touch-action:manipulation; }
+.ue-density-panel button:focus-visible, .ue-density-panel input:focus-visible { outline:2px solid #777; outline-offset:3px; }
+@media (max-width:720px) {
+ .ue-density-trigger { padding:0 7px; min-height:40px; }
+ .ue-app-shell .ue-workspace-switcher .ue-topbar-tab { justify-content:flex-start; }
+}
+@media (max-width:480px) {
+ .ue-filter-controls--gallery { flex-wrap:wrap; justify-content:flex-start; gap:6px; }
+ .ue-filter-controls--gallery > .ue-toolbar-group--browse { flex:1 0 100%; flex-wrap:wrap; justify-content:space-between; gap:6px; }
+ .ue-filter-controls--gallery [data-tour-id="gallery-selection"] span { display:inline; }
+}

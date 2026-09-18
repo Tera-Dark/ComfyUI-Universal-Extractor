@@ -4,3 +4,10 @@
 @import "./styles/workspace.css";
 @import "./styles/gallery.css";
 @import "./styles/onboarding.css";
+
+@import "./styles/minimal.css";
+
+@import "./styles/refinements.css";
+@import "./styles/motion.css";
+
+@import "./styles/workspace-system.css";

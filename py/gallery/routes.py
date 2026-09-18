@@ -11,6 +11,7 @@ from aiohttp import web
 from ..constants import GALLERY_INDEX_FILE, GALLERY_UI_DIR, IMPORT_IMAGE_SUBFOLDER, TRASH_DIR
 from ..paths import build_relative_display, get_comfy_base_dir, get_output_dir
 from .update_checker import check_update_status
+from .execution import run_gallery_task
 from .service import (
     LibraryValidationError,
     batch_update_images,
@@ -105,7 +106,9 @@ def _same_origin_url(value: str, request: web.Request) -> bool:
     parsed = urlparse(value)
     if not parsed.scheme or not parsed.netloc:
         return False
-    return parsed.netloc.lower() == request.host.lower()
+    # Compare host/port: TLS may terminate at a reverse proxy. This is a CSRF
+    # check, not authentication. Do not trust arbitrary forwarded headers here.
+    return parsed.scheme.lower() in {"http", "https"} and parsed.netloc.lower() == request.host.lower()
 
 
 def _is_same_origin_request(request: web.Request) -> bool:
@@ -128,7 +131,25 @@ def _guarded(handler):
     async def wrapped(request: web.Request):
         if not _is_same_origin_request(request):
             return web.json_response({"error": "same-origin request required"}, status=403)
-        return await handler(request)
+        try:
+            if request.can_read_body and request.content_type == "application/json":
+                payload = await request.json()
+                if not isinstance(payload, dict):
+                    return _bad_request("json body must be an object")
+                paths = payload.get("relative_paths")
+                if paths is not None and (not isinstance(paths, list) or len(paths) > 2000
+                        or any(not isinstance(path, str) or len(path) > 4096 for path in paths)):
+                    return _bad_request("relative_paths must contain at most 2000 path strings")
+            return await handler(request)
+        except web.HTTPException:
+            raise
+        except (ValueError, TypeError) as error:
+            return _bad_request(str(error))
+        except FileExistsError as error:
+            return web.json_response({"error": str(error)}, status=409)
+        except (OSError, RuntimeError) as error:
+            traceback.print_exc()
+            return web.json_response({"error": str(error)}, status=500)
 
     wrapped.__name__ = getattr(handler, "__name__", "wrapped")
     return wrapped
@@ -282,10 +303,12 @@ async def redirect_gallery_root(_request: web.Request) -> web.StreamResponse:
 async def api_gallery_context(request: web.Request) -> web.Response:
     force_refresh = request.query.get("force_refresh", "").lower() in {"1", "true", "yes"}
     try:
-        return web.json_response(get_gallery_context(force_refresh=force_refresh))
+        return web.json_response(await run_gallery_task(get_gallery_context, force_refresh=force_refresh))
+    except web.HTTPException:
+        raise
     except Exception as error:
         _log_gallery_startup_error("context", error)
-        return web.json_response(_fallback_gallery_context(error))
+        return web.json_response(await run_gallery_task(_fallback_gallery_context, error))
 
 
 async def api_list_images(request: web.Request) -> web.Response:
@@ -306,7 +329,7 @@ async def api_list_images(request: web.Request) -> web.Response:
     try:
         page = _parse_int(request.query.get("page"), "page", 1, min_value=1)
         limit = _parse_int(request.query.get("limit"), "limit", 60, min_value=1, max_value=120)
-        page_result = list_images_page(
+        page_result = await run_gallery_task(list_images_page,
             page=page,
             limit=limit,
             search=search,
@@ -323,9 +346,11 @@ async def api_list_images(request: web.Request) -> web.Response:
         )
     except ValueError as error:
         return _bad_request(str(error))
+    except web.HTTPException:
+        raise
     except Exception as error:
         _log_gallery_startup_error("image list", error)
-        return web.json_response(_fallback_image_page(page, limit, error))
+        return web.json_response(await run_gallery_task(_fallback_image_page, page, limit, error))
 
     return web.json_response(page_result)
 
@@ -334,7 +359,7 @@ async def api_image_freshness(request: web.Request) -> web.Response:
     subfolder = request.query.get("subfolder", "")
     known = request.query.get("known", "")
     try:
-        return web.json_response(get_image_freshness(subfolder=subfolder, known=known))
+        return web.json_response(await run_gallery_task(get_image_freshness, subfolder=subfolder, known=known))
     except ValueError as error:
         return _bad_request(str(error))
 
@@ -359,7 +384,7 @@ async def api_variant_groups(request: web.Request) -> web.Response:
     try:
         limit = _parse_int(request.query.get("limit"), "limit", 80, min_value=1, max_value=200)
         return web.json_response(
-            list_variant_groups(
+            await run_gallery_task(list_variant_groups,
                 **_variant_filter_kwargs(request),
                 group_type=request.query.get("type", ""),
                 limit=limit,
@@ -378,7 +403,7 @@ async def api_variant_group_images(request: web.Request) -> web.Response:
         page = _parse_int(request.query.get("page"), "page", 1, min_value=1)
         limit = _parse_int(request.query.get("limit"), "limit", 60, min_value=1, max_value=120)
         return web.json_response(
-            get_variant_group_images(
+            await run_gallery_task(get_variant_group_images,
                 **_variant_filter_kwargs(request),
                 group_id=group_id,
                 group_type=request.query.get("type", ""),
@@ -403,7 +428,7 @@ async def api_fingerprint_prewarm(request: web.Request) -> web.Response:
     try:
         limit = _parse_int(body.get("limit"), "limit", 240, min_value=1, max_value=1000)
         return web.json_response(
-            prewarm_image_fingerprints(
+            await run_gallery_task(prewarm_image_fingerprints,
                 relative_paths=[str(path) for path in relative_paths] if relative_paths else None,
                 subfolder=str(body.get("subfolder") or ""),
                 search=str(body.get("search") or ""),
@@ -421,7 +446,7 @@ async def api_fingerprint_prewarm(request: web.Request) -> web.Response:
 
 
 async def api_fingerprint_status(_request: web.Request) -> web.Response:
-    return web.json_response(get_fingerprint_index_status())
+    return web.json_response(await run_gallery_task(get_fingerprint_index_status))
 
 
 async def api_image_metadata(request: web.Request) -> web.Response:
@@ -430,7 +455,7 @@ async def api_image_metadata(request: web.Request) -> web.Response:
         return web.json_response({"error": "relative_path required"}, status=400)
 
     try:
-        _, full_path = resolve_image_path(relative_path)
+        _, full_path = await run_gallery_task(resolve_image_path, relative_path)
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -439,7 +464,7 @@ async def api_image_metadata(request: web.Request) -> web.Response:
     if not os.path.exists(full_path):
         return web.json_response({"error": "not found"}, status=404)
 
-    return web.json_response(get_image_metadata(relative_path))
+    return web.json_response(await run_gallery_task(get_image_metadata, relative_path))
 
 
 async def api_thumbnail(request: web.Request) -> web.StreamResponse:
@@ -478,17 +503,17 @@ async def api_prewarm_thumbnails(request: web.Request) -> web.Response:
     try:
         size = _parse_int(body.get("size"), "size", 480, min_value=64, max_value=1024)
         limit = _parse_int(body.get("limit"), "limit", 80, min_value=1, max_value=200)
-        return web.json_response(enqueue_thumbnail_prewarm([str(path) for path in relative_paths], size=size, limit=limit))
+        return web.json_response(await run_gallery_task(enqueue_thumbnail_prewarm, [str(path) for path in relative_paths], size=size, limit=limit))
     except ValueError as error:
         return _bad_request(str(error))
 
 
 async def api_thumbnail_prewarm_status(_request: web.Request) -> web.Response:
-    return web.json_response(get_thumbnail_prewarm_status())
+    return web.json_response(await run_gallery_task(get_thumbnail_prewarm_status))
 
 
 async def api_color_index_status(_request: web.Request) -> web.Response:
-    return web.json_response(get_color_index_status())
+    return web.json_response(await run_gallery_task(get_color_index_status))
 
 
 async def api_image_file(request: web.Request) -> web.StreamResponse:
@@ -497,7 +522,7 @@ async def api_image_file(request: web.Request) -> web.StreamResponse:
         return _bad_request("relative_path required")
 
     try:
-        _, full_path = resolve_image_path(relative_path)
+        _, full_path = await run_gallery_task(resolve_image_path, relative_path)
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -510,17 +535,17 @@ async def api_image_file(request: web.Request) -> web.StreamResponse:
 
 
 async def api_list_trash(_request: web.Request) -> web.Response:
-    return web.json_response({"items": list_trash_items()})
+    return web.json_response({"items": await run_gallery_task(list_trash_items)})
 
 
 async def api_trash_file(request: web.Request) -> web.StreamResponse:
     item_id = request.query.get("id", "")
-    item = get_trash_item(item_id)
+    item = await run_gallery_task(get_trash_item, item_id)
     if not item:
         return web.Response(status=404)
 
     try:
-        storage_path = Path(resolve_trash_storage_path(item))
+        storage_path = Path(await run_gallery_task(resolve_trash_storage_path, item))
     except ValueError as error:
         return _bad_request(str(error))
 
@@ -539,7 +564,7 @@ async def api_restore_trash_item(request: web.Request) -> web.Response:
     if not item_id:
         return web.json_response({"error": "id required"}, status=400)
     try:
-        return web.json_response(restore_trash_item(item_id))
+        return web.json_response(await run_gallery_task(restore_trash_item, item_id))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -552,7 +577,7 @@ async def api_purge_trash_item(request: web.Request) -> web.Response:
     if not item_id:
         return web.json_response({"error": "id required"}, status=400)
     try:
-        return web.json_response(purge_trash_item(item_id))
+        return web.json_response(await run_gallery_task(purge_trash_item, item_id))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -567,7 +592,7 @@ async def api_update_image_state(request: web.Request) -> web.Response:
         return web.json_response({"error": "relative_path and updates required"}, status=400)
 
     try:
-        _, full_path = resolve_image_path(relative_path)
+        _, full_path = await run_gallery_task(resolve_image_path, relative_path)
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -576,7 +601,7 @@ async def api_update_image_state(request: web.Request) -> web.Response:
     if not os.path.exists(full_path):
         return web.json_response({"error": "image not found"}, status=404)
 
-    return web.json_response(persist_image_state(relative_path, updates))
+    return web.json_response(await run_gallery_task(persist_image_state, relative_path, updates))
 
 
 async def api_import_files(request: web.Request) -> web.Response:
@@ -612,7 +637,7 @@ async def api_import_files(request: web.Request) -> web.Response:
                 return _payload_too_large("too many files in import request")
 
             try:
-                kind, target_path, skipped_item = get_import_target_for_filename(part.filename, target_source_id, target_subfolder)
+                kind, target_path, skipped_item = await run_gallery_task(get_import_target_for_filename, part.filename, target_source_id, target_subfolder)
             except (FileNotFoundError, ValueError) as error:
                 cleanup_written_targets()
                 return _bad_request(str(error))
@@ -652,7 +677,7 @@ async def api_import_files(request: web.Request) -> web.Response:
                 imported_images.append(
                     {
                         "filename": os.path.basename(target_path),
-                        "relative_path": image_ref_for_full_path(target_path),
+                        "relative_path": await run_gallery_task(image_ref_for_full_path, target_path),
                     }
                 )
             else:
@@ -665,7 +690,7 @@ async def api_import_files(request: web.Request) -> web.Response:
         elif part.name == "target_subfolder":
             target_subfolder = field_value or IMPORT_IMAGE_SUBFOLDER
 
-    return web.json_response(build_import_result(imported_images, imported_libraries, skipped))
+    return web.json_response(await run_gallery_task(build_import_result, imported_images, imported_libraries, skipped))
 
 
 async def api_delete_images(request: web.Request) -> web.Response:
@@ -674,7 +699,7 @@ async def api_delete_images(request: web.Request) -> web.Response:
     if not isinstance(relative_paths, list) or not relative_paths:
         return web.json_response({"error": "relative_paths required"}, status=400)
     try:
-        return web.json_response(delete_images(relative_paths))
+        return web.json_response(await run_gallery_task(delete_images, relative_paths))
     except ValueError as error:
         return _bad_request(str(error))
 
@@ -686,7 +711,7 @@ async def api_batch_update_images(request: web.Request) -> web.Response:
     if not isinstance(relative_paths, list) or not relative_paths or not isinstance(updates, dict):
         return web.json_response({"error": "relative_paths and updates required"}, status=400)
     try:
-        return web.json_response(batch_update_images(relative_paths, updates))
+        return web.json_response(await run_gallery_task(batch_update_images, relative_paths, updates))
     except ValueError as error:
         return _bad_request(str(error))
 
@@ -694,7 +719,7 @@ async def api_batch_update_images(request: web.Request) -> web.Response:
 async def api_list_boards(request: web.Request) -> web.Response:
     force_refresh = request.query.get("force_refresh", "").lower() in {"1", "true", "yes"}
     try:
-        return web.json_response({"boards": list_boards(force_refresh=force_refresh)})
+        return web.json_response({"boards": await run_gallery_task(list_boards, force_refresh=force_refresh)})
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
 
@@ -704,7 +729,7 @@ async def api_create_board(request: web.Request) -> web.Response:
     name = str(body.get("name", "")).strip()
     description = str(body.get("description", "")).strip()
     try:
-        return web.json_response(create_gallery_board(name, description))
+        return web.json_response(await run_gallery_task(create_gallery_board, name, description))
     except ValueError as error:
         return web.json_response({"error": str(error)}, status=400)
 
@@ -716,7 +741,7 @@ async def api_update_board(request: web.Request) -> web.Response:
     if not board_id or not isinstance(updates, dict):
         return web.json_response({"error": "id and updates required"}, status=400)
     try:
-        return web.json_response(update_gallery_board(board_id, updates))
+        return web.json_response(await run_gallery_task(update_gallery_board, board_id, updates))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -729,7 +754,7 @@ async def api_delete_board(request: web.Request) -> web.Response:
     if not board_id:
         return web.json_response({"error": "id required"}, status=400)
     try:
-        return web.json_response(delete_gallery_board(board_id))
+        return web.json_response(await run_gallery_task(delete_gallery_board, board_id))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
 
@@ -742,7 +767,7 @@ async def api_update_board_pins(request: web.Request) -> web.Response:
     if not board_id or not isinstance(relative_paths, list):
         return web.json_response({"error": "id and relative_paths required"}, status=400)
     try:
-        return web.json_response(update_board_images(board_id, relative_paths, pinned=pinned))
+        return web.json_response(await run_gallery_task(update_board_images, board_id, relative_paths, pinned=pinned))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -758,7 +783,7 @@ async def api_move_images(request: web.Request) -> web.Response:
         return web.json_response({"error": "relative_paths required"}, status=400)
 
     try:
-        return web.json_response(move_images(relative_paths, target_subfolder, target_source_id))
+        return web.json_response(await run_gallery_task(move_images, relative_paths, target_subfolder, target_source_id))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -773,7 +798,7 @@ async def api_rename_image(request: web.Request) -> web.Response:
         return web.json_response({"error": "relative_path and new_filename required"}, status=400)
 
     try:
-        return web.json_response(rename_image(relative_path, new_filename))
+        return web.json_response(await run_gallery_task(rename_image, relative_path, new_filename))
     except FileNotFoundError:
         return web.json_response({"error": "image not found"}, status=404)
     except FileExistsError:
@@ -798,7 +823,7 @@ async def api_batch_rename_images(request: web.Request) -> web.Response:
 
     try:
         return web.json_response(
-            batch_rename_images(
+            await run_gallery_task(batch_rename_images,
                 relative_paths=relative_paths,
                 template=template,
                 start_number=start_number,
@@ -815,14 +840,14 @@ async def api_batch_rename_images(request: web.Request) -> web.Response:
 
 
 async def api_list_libraries(_request: web.Request) -> web.Response:
-    return web.json_response({"libraries": list_libraries()})
+    return web.json_response({"libraries": await run_gallery_task(list_libraries)})
 
 
 async def api_get_library(request: web.Request) -> web.Response:
     name = request.query.get("name", "")
     if not name:
         return web.json_response({"error": "name required"}, status=400)
-    library = get_library(name)
+    library = await run_gallery_task(get_library, name)
     return web.json_response({"name": name, "data": library})
 
 
@@ -837,7 +862,7 @@ async def api_get_library_entries(request: web.Request) -> web.Response:
         limit = _parse_int(request.query.get("limit"), "limit", 120, min_value=1, max_value=MAX_LIBRARY_ENTRY_LIMIT)
     except ValueError as error:
         return _bad_request(str(error))
-    return web.json_response(get_library_entries_page(name, search=search, page=page, limit=limit))
+    return web.json_response(await run_gallery_task(get_library_entries_page, name, search=search, page=page, limit=limit))
 
 
 async def api_get_library_raw(request: web.Request) -> web.Response:
@@ -846,7 +871,7 @@ async def api_get_library_raw(request: web.Request) -> web.Response:
         return web.json_response({"error": "name required"}, status=400)
 
     try:
-        return web.json_response({"name": name, "text": get_library_raw_text(name)})
+        return web.json_response({"name": name, "text": await run_gallery_task(get_library_raw_text, name)})
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
 
@@ -864,7 +889,7 @@ async def api_search_library_artists(request: web.Request) -> web.Response:
     except ValueError as error:
         return _bad_request(str(error))
     return web.json_response(
-        search_library_artists(
+        await run_gallery_task(search_library_artists,
             name=name,
             query=query,
             filter_mode=filter_mode,
@@ -882,7 +907,7 @@ async def api_generate_artist_string(request: web.Request) -> web.Response:
 
     try:
         return web.json_response(
-            generate_artist_string(
+            await run_gallery_task(generate_artist_string,
                 name=name,
                 query=str(body.get("query", "")),
                 count=_parse_int(body.get("count"), "count", 3, min_value=1, max_value=20),
@@ -911,7 +936,7 @@ async def api_save_library(request: web.Request) -> web.Response:
     if not name or data is None:
         return web.json_response({"error": "name and data required"}, status=400)
     try:
-        filename = save_library(name, data)
+        filename = await run_gallery_task(save_library, name, data)
     except LibraryValidationError as error:
         return web.json_response(
             {"error": "validation failed", "validation_errors": error.issues},
@@ -963,7 +988,7 @@ async def api_import_library(request: web.Request) -> web.Response:
         return web.json_response({"error": "library file required"}, status=400)
 
     try:
-        result = import_library_data(
+        result = await run_gallery_task(import_library_data,
             source_filename=uploaded_name,
             raw_payload=uploaded_bytes,
             mode=mode,
@@ -992,9 +1017,9 @@ async def api_upsert_library_entry(request: web.Request) -> web.Response:
 
     try:
         if "index" in body and body.get("index") is not None:
-            result = update_library_entry(name, int(body.get("index")), entry)
+            result = await run_gallery_task(update_library_entry, name, int(body.get("index")), entry)
         else:
-            result = create_library_entry(name, entry)
+            result = await run_gallery_task(create_library_entry, name, entry)
     except LibraryValidationError as error:
         return web.json_response(
             {"error": "validation failed", "validation_errors": error.issues},
@@ -1014,7 +1039,7 @@ async def api_delete_library_entry(request: web.Request) -> web.Response:
         return web.json_response({"error": "name and index required"}, status=400)
 
     try:
-        result = delete_library_entry(name, int(index))
+        result = await run_gallery_task(delete_library_entry, name, int(index))
     except (ValueError, IndexError) as error:
         return web.json_response({"error": str(error)}, status=400)
 
@@ -1025,7 +1050,7 @@ async def api_create_folder(request: web.Request) -> web.Response:
     body = await request.json()
     path = str(body.get("path", "")).strip()
     try:
-        return web.json_response(create_folder(path))
+        return web.json_response(await run_gallery_task(create_folder, path))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -1036,7 +1061,7 @@ async def api_delete_folder(request: web.Request) -> web.Response:
     body = await request.json()
     path = str(body.get("path", "")).strip()
     try:
-        return web.json_response(delete_folder(path))
+        return web.json_response(await run_gallery_task(delete_folder, path))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -1048,7 +1073,7 @@ async def api_merge_folder(request: web.Request) -> web.Response:
     source_path = str(body.get("source_path", "")).strip()
     target_path = str(body.get("target_path", "")).strip()
     try:
-        return web.json_response(merge_folder(source_path, target_path))
+        return web.json_response(await run_gallery_task(merge_folder, source_path, target_path))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -1060,7 +1085,7 @@ async def api_rename_folder(request: web.Request) -> web.Response:
     source_path = str(body.get("source_path", "")).strip()
     target_path = str(body.get("target_path", "")).strip()
     try:
-        return web.json_response(rename_folder(source_path, target_path))
+        return web.json_response(await run_gallery_task(rename_folder, source_path, target_path))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except FileExistsError as error:
@@ -1073,13 +1098,13 @@ async def api_delete_library(request: web.Request) -> web.Response:
     name = request.query.get("name", "")
     if not name:
         return web.json_response({"error": "name required"}, status=400)
-    delete_library(name)
+    await run_gallery_task(delete_library, name)
     return web.json_response({"ok": True})
 
 
 async def api_list_gallery_sources(request: web.Request) -> web.Response:
     force_refresh = request.query.get("force_refresh", "").lower() in {"1", "true", "yes"}
-    context = get_gallery_context(force_refresh=force_refresh)
+    context = await run_gallery_task(get_gallery_context, force_refresh=force_refresh)
     return web.json_response({"sources": context.get("sources", []), "active_source_count": context.get("active_source_count", 0)})
 
 
@@ -1088,7 +1113,7 @@ async def api_save_gallery_source(request: web.Request) -> web.Response:
     if not isinstance(body, dict):
         return _bad_request("source payload required")
     try:
-        return web.json_response(save_gallery_source(body))
+        return web.json_response(await run_gallery_task(save_gallery_source, body))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -1101,7 +1126,7 @@ async def api_delete_gallery_source(request: web.Request) -> web.Response:
     if not source_id:
         return _bad_request("id required")
     try:
-        return web.json_response(delete_gallery_source(source_id))
+        return web.json_response(await run_gallery_task(delete_gallery_source, source_id))
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except ValueError as error:
@@ -1111,13 +1136,13 @@ async def api_delete_gallery_source(request: web.Request) -> web.Response:
 async def api_test_gallery_source_path(request: web.Request) -> web.Response:
     body = await request.json()
     try:
-        return web.json_response(test_gallery_source_path(str(body.get("path", ""))))
+        return web.json_response(await run_gallery_task(test_gallery_source_path, str(body.get("path", ""))))
     except ValueError as error:
         return _bad_request(str(error))
 
 
 async def api_diagnose_gallery_sources(_request: web.Request) -> web.Response:
-    return web.json_response(diagnose_gallery_sources())
+    return web.json_response(await run_gallery_task(diagnose_gallery_sources))
 
 
 async def api_update_status(request: web.Request) -> web.Response:

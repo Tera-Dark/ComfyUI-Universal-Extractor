@@ -2,6 +2,47 @@
 
 All notable changes to the ComfyUI Universal Extractor project will be documented in this file.
 
+## 1.3.0-rc.3 - 2026-09-18
+
+Local QoL and visual-consistency candidate; not an upstream release.
+
+- Unify workbench, settings, library, organizer and variant surfaces around the gallery's neutral typography, controls and spacing. Horizontal workbench tools and optional format conversion; row-based settings and section shortcuts.
+- Preserve workbench draft/selection state while switching workspaces in the current page session; hidden effects are suspended with React Activity.
+- Fix new-source selection reset; protect dirty source edits against source/tab changes, incoming refreshes and browser unload. Save validates non-empty name/path; source controls expose pressed state.
+- Dual-pane request sequencing prevents stale directory responses; paged loading replaces the implicit 80-image ceiling. Explicit loaded-image selection scope, independent filter scope and return-to-gallery action.
+- Lock repeated moves from confirmation through completion; confirm source/destination, preserve failures, report moved/missing/blocked counts and do not overwrite conflicts.
+- Search/sort loaded variant groups and clarify that similarity is not permission to delete; guard stale variant requests.
+- Separate filter reset from sort reset; keyboard Escape and focus return for the filter panel.
+- Shared confirmation dialogs are portaled, modal, safe-action focused, keyboard contained, and cancellable with Escape; replaced requests resolve safely.
+- See docs/UPGRADE-1.3.0-rc.3.zh-CN.md and docs/VALIDATION-1.3.0-rc.3.md for scope and limitations.
+
+## 1.3.0-rc.2 - 2026-09-18
+
+Local interaction refinement candidate; not an upstream release. Includes RC1 backend safeguards.
+
+- Replace the centered tutorial with an 11-step target-aware spotlight tour, focus containment, missing-target fallback, and measured mobile positioning. Explicit dark-button/white-text contrast.
+- Replace the numeric columns menu with three visual density presets and an accessible 3–8 range control.
+- Add visible workspace descriptions at every screen size; prevent narrow-screen toolbar overlap.
+- Normalize short opacity/color motion, remove full-overlay travel and blurred photo backdrops, decode before image handoff, cancel stale requests, preload neighbors, and honor reduced motion.
+- Centralize dual-folder translations, localize errors/retry/tooltips/dates, set document language, and audit 833 keys and interpolation placeholders.
+- Add regression coverage for geometry, density, decoder cancellation, error retry, unsaved-change guard, and first-run tours in both languages across four viewport sizes.
+- See docs/UPGRADE-1.3.0-rc.2.zh-CN.md and docs/VALIDATION-1.3.0-rc.2.md for installation and actual validation limits.
+
+## 1.3.0-rc.1 - 2026-09-18
+
+Local candidate based on 87960b0; not an upstream release.
+
+- Minimal neutral workspace UI; workspace dropdown; progressive toolbar/directory actions; keyboard dismiss and mobile sidebar close.
+- Correct ComfyUI cache invalidation for polling and changed libraries; unique value sampling; bounded synchronized polling state.
+- Optional Universal Prompt Snapshot pass-through node saves resolved text in PNG metadata.
+- Portable Send2Trash with accurate UI language; collision-safe, source-aware restore.
+- Journaled file/state operations with rollback, unresolved-journal guard and read-only recovery inspection.
+- Bounded worker offload for service calls, exact Hamming candidate index, bounded prefetch queue.
+- Conservative metadata parsing and incomplete-prompt exclusion from fingerprint grouping.
+- Content-hashed clean builds with manifest validation; no rewriting historical hashed assets.
+- Frontend lockfile security fixes; audit network failure no longer counts as success.
+- Cross-platform CI configuration and additional fault-injection tests. See docs/UPGRADE-1.3.0-rc.1.zh-CN.md for limitations and installation.
+
 ## v1.2.10 - 2026-09-04
 
 ### 🖼️ 画廊浏览与排版升级 (Modern Visuals & Dynamic Masonry)

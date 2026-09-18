@@ -1,3 +1,4 @@
+import { useI18n } from "../../i18n/I18nProvider";
 import type { DragEvent, MouseEvent } from "react";
 import { Check } from "lucide-react";
 
@@ -38,6 +39,7 @@ export const DualFolderCard = ({
   onDragEnd,
   onToggleSelected,
 }: DualFolderCardProps) => {
+  const { locale } = useI18n();
   const resolution = getDualFolderImageResolution(image);
 
   return (
@@ -59,7 +61,7 @@ export const DualFolderCard = ({
           {resolution ? <span className="ue-dual-card-resolution">{resolution}</span> : null}
         </div>
         <span className="ue-dual-card-meta">
-          {formatCompactDate(image.created_at)}
+          {formatCompactDate(image.created_at, locale)}
           <i aria-hidden="true">/</i>
           {formatFileSize(image.size)}
         </span>

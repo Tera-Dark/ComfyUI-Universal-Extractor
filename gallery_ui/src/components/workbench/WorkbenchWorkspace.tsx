@@ -2,14 +2,12 @@ import { useEffect, useMemo, useState } from "react";
 import {
   ArrowUpRight,
   BookmarkPlus,
-  Boxes,
   Compass,
   Copy,
   ExternalLink,
   Gauge,
   Globe2,
   Images,
-  LayoutGrid,
   Link2,
   Plus,
   Search,
@@ -269,7 +267,6 @@ export const WorkbenchWorkspace = ({
     [selectedInspirationId],
   );
 
-  const activeToolLabel = activeTool === "artist" ? t("toolArtistGenerator") : t("toolInspirationHub");
   const resultTokenCount = useMemo(
     () => finalResult.split(",").map((part) => part.trim()).filter(Boolean).length,
     [finalResult],
@@ -521,48 +518,31 @@ export const WorkbenchWorkspace = ({
           <h2>{t("workbenchAppTitle")}</h2>
           <p>{t("workbenchAppSubtitle")}</p>
         </div>
-        <div className="ue-workbench-hero-strip" aria-label={t("workbenchStatusStrip")}>
-          <div>
-            <span>{t("workbenchActiveTool")}</span>
-            <strong>{activeToolLabel}</strong>
-          </div>
-          <div>
-            <span>{t("workbenchLibraryCount")}</span>
-            <strong>{libraries.length}</strong>
-          </div>
-          <div>
-            <span>{t("workbenchQueueCount")}</span>
-            <strong>{preselectedNames.length}</strong>
-          </div>
-        </div>
+
       </div>
 
       <div className="ue-workbench-app-shell">
         <aside className="ue-workbench-rail" aria-label={t("workbenchToolShelf")}>
-          <div className="ue-workbench-rail-head">
-            <LayoutGrid size={16} />
-            <span>{t("workbenchToolShelf")}</span>
-          </div>
+
           <button
             className={`ue-workbench-tool-tab ${activeTool === "artist" ? "is-active" : ""}`}
+            aria-pressed={activeTool === "artist"}
             onClick={() => setActiveTool("artist")}
           >
             <Wand2 size={17} />
             <span>{t("toolArtistGenerator")}</span>
-            <em>{t("workbenchToolReady")}</em>
+
           </button>
           <button
             className={`ue-workbench-tool-tab ${activeTool === "inspiration" ? "is-active" : ""}`}
+            aria-pressed={activeTool === "inspiration"}
             onClick={() => setActiveTool("inspiration")}
           >
             <Images size={17} />
             <span>{t("toolInspirationHub")}</span>
-            <em>{t("workbenchToolNew")}</em>
+
           </button>
-          <div className="ue-workbench-rail-footer">
-            <Boxes size={15} />
-            <p>{t("workbenchToolShelfHint")}</p>
-          </div>
+
         </aside>
 
         <div className="ue-workbench-stage">
@@ -719,7 +699,7 @@ export const WorkbenchWorkspace = ({
                       aria-label={t("artistGenerate")}
                       title={t("artistGenerate")}
                     >
-                      <Wand2 size={15} />
+                      <Wand2 size={15} /><span>{t("artistGenerate")}</span>
                     </button>
                     <button
                       className="ue-icon-action"
@@ -728,7 +708,7 @@ export const WorkbenchWorkspace = ({
                       aria-label={t("artistCopyResult")}
                       title={t("artistCopyResult")}
                     >
-                      <Copy size={15} />
+                      <Copy size={15} /><span>{t("artistCopyResult")}</span>
                     </button>
                   </div>
 
@@ -741,7 +721,7 @@ export const WorkbenchWorkspace = ({
                     />
                   </label>
 
-                  <div className="ue-tool-divider" />
+                  <details className="ue-qol-disclosure"><summary>{t("qolFormatDetails")}</summary>
 
                   <div className="ue-tool-subsection">
                     <span>03</span>
@@ -782,7 +762,7 @@ export const WorkbenchWorkspace = ({
                       aria-label={t("artistCopyResult")}
                       title={t("artistCopyResult")}
                     >
-                      <Copy size={14} />
+                      <Copy size={14} /><span>{t("artistCopyResult")}</span>
                     </button>
                   </div>
 
@@ -796,6 +776,7 @@ export const WorkbenchWorkspace = ({
                       <span>{t("workbenchFormattedTokens", { count: formattedTokenCount })}</span>
                     </div>
                   ) : null}
+                  </details>
                 </div>
               </article>
 

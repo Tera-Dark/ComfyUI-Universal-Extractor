@@ -45,6 +45,7 @@ const prefetchedImageUrls = new BoundedSet(2500);
 const queuedImageUrls = new Set<string>();
 const imagePrefetchQueue: string[] = [];
 const MAX_IMAGE_PREFETCH_CONCURRENCY = 4;
+const MAX_IMAGE_PREFETCH_QUEUE = 80;
 let activeImagePrefetches = 0;
 
 export const getGalleryImageUrl = (image: ImageRecord) => image.thumb_url || image.url;
@@ -66,7 +67,12 @@ const pumpImagePrefetchQueue = () => {
     activeImagePrefetches += 1;
     const preloadImage = new Image();
     preloadImage.decoding = "async";
+    let finished = false;
+    const timeout = window.setTimeout(() => finish(false), 15000);
     const finish = (loaded: boolean) => {
+      if (finished) return;
+      finished = true;
+      window.clearTimeout(timeout);
       preloadImage.onload = null;
       preloadImage.onerror = null;
       try {
@@ -95,6 +101,13 @@ export const prefetchGalleryImage = (image: ImageRecord) => {
     return;
   }
 
+  if (imagePrefetchQueue.length >= MAX_IMAGE_PREFETCH_QUEUE) {
+    const staleUrl = imagePrefetchQueue.shift();
+    if (staleUrl) {
+      queuedImageUrls.delete(staleUrl);
+      prefetchedImageUrls.delete(staleUrl);
+    }
+  }
   prefetchedImageUrls.add(imageUrl);
   queuedImageUrls.add(imageUrl);
   imagePrefetchQueue.push(imageUrl);

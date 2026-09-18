@@ -56,7 +56,7 @@ export const TrashWorkspaceView = ({
   onSelectionPointerMove,
   onSelectionPointerEnd,
 }: TrashWorkspaceViewProps) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
 
   if (trashItems.length === 0) {
     return (
@@ -163,7 +163,7 @@ export const TrashWorkspaceView = ({
                   </div>
                   <p title={item.original_path}>{item.original_path}</p>
                   <div className="ue-trash-card-meta">
-                    <span>{formatCompactDate(item.deleted_at)}</span>
+                    <span>{formatCompactDate(item.deleted_at, locale)}</span>
                     {item.image_count ? <span>{t("trashImageCount", { count: item.image_count })}</span> : null}
                   </div>
                 </div>

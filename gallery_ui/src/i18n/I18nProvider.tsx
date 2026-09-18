@@ -4,6 +4,13 @@ import type { WorkspaceTab } from "../types/universal-gallery";
 import { translations, type Locale } from "./translations";
 
 interface TranslateOptions {
+  source?: string;
+  moved?: number;
+  missing?: number;
+  blocked?: number;
+  loaded?: number;
+  total?: number;
+  shown?: number;
   page?: number;
   totalPages?: number;
   count?: number;
@@ -34,13 +41,24 @@ const interpolate = (template: string, options?: TranslateOptions) => {
 
 export const I18nProvider = ({ children }: { children: ReactNode }) => {
   const [locale, setLocale] = useState<Locale>(() => {
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    return stored === "en" || stored === "zh-CN" ? stored : "zh-CN";
+    try {
+      const stored = window.localStorage.getItem(STORAGE_KEY);
+      return stored === "en" || stored === "zh-CN" ? stored : "zh-CN";
+    } catch { return "zh-CN"; }
   });
 
   useEffect(() => {
-    window.localStorage.setItem(STORAGE_KEY, locale);
+    document.documentElement.lang = locale;
+    try { window.localStorage.setItem(STORAGE_KEY, locale); } catch { /* Private mode: keep in-memory language. */ }
   }, [locale]);
+
+  useEffect(() => {
+    const sync = (event: StorageEvent) => {
+      if (event.key === STORAGE_KEY && (event.newValue === "en" || event.newValue === "zh-CN")) setLocale(event.newValue);
+    };
+    window.addEventListener("storage", sync);
+    return () => window.removeEventListener("storage", sync);
+  }, []);
 
   const value = useMemo<I18nContextValue>(
     () => ({
@@ -48,7 +66,7 @@ export const I18nProvider = ({ children }: { children: ReactNode }) => {
       setLocale,
       t: (key, options) => {
         const dictionary = translations[locale];
-        const entry = dictionary[key];
+        const entry = dictionary[key] ?? translations.en[key];
         if (!entry) {
           return key;
         }

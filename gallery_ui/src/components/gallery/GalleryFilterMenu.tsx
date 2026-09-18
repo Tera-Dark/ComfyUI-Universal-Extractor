@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import { CalendarX, Check, Pin } from "lucide-react";
 
 import { useI18n } from "../../i18n/I18nProvider";
@@ -52,6 +53,10 @@ export const GalleryFilterMenu = ({
   onPageChange,
 }: GalleryFilterMenuProps) => {
   const { t } = useI18n();
+  const panel=useRef<HTMLDivElement>(null);
+  const previousFocus=useRef<HTMLElement|null>(null);
+  useEffect(()=>{previousFocus.current=document.activeElement instanceof HTMLElement ? document.activeElement : null;panel.current?.focus({preventScroll:true});},[]);
+  const close=()=>{onClose();previousFocus.current?.focus({preventScroll:true});};
   const selectedColorFilter = COLOR_FILTERS.find((option) => option.value === selectedColorFamily);
   const selectedSortOption = SORT_OPTIONS.find((option) => option.value === sortBy) ?? SORT_OPTIONS[0];
   const selectedSortOrderOption = SORT_ORDER_OPTIONS.find((option) => option.value === sortOrder) ?? SORT_ORDER_OPTIONS[0];
@@ -65,8 +70,6 @@ export const GalleryFilterMenu = ({
     onDateToChange("");
     onFavoritesOnlyChange(false);
     onColorFamilyChange("");
-    onSortByChange("created_at");
-    onSortOrderChange("desc");
     onPageChange(1);
   };
 
@@ -125,7 +128,7 @@ export const GalleryFilterMenu = ({
   ].filter(Boolean) as Array<{ key: string; label: string; color?: string; onClear: () => void }>;
 
   return (
-    <div className="ue-filter-menu" onClick={(event) => event.stopPropagation()}>
+    <div ref={panel} role="dialog" aria-label={t("galleryFilters")} tabIndex={-1} onKeyDown={event=>{if(event.key==="Escape"){event.stopPropagation();close();}}} className="ue-filter-menu" onClick={(event) => event.stopPropagation()}>
       <div className="ue-filter-menu-head">
         <div>
           <span>{t("galleryFilters")}</span>
@@ -138,18 +141,20 @@ export const GalleryFilterMenu = ({
             <button
               className="ue-filter-reset-btn"
               onClick={resetFilters}
-              aria-label={t("galleryDateClear")}
-              title={t("galleryDateClear")}
+              aria-label={t("filterReset")}
+              title={t("filterReset")}
               type="button"
             >
               <CalendarX size={13} />
-              <span>{t("galleryDateClear")}</span>
+              <span>{t("filterReset")}</span>
             </button>
           ) : null}
         </div>
       </div>
 
       <div className="ue-filter-menu-body">
+        <p className="ue-qol-note">{t("qolFilterHint")}</p>
+        {(sortBy !== "created_at" || sortOrder !== "desc") ? <button type="button" className="ue-filter-link" onClick={()=>{onSortByChange("created_at");onSortOrderChange("desc");onPageChange(1);}}>{t("qolResetSort")}</button> : null}
         <section className="ue-filter-section ue-filter-section--summary">
           <div className="ue-filter-section-head">
             <span>{t("galleryActiveFilters")}</span>
@@ -162,7 +167,7 @@ export const GalleryFilterMenu = ({
                   className="ue-active-filter-chip"
                   onClick={chip.onClear}
                   type="button"
-                  title={`${chip.label} · ${t("galleryDateClear")}`}
+                  title={`${chip.label} · ${t("filterReset")}`}
                 >
                   {chip.color ? <span className="ue-active-filter-dot" style={{ background: chip.color }} /> : null}
                   <span>{chip.label}</span>
@@ -343,7 +348,7 @@ export const GalleryFilterMenu = ({
 
       <div className="ue-filter-menu-foot">
         <span>{t("galleryFilterStickyHint")}</span>
-        <button type="button" onClick={onClose}>
+        <button type="button" onClick={close}>
           {t("galleryFilterClose")}
         </button>
       </div>

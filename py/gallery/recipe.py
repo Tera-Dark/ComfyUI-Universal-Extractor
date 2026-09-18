@@ -1,5 +1,6 @@
 ﻿from __future__ import annotations
 
+import json
 import re
 from typing import Any
 
@@ -78,18 +79,45 @@ def _size_from_prompt(prompt_data: dict[str, Any], sampler_inputs: dict[str, Any
     return "", None, None
 
 
+def _sampler_nodes(prompt_data):
+    return [node for node in prompt_data.values() if isinstance(node, dict)
+            and "steps" in _node_inputs(node)
+            and any(key in _node_inputs(node) for key in ("sampler_name", "sampler", "cfg"))]
+
+
 def _find_sampler_node(prompt_data: dict[str, Any]) -> dict[str, Any] | None:
-    for node in prompt_data.values():
-        inputs = _node_inputs(node)
-        if "steps" in inputs and ("sampler_name" in inputs or "sampler" in inputs or "cfg" in inputs):
-            return node if isinstance(node, dict) else None
-    return None
+    nodes = _sampler_nodes(prompt_data)
+    # Do not silently pick the first sampler in a multi-output or multi-stage graph.
+    return nodes[0] if len(nodes) == 1 else None
+
+
+def _literal_text(prompt_data, value, visited=None, snapshots=None):
+    if isinstance(value, str):
+        return value
+    visited = set() if visited is None else visited
+    if not isinstance(value, (list, tuple)) or len(value) != 2 or value[1] != 0:
+        return None
+    node_id = str(value[0])
+    if node_id in visited or len(visited) >= 32:
+        return None
+    visited.add(node_id)
+    node = prompt_data.get(node_id)
+    if _class_type(node) == "UniversalPromptSnapshot":
+        snapshot = (snapshots or {}).get(node_id, {})
+        return snapshot.get("text") if isinstance(snapshot, dict) and isinstance(snapshot.get("text"), str) else None
+    # Only statically-known literal nodes; never re-run randomizers or guess
+    # custom node outputs from an arbitrary input named 'text'.
+    if _class_type(node) not in {"PrimitiveString", "StringConstant", "PrimitiveStringMultiline"}:
+        return None
+    inputs = _node_inputs(node)
+    return _literal_text(prompt_data, inputs.get("value", inputs.get("string", inputs.get("text"))), visited, snapshots)
 
 
 def build_prompt_summary(metadata: dict) -> dict:
     summary = {
         "positive_prompt": "",
         "negative_prompt": "",
+        "prompt_resolved": False,
         "size": "",
         "seed": None,
         "steps": None,
@@ -103,6 +131,14 @@ def build_prompt_summary(metadata: dict) -> dict:
     if not prompt_data:
         return summary
 
+    snapshots = metadata.get("universal_prompt_snapshots", {})
+    if isinstance(snapshots, str):
+        try:
+            snapshots = json.loads(snapshots)
+        except (ValueError, TypeError):
+            snapshots = {}
+    if not isinstance(snapshots, dict):
+        snapshots = {}
     sampler_node = _find_sampler_node(prompt_data)
     sampler_inputs = _node_inputs(sampler_node)
     if sampler_node:
@@ -116,8 +152,11 @@ def build_prompt_summary(metadata: dict) -> dict:
         positive_node = _resolve_reference_node(prompt_data, sampler_inputs.get("positive"))
         negative_node = _resolve_reference_node(prompt_data, sampler_inputs.get("negative"))
 
-        positive_text = _node_inputs(positive_node).get("text") if positive_node else None
-        negative_text = _node_inputs(negative_node).get("text") if negative_node else None
+        positive_text = _literal_text(prompt_data, _node_inputs(positive_node).get("text"), snapshots=snapshots) if positive_node else None
+        negative_text = _literal_text(prompt_data, _node_inputs(negative_node).get("text"), snapshots=snapshots) if negative_node else None
+        summary["prompt_resolved"] = positive_text is not None and (
+            not sampler_inputs.get("negative") or negative_text is not None
+        )
         if isinstance(positive_text, str):
             summary["positive_prompt"] = positive_text
         if isinstance(negative_text, str):
@@ -468,7 +507,13 @@ def extract_generation_recipe(metadata: dict) -> dict:
     sampler_inputs = _node_inputs(sampler_node)
     _, width, height = _size_from_prompt(prompt_data, sampler_inputs)
 
+    warnings = []
+    if len(_sampler_nodes(prompt_data)) > 1:
+        warnings.append("multiple_samplers")
+    if not summary["prompt_resolved"]:
+        warnings.append("prompt_unresolved")
     return {
+        "warnings": warnings,
         "source_format": "comfy_prompt" if prompt_data else "unknown",
         "has_workflow": isinstance(metadata.get("workflow"), dict),
         "positive_prompt": summary["positive_prompt"],

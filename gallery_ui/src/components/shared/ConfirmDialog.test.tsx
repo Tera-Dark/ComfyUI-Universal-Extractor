@@ -65,4 +65,16 @@ describe("ConfirmProvider", () => {
     expect(backdrop).toHaveClass("ue-modal-backdrop");
     expect(modal).toHaveClass("ue-dialog-modal");
   });
+  it("focuses the safe action, cancels with Escape and restores trigger focus", async () => {
+    const user=userEvent.setup();
+    render(<I18nProvider><ConfirmProvider><ConfirmHarness/></ConfirmProvider></I18nProvider>);
+    const ask=screen.getByRole("button",{name:"Ask"});
+    await user.click(ask);
+    expect(screen.getByRole("button",{name:"Keep"})).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("alertdialog")).not.toBeInTheDocument();
+    expect(screen.getByTestId("result")).toHaveTextContent("false");
+    expect(ask).toHaveFocus();
+  });
+
 });

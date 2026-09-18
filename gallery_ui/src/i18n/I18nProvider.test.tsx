@@ -1,6 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { I18nProvider, useI18n } from "./I18nProvider";
 
@@ -34,4 +34,21 @@ describe("I18nProvider", () => {
     expect(screen.getByTestId("locale").textContent).toBe("en");
     expect(window.localStorage.getItem("universal-extractor-locale")).toBe("en");
   });
+  it("sets document language and follows locale changes from another tab", () => {
+    render(<I18nProvider><Probe /></I18nProvider>);
+    expect(document.documentElement.lang).toBe("zh-CN");
+    fireEvent(window,new StorageEvent("storage",{key:"universal-extractor-locale",newValue:"en"}));
+    expect(screen.getByTestId("locale")).toHaveTextContent("en");
+    expect(document.documentElement.lang).toBe("en");
+  });
+  it("still works when browser storage is unavailable", async () => {
+    const get=vi.spyOn(Storage.prototype,"getItem").mockImplementation(()=>{throw new Error("blocked");});
+    const set=vi.spyOn(Storage.prototype,"setItem").mockImplementation(()=>{throw new Error("blocked");});
+    try {
+      render(<I18nProvider><Probe /></I18nProvider>);
+      await userEvent.click(screen.getByRole("button",{name:"English"}));
+      expect(screen.getByTestId("locale")).toHaveTextContent("en");
+    } finally {get.mockRestore();set.mockRestore();}
+  });
+
 });

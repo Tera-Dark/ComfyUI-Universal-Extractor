@@ -71,6 +71,7 @@ interface ImageContextMenuState {
 }
 
 interface DualFolderWorkspaceProps {
+  onExit?: () => void;
   context: GalleryContext | null;
   initialFolder: string;
   sortBy: string;
@@ -97,33 +98,33 @@ const getFolderSource = (folderRef: string, context: GalleryContext | null) => {
   return context?.sources.find((source) => source.id === sourceId);
 };
 
-const getFolderLabel = (folderRef: string, context: GalleryContext | null) =>
+const getFolderLabel = (folderRef: string, context: GalleryContext | null, t: (key: string) => string) =>
   formatFolderLabel(
     folderRef,
     context?.sources ?? [],
     (source, fallbackId) => {
       if (source?.kind === "output") {
-        return "输出图库";
+        return t("sidebarOutputSource");
       }
       if (source?.kind === "input") {
-        return "输入图库";
+        return t("sidebarInputSource");
       }
       return source?.name || fallbackId;
     },
   );
 
-const getFolderOption = (folderRef: string, context: GalleryContext | null): FolderOption => {
+const getFolderOption = (folderRef: string, context: GalleryContext | null, t: (key: string) => string): FolderOption => {
   const { sourceId, relativePath } = parseFolderRef(folderRef);
   const source = context?.sources.find((item) => item.id === sourceId);
   const sourceName = source?.kind === "output"
-    ? "输出图库"
+    ? t("sidebarOutputSource")
     : source?.kind === "input"
-      ? "输入图库"
+      ? t("sidebarInputSource")
       : source?.name || sourceId;
   const segments = relativePath.split("/").filter(Boolean);
   const label = segments.at(-1) || "./";
   const parent = segments.length > 1 ? segments.slice(0, -1).join("/") : sourceName;
-  const fullLabel = getFolderLabel(folderRef, context);
+  const fullLabel = getFolderLabel(folderRef, context, t);
   return {
     value: folderRef,
     label,
@@ -151,6 +152,7 @@ const FolderCombobox = ({
   onChange: (value: string) => void;
   emptyText: string;
 }) => {
+  const { t } = useI18n();
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
@@ -226,7 +228,7 @@ const FolderCombobox = ({
                   commit(visibleOptions[activeIndex]);
                 }
               }}
-              placeholder="搜索目录"
+              placeholder={t("sidebarFolderSearch")}
             />
           </label>
           <div className="ue-folder-combobox-list" role="listbox" aria-label={label}>
@@ -259,6 +261,7 @@ const FolderCombobox = ({
 };
 
 export const DualFolderWorkspace = ({
+  onExit,
   context,
   initialFolder,
   sortBy,
@@ -276,115 +279,60 @@ export const DualFolderWorkspace = ({
   const { confirm } = useConfirm();
   const { pushToast } = useToast();
   const { runOperation } = useOperationStatus();
-  const text = useMemo(() => locale === "en"
-    ? ({
-        title: "Dual folder mode",
-        hint: "Open two folders side by side. Select, right-click, or drag images to organize them.",
-        left: "Left folder",
-        right: "Right folder",
-        selected: (count: number) => `${count} selected`,
-        selectAll: "Select all",
-        invertSelection: "Invert",
-        clearSelection: "Clear",
-        refresh: "Refresh",
-        moveOther: "Move to other pane",
-        dropHint: "Drop here to move",
-        readOnly: "Target is read-only",
-        empty: "No images in this folder",
-        loading: "Loading folder...",
-        moving: "Moving images...",
-        moved: "Moved",
-        moveConfirmTitle: "Move selected images",
-        moveConfirm: (count: number, target: string) => `Move ${count} image(s) to "${target}"?`,
-        pinConfirm: (count: number) => `Pin ${count} selected image(s)?`,
-        unpinConfirm: (count: number) => `Unpin ${count} selected image(s)?`,
-        addToBoardConfirm: (count: number, target: string) => `Add ${count} selected image(s) to "${target}"?`,
-        sameFolder: "Already in this folder",
-        noMatch: "No matching folders",
-        loadError: "Failed to load folder images.",
-        moveError: "Failed to move images.",
-        openDetail: "Open detail",
-        openFull: "Open full size",
-        openWorkflow: "Open workflow",
-        metadata: "View Metadata",
-        copyImage: "Copy image",
-        copyFilename: "Copy filename",
-        copyPath: "Copy path",
-        copyPrompt: "Copy positive prompt",
-        copySuccess: "Copied",
-        copyImageSuccess: "Image copied",
-        copyError: "Failed to copy",
-        promptMissing: "No positive prompt found",
-        select: "Select",
-        deselect: "Deselect",
-        pin: "Pin",
-        unpin: "Unpin",
-        addToBoard: "Add to board",
-        delete: "Delete",
-        deleteTitle: "Delete selected images",
-        deleteMessage: (count: number) => `Delete ${count} selected image(s)?`,
-        deleteSuccess: "Deleted",
-        deleteError: "Failed to delete images",
-        metadataError: "Failed to load metadata",
-        swapFolders: "Swap left and right folders",
-        moveToRight: "Move selected to right folder",
-        moveToLeft: "Move selected to left folder",
-        refreshBoth: "Refresh both folders",
-      })
-    : ({
-        title: "双栏目录整理",
-        hint: "左右各打开一个目录，可选择、右键或拖拽图片进行整理。",
-        left: "左侧目录",
-        right: "右侧目录",
-        selected: (count: number) => `已选 ${count} 张`,
-        selectAll: "全选",
-        invertSelection: "反选",
-        clearSelection: "清空",
-        refresh: "刷新",
-        moveOther: "移动到另一栏",
-        dropHint: "拖到这里移动",
-        readOnly: "目标目录只读",
-        empty: "这个目录没有图片",
-        loading: "正在加载目录...",
-        moving: "正在移动图片...",
-        moved: "已移动",
-        moveConfirmTitle: "移动选中图片",
-        moveConfirm: (count: number, target: string) => `将 ${count} 张图片移动到“${target}”吗？`,
-        pinConfirm: (count: number) => `将选中的 ${count} 张图片设为 Pin 吗？`,
-        unpinConfirm: (count: number) => `取消选中 ${count} 张图片的 Pin 吗？`,
-        addToBoardConfirm: (count: number, target: string) => `将选中的 ${count} 张图片加入“${target}”吗？`,
-        sameFolder: "已在这个目录",
-        noMatch: "没有匹配目录",
-        loadError: "目录图片加载失败。",
-        moveError: "图片移动失败。",
-        openDetail: "打开详情",
-        openFull: "打开原图",
-        openWorkflow: "打开工作流",
-        metadata: "查看 Metadata",
-        copyImage: "复制图片",
-        copyFilename: "复制文件名",
-        copyPath: "复制路径",
-        copyPrompt: "复制正向提示词",
-        copySuccess: "已复制",
-        copyImageSuccess: "已复制图片",
-        copyError: "复制失败",
-        promptMissing: "没有找到正向提示词",
-        select: "选择",
-        deselect: "取消选择",
-        pin: "置顶",
-        unpin: "取消置顶",
-        addToBoard: "加入图版",
-        delete: "删除",
-        deleteTitle: "删除所选图片",
-        deleteMessage: (count: number) => `确定删除选中的 ${count} 张图片吗？`,
-        deleteSuccess: "已删除",
-        deleteError: "删除图片失败",
-        metadataError: "Metadata 加载失败",
-        swapFolders: "左右目录对调",
-        moveToRight: "将选中项移入右侧目录",
-        moveToLeft: "将选中项移入左侧目录",
-        refreshBoth: "同时刷新双栏",
-      }), [locale]);
+  const text = useMemo(() => ({
+    title: t("dual_title"),
+    hint: t("dual_hint"),
+    left: t("dual_left"),
+    right: t("dual_right"),
+    selected: (count: number) => t("dual_selected", {count}),
+    selectAll: t("dual_selectAll"),
+    invertSelection: t("dual_invertSelection"),
+    clearSelection: t("dual_clearSelection"),
+    refresh: t("dual_refresh"),
+    moveOther: t("dual_moveOther"),
+    dropHint: t("dual_dropHint"),
+    readOnly: t("dual_readOnly"),
+    empty: t("dual_empty"),
+    loading: t("dual_loading"),
+    moving: t("dual_moving"),
+    moved: t("dual_moved"),
+    moveConfirmTitle: t("dual_moveConfirmTitle"),
+    moveConfirm: (count: number, target: string) => t("dual_moveConfirm", {count, target}),
+    pinConfirm: (count: number) => t("dual_pinConfirm", {count}),
+    unpinConfirm: (count: number) => t("dual_unpinConfirm", {count}),
+    addToBoardConfirm: (count: number, target: string) => t("dual_addToBoardConfirm", {count, target}),
+    sameFolder: t("dual_sameFolder"),
+    noMatch: t("dual_noMatch"),
+    loadError: t("dual_loadError"),
+    moveError: t("dual_moveError"),
+    openDetail: t("dual_openDetail"),
+    openFull: t("dual_openFull"),
+    openWorkflow: t("dual_openWorkflow"),
+    metadata: t("dual_metadata"),
+    copyImage: t("dual_copyImage"),
+    copyFilename: t("dual_copyFilename"),
+    copyPath: t("dual_copyPath"),
+    copyPrompt: t("dual_copyPrompt"),
+    copySuccess: t("dual_copySuccess"),
+    copyImageSuccess: t("dual_copyImageSuccess"),
+    copyError: t("dual_copyError"),
+    promptMissing: t("dual_promptMissing"),
+    select: t("dual_select"),
+    deselect: t("dual_deselect"),
+    pin: t("dual_pin"),
+    unpin: t("dual_unpin"),
+    addToBoard: t("dual_addToBoard"),
+    delete: t("dual_delete"),
+    deleteTitle: t("dual_deleteTitle"),
+    deleteMessage: (count: number) => t("dual_deleteMessage", {count}),
+    deleteSuccess: t("dual_deleteSuccess"),
+    deleteError: t("dual_deleteError"),
+    metadataError: t("dual_metadataError"),
+    swapFolders: t("dual_swapFolders"),
+    moveToRight: t("dual_moveToRight"),
+    moveToLeft: t("dual_moveToLeft"),
+    refreshBoth: t("dual_refreshBoth"),
+  }), [t]);
 
   const folderRefs = useMemo(() => {
     const refs = new Set<string>();
@@ -396,15 +344,15 @@ export const DualFolderWorkspace = ({
     for (const subfolder of context?.subfolders ?? []) {
       refs.add(subfolder);
     }
-    return [...refs].sort((left, right) => getFolderLabel(left, context).localeCompare(getFolderLabel(right, context), undefined, {
+    return [...refs].sort((left, right) => getFolderLabel(left, context, t).localeCompare(getFolderLabel(right, context, t), locale, {
       numeric: true,
       sensitivity: "base",
     }));
-  }, [context]);
+  }, [context, t, locale]);
 
   const folderOptions = useMemo(
-    () => folderRefs.map((folderRef) => getFolderOption(folderRef, context)),
-    [context, folderRefs],
+    () => folderRefs.map((folderRef) => getFolderOption(folderRef, context, t)),
+    [context, folderRefs, t],
   );
 
   const fallbackRoot = makeSourceRootRef(DEFAULT_OUTPUT_SOURCE_ID);
@@ -419,6 +367,12 @@ export const DualFolderWorkspace = ({
   const [activePane, setActivePane] = useState<PaneId>("left");
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [movingMessage, setMovingMessage] = useState("");
+  const [isMoving,setIsMoving] = useState(false);
+  const moveLock = useRef(false);
+  const requestIds = useRef({left:0,right:0});
+  const pages = useRef({left:1,right:1});
+  const messageTimer = useRef<number | undefined>(undefined);
+  useEffect(()=>()=>{requestIds.current.left++;requestIds.current.right++;window.clearTimeout(messageTimer.current);},[]);
   const [contextMenu, setContextMenu] = useState<ImageContextMenuState | null>(null);
   const [boardPickerPaths, setBoardPickerPaths] = useState<string[]>([]);
   const [metadataViewerImage, setMetadataViewerImage] = useState<ImageRecord | null>(null);
@@ -458,12 +412,14 @@ export const DualFolderWorkspace = ({
     clearPaneSelection("right");
   }, [rightFolder, clearPaneSelection]);
 
-  const loadPane = useCallback(async (pane: PaneId, folderRef: string, forceRefresh = false) => {
+  const loadPane = useCallback(async (pane: PaneId, folderRef: string, forceRefresh = false, append = false) => {
+    const requestId = ++requestIds.current[pane];
+    const page = append ? pages.current[pane] + 1 : 1;
     const setPaneState = pane === "left" ? setLeftState : setRightState;
     setPaneState((current) => ({ ...current, loading: true, error: "" }));
     try {
       const response = await galleryApi.listImages(
-        1,
+        page,
         pageSize,
         "",
         "",
@@ -477,13 +433,14 @@ export const DualFolderWorkspace = ({
         sortOrder,
         forceRefresh,
       );
-      setPaneState({
-        images: response.images,
-        total: response.total,
-        loading: false,
-        error: "",
-      });
+      if (requestId !== requestIds.current[pane]) return;
+      pages.current[pane] = page;
+      setPaneState(current => ({
+        images: append ? [...new Map([...current.images,...response.images].map(image=>[image.relative_path,image])).values()] : response.images,
+        total: response.total, loading:false, error:"",
+      }));
     } catch {
+      if (requestId !== requestIds.current[pane]) return;
       setPaneState((current) => ({
         ...current,
         loading: false,
@@ -508,8 +465,9 @@ export const DualFolderWorkspace = ({
   }, [rightFolder, loadPane]);
 
   const setTimedMessage = useCallback((message: string, timeout = 1800) => {
+    window.clearTimeout(messageTimer.current);
     setMovingMessage(message);
-    window.setTimeout(() => setMovingMessage(""), timeout);
+    if (timeout > 0) messageTimer.current = window.setTimeout(() => setMovingMessage(""), timeout);
   }, []);
 
   const getSelectedPathsForAction = useCallback((pane: PaneId, image: ImageRecord) => {
@@ -571,37 +529,39 @@ export const DualFolderWorkspace = ({
       return;
     }
     const targetSource = getFolderSource(targetFolder, context);
-    if (!targetSource?.writable) {
+    if (!getFolderSource(sourceFolder,context)?.writable || !targetSource?.writable) {
       setTimedMessage(text.readOnly);
       return;
     }
-    const approved = await confirm({
-      title: text.moveConfirmTitle,
-      message: text.moveConfirm(relativePaths.length, getFolderLabel(targetFolder, context)),
-      tone: "warning",
-      confirmLabel: locale === "en" ? "Move" : "移动",
-      cancelLabel: locale === "en" ? "Cancel" : "取消",
-    });
-    if (!approved) {
-      return;
-    }
-
-    const { targetSourceId, targetSubfolder } = getTargetFolderPayload(targetFolder);
+    if (moveLock.current) return;
+    moveLock.current = true;
+    setIsMoving(true);
     try {
-      await runOperation(() => onMoveImages(relativePaths, targetSubfolder, targetSourceId), {
-        pending: t("operationMoveImages"),
-        success: t("operationMoveImagesSuccess"),
-        error: (error) => (error instanceof Error ? error.message : text.moveError),
+      const approved = await confirm({
+        title: text.moveConfirmTitle,
+        message: t("qolMoveConfirm", {count:relativePaths.length,source:getFolderLabel(sourceFolder,context,t),target:getFolderLabel(targetFolder,context,t)}),
+        tone:"warning", confirmLabel:t("commonMove"), cancelLabel:t("libraryCancel"),
       });
-      setMovingMessage("");
-      setTimedMessage(text.moved);
-      clearPaneSelection(targetPane === "left" ? "right" : "left");
+      if (!approved) return;
+      setTimedMessage(t("qolMoveBusy"),0);
+      const {targetSourceId,targetSubfolder} = getTargetFolderPayload(targetFolder);
+      const result = await runOperation(()=>onMoveImages(relativePaths,targetSubfolder,targetSourceId),{
+        pending:t("operationMoveImages"),
+        success: value=>t("qolMoveResult",{moved:value.moved.length,missing:value.missing.length,blocked:value.blocked?.length ?? 0}),
+        error:error=>error instanceof Error ? error.message : text.moveError,
+      });
+      setTimedMessage(t("qolMoveResult",{moved:result.moved.length,missing:result.missing.length,blocked:result.blocked?.length ?? 0}),0);
+      const failed = new Set([...result.missing,...(result.blocked ?? [])]);
+      setPaneSelection(targetPane === "left" ? "right" : "left",current=>({...current,selectedPaths:current.selectedPaths.filter(path=>failed.has(path))}));
       clearPaneSelection(targetPane);
       await reloadBothPanes(true);
-    } catch {
-      setTimedMessage(text.moveError);
+    } catch (error) {
+      setTimedMessage(error instanceof Error ? error.message : text.moveError,0);
+    } finally {
+      moveLock.current=false;
+      setIsMoving(false);
     }
-  }, [clearPaneSelection, confirm, context, getPaneFolder, locale, onMoveImages, reloadBothPanes, runOperation, setTimedMessage, t, text]);
+  }, [clearPaneSelection,confirm,context,getPaneFolder,onMoveImages,reloadBothPanes,runOperation,setPaneSelection,setTimedMessage,t,text]);
 
   const moveActiveSelectionToOtherPane = useCallback(async (pane: PaneId) => {
     const selection = getPaneSelection(pane);
@@ -676,7 +636,7 @@ export const DualFolderWorkspace = ({
       message: text.deleteMessage(paths.length),
       tone: paths.length >= 20 ? "danger" : "warning",
       confirmLabel: text.delete,
-      cancelLabel: locale === "en" ? "Cancel" : "取消",
+      cancelLabel: t("libraryCancel"),
     });
     if (!approved) {
       return;
@@ -693,7 +653,7 @@ export const DualFolderWorkspace = ({
     } catch (error) {
       setTimedMessage(error instanceof Error ? error.message : text.deleteError);
     }
-  }, [clearPaneSelection, confirm, locale, onDeleteImages, reloadBothPanes, runOperation, setTimedMessage, t, text]);
+  }, [clearPaneSelection, confirm, onDeleteImages, reloadBothPanes, runOperation, setTimedMessage, t, text]);
 
   const handleOpenContextMenu = (event: React.MouseEvent, pane: PaneId, image: ImageRecord) => {
     event.preventDefault();
@@ -718,7 +678,7 @@ export const DualFolderWorkspace = ({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target)) {
+      if (moveLock.current || isEditableTarget(event.target)) {
         return;
       }
       const pane = activePane;
@@ -768,8 +728,8 @@ export const DualFolderWorkspace = ({
       title: text.addToBoard,
       message: text.addToBoardConfirm(boardPickerPaths.length, board?.name || boardId),
       tone: "warning",
-      confirmLabel: locale === "en" ? "Add" : "加入",
-      cancelLabel: locale === "en" ? "Cancel" : "取消",
+      confirmLabel: t("commonAdd"),
+      cancelLabel: t("libraryCancel"),
     });
     if (!approved) {
       return;
@@ -791,7 +751,7 @@ export const DualFolderWorkspace = ({
       message: pinned ? text.pinConfirm(paths.length) : text.unpinConfirm(paths.length),
       tone: "warning",
       confirmLabel: pinned ? text.pin : text.unpin,
-      cancelLabel: locale === "en" ? "Cancel" : "取消",
+      cancelLabel: t("libraryCancel"),
     });
     if (!approved) {
       return;
@@ -864,7 +824,7 @@ export const DualFolderWorkspace = ({
           </button>
           <button
             type="button"
-            disabled={!selection.selectedPaths.length}
+            disabled={isMoving || !selection.selectedPaths.length || folderRef === getPaneFolder(pane === "left" ? "right" : "left") || !getFolderSource(getPaneFolder(pane === "left" ? "right" : "left"),context)?.writable}
             onClick={() => void moveActiveSelectionToOtherPane(pane)}
             title={text.moveOther}
             aria-label={text.moveOther}
@@ -881,7 +841,8 @@ export const DualFolderWorkspace = ({
           </div>
         ) : null}
 
-        {state.loading ? (
+        <p className="ue-qol-note">{t("qolPaneScope",{loaded:state.images.length,total:state.total})}</p>
+        {state.loading && !state.images.length ? (
           <div className="ue-dual-pane-state">
             <Loader2 size={18} />
             <span>{text.loading}</span>
@@ -938,6 +899,7 @@ export const DualFolderWorkspace = ({
             })}
           </div>
         )}
+        {state.images.length < state.total ? <button className="ue-secondary-action" type="button" disabled={state.loading || isMoving} onClick={()=>void loadPane(pane,folderRef,false,true)}>{state.loading ? text.loading : t("qolLoadMore")}</button> : null}
       </section>
     );
   };
@@ -1075,7 +1037,7 @@ export const DualFolderWorkspace = ({
     const canMoveLeft = Boolean(leftSource?.writable) && leftFolder !== rightFolder;
 
     return (
-      <aside className="ue-dual-transfer-rail" aria-label="Transfer Actions">
+      <aside className="ue-dual-transfer-rail" aria-label={t("dual_moveOther")}>
         <div className="ue-dual-transfer-group">
           <button
             type="button"
@@ -1139,14 +1101,18 @@ export const DualFolderWorkspace = ({
             <span>{text.hint}</span>
           </div>
         </div>
-        {movingMessage ? <em>{movingMessage}</em> : null}
+
       </div>
 
+      <div className="ue-qol-mode-actions">{onExit ? <button className="ue-secondary-action" type="button" disabled={isMoving} onClick={onExit}>{t("qolBackGallery")}</button> : null}</div>
+      <p className="ue-qol-note">{t("qolMoveScope")}</p>
+      {movingMessage ? <div className="ue-qol-status" role="status" aria-live="polite">{movingMessage}</div> : null}
+      <fieldset className="ue-dual-operation-lock" disabled={isMoving} aria-busy={isMoving}>
       <div className="ue-dual-layout">
         {renderPane("left", leftFolder, setLeftFolder, leftState)}
         {renderTransferRail()}
         {renderPane("right", rightFolder, setRightFolder, rightState)}
-      </div>
+      </div></fieldset>
 
       {renderContextMenu()}
 

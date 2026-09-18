@@ -1,0 +1,37 @@
+/* One motion system. State changes use opacity/color; geometry stays stable.
+   Long travel is reserved for the sidebar. No slide/scale entrances on photos. */
+:root { --ue-duration-fast:120ms; --ue-duration-base:160ms; --ue-duration-slow:200ms; --ue-ease:cubic-bezier(.2,.7,.3,1); }
+@keyframes ue-fade-in { from {opacity:0;} to {opacity:1;} }
+@keyframes ue-scale-in { from {opacity:0;} to {opacity:1;} }
+@keyframes ue-overlay-in { from {opacity:0;} to {opacity:1;} }
+@keyframes ue-image-reveal { from {opacity:.35;} to {opacity:1;} }
+.ue-modal-backdrop { animation:ue-overlay-in 140ms linear both; }
+.ue-animate-in { animation:ue-fade-in 140ms ease-out; }
+.ue-app-shell .ue-gallery-card, .ue-app-shell .ue-gallery-media, .ue-app-shell .ue-gallery-image-shell { transition:box-shadow 120ms ease, border-color 120ms ease; }
+.ue-app-shell .ue-gallery-card:hover .ue-gallery-media img { transform:none; filter:none; }
+.ue-app-shell .ue-gallery-image-shell img { transition:opacity 120ms linear; }
+.ue-disclosure-panel, .ue-density-panel, .ue-filter-menu, .ue-sidebar-action-menu, .ue-gallery-context-menu { animation:ue-fade-in 100ms ease-out; }
+.ue-primary-action:hover:not(:disabled), .ue-secondary-action:hover:not(:disabled), .ue-primary-btn:hover:not(:disabled), .ue-icon-action:hover:not(:disabled), .ue-dual-transfer-btn:hover:not(:disabled) { transform:none; }
+/* The image viewer is a neutral stage, not a blurred, moving copy of the image. */
+.ue-modal-backdrop.ue-modal-backdrop--lightbox { background:rgba(18,18,18,.97); backdrop-filter:none; padding:0; animation:ue-overlay-in 140ms linear; }
+.ue-modal-backdrop--lightbox .ue-lightbox-shell { height:100dvh; }
+.ue-modal-backdrop--lightbox .ue-lightbox-backdrop-stack { display:none; }
+.ue-modal-backdrop--lightbox .ue-lightbox-stage { transition:none; }
+.ue-modal-backdrop--lightbox .ue-lightbox-media img { box-shadow:0 8px 32px #00000025; transition:none; animation:ue-image-reveal 120ms linear; }
+.ue-modal-backdrop--lightbox .ue-lightbox-media.is-zoom-transition img { transition:transform 160ms cubic-bezier(.2,.7,.3,1); }
+.ue-modal-backdrop--lightbox .ue-lightbox-media.is-dragging img { transition:none; }
+.ue-modal-backdrop--lightbox .ue-lightbox-side-nav { width:42px; height:64px; background:#ffffff12; border-color:#ffffff15; box-shadow:none; backdrop-filter:none; }
+.ue-modal-backdrop--lightbox .ue-lightbox-side-nav--prev { left:16px; }
+.ue-modal-backdrop--lightbox .ue-lightbox-side-nav--next { right:16px; }
+.ue-modal-backdrop--lightbox .ue-lightbox-side-nav:hover:not(:disabled) { transform:translateY(-50%); background:#ffffff24; }
+.ue-modal-backdrop--lightbox .ue-lightbox-close:hover { transform:none; }
+.ue-lightbox-loading { position:absolute; left:50%; bottom:100px; transform:translateX(-50%); z-index:5; color:#eee; background:#292929; border:1px solid #ffffff22; border-radius:20px; padding:8px 14px; font-size:12px; pointer-events:none; }
+.ue-modal-backdrop--lightbox .ue-lightbox-filmstrip { animation:ue-fade-in 120ms linear; scroll-behavior:auto; }
+.ue-modal-backdrop--lightbox .ue-lightbox-filmstrip-item:hover { transform:none; }
+.ue-onboarding-layer { animation:ue-fade-in 120ms linear; }
+#root[inert] .ue-sidebar { transition:none; }
+/* Position updates follow the actual target, without springs or animation fighting scroll. */
+.ue-onboarding-card, .ue-onboarding-highlight { animation:none; transition:none; }
+@media (prefers-reduced-motion:reduce) {
+  *, *::before, *::after { animation:none !important; transition:none !important; scroll-behavior:auto !important; }
+}

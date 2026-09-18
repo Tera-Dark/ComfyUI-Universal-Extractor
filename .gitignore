@@ -7,7 +7,7 @@ __pycache__/
 env/
 build/
 develop-eggs/
-dist/
+/dist/
 downloads/
 eggs/
 .eggs/
@@ -19,10 +19,13 @@ var/
 *.egg-info/
 .installed.cfg
 *.egg
+.pytest_cache/
 
 # Vite / React / Node
 gallery_ui/node_modules/
 # Keep gallery_ui/dist in git so users can install without rebuilding
+!gallery_ui/dist/
+!gallery_ui/dist/**
 
 # OS / tooling
 .DS_Store
@@ -40,3 +43,9 @@ data/trash_state.json
 
 # Python caches in nested folders
 py/**/__pycache__/
+
+data/operation_journal/
+data/gallery_sources.json
+
+# Local browser evidence
+artifacts/

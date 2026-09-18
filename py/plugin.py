@@ -10,8 +10,10 @@ if PLUGIN_DIR not in sys.path:
 
 def load_node_classes():
     module = importlib.import_module(".nodes.extractor_node", package=__package__)
+    snapshot_module = importlib.import_module(".nodes.prompt_snapshot", package=__package__)
     return {
         "UniversalJsonSegmentRandomizer": module.UniversalJsonSegmentRandomizer,
+        "UniversalPromptSnapshot": snapshot_module.UniversalPromptSnapshot,
     }
 
 

@@ -42,6 +42,7 @@ import { useToast } from "../shared/ToastViewport";
 import type { DetailNavigationState, ImageMetadata, ImageRecord, VariantGroup } from "../../types/universal-gallery";
 import { formatFileSize, formatLongDateTime } from "../../utils/formatters";
 import { isEditableTarget } from "../../utils/interaction";
+import { loadDecodedImage, preferredScrollBehavior } from "../../utils/imageLoading";
 import { getPositivePromptText } from "../../utils/metadata";
 import "../../styles/detail.css";
 
@@ -105,21 +106,6 @@ const makeLightboxVisual = (image: ImageRecord): LightboxVisual => ({
   alt: image.title || image.filename,
 });
 
-const preloadLightboxImage = async (src: string) => {
-  if (!src) {
-    return;
-  }
-
-  const image = new window.Image();
-  image.decoding = "async";
-  const loaded = new Promise<void>((resolve) => {
-    image.onload = () => resolve();
-    image.onerror = () => resolve();
-  });
-  image.src = src;
-  await loaded;
-  await image.decode?.().catch(() => undefined);
-};
 
 export const ImageDetailModal = ({
   image,
@@ -132,7 +118,7 @@ export const ImageDetailModal = ({
   navigation,
   onNavigate,
 }: ImageDetailModalProps) => {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const { confirm } = useConfirm();
   const { pushToast } = useToast();
   const [metadata, setMetadata] = useState<ImageMetadata | null>(null);
@@ -160,7 +146,16 @@ export const ImageDetailModal = ({
   const mediaRef = useRef<HTMLDivElement | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const previousOverflowRef = useRef<string>("");
-  const [activeVisual, setActiveVisual] = useState<LightboxVisual>(() => makeLightboxVisual(image));
+  const [activeVisual, setActiveVisual] = useState<LightboxVisual>(() => ({...makeLightboxVisual(image), src: image.thumb_url || image.original_url || image.url}));
+  const [visualLoading, setVisualLoading] = useState(true);
+  const [zoomAnimating, setZoomAnimating] = useState(false);
+  useEffect(() => {
+    if (!zoomAnimating) return;
+    const timer = window.setTimeout(() => setZoomAnimating(false), 180);
+    return () => window.clearTimeout(timer);
+  }, [zoomAnimating]);
+  const lightboxRef = useRef<HTMLDivElement>(null);
+  const closing = useRef(false);
   const [showFilmstrip, setShowFilmstrip] = useState(true);
   const [imageLoadFailed, setImageLoadFailed] = useState(false);
   const [detailRetryKey, setDetailRetryKey] = useState(0);
@@ -172,6 +167,7 @@ export const ImageDetailModal = ({
     setDraftNotes(image.notes || "");
     setDraftPinned(image.pinned || image.favorite || false);
     setDraftFilename(image.filename || "");
+    setSavedStateSnapshot({title:image.title || "", category:image.category || "", notes:image.notes || "", pinned:image.pinned || image.favorite || false});
     setZoomScale(MIN_ZOOM);
     setPan({ x: 0, y: 0 });
     setIsExpandedView(false);
@@ -182,15 +178,24 @@ export const ImageDetailModal = ({
   }, [image.relative_path, image.title, image.category, image.notes, image.pinned, image.favorite, image.filename]);
 
   useEffect(() => {
-    setActiveVisual(makeLightboxVisual(image));
+    const controller = new AbortController();
+    const desired = { key:image.relative_path, src:image.original_url || image.url, bg:image.thumb_url || image.url, alt:image.title || image.filename };
+    if (detailRetryKey) desired.src += `${desired.src.includes("?") ? "&" : "?"}_retry=${detailRetryKey}`;
+    setVisualLoading(true);
     setImageLoadFailed(false);
-    setDetailRetryKey(0);
-  }, [image]);
+    void loadDecodedImage(desired.src, controller.signal).then(loaded => {
+      if (controller.signal.aborted) return;
+      if (loaded) setActiveVisual(desired);
+      setImageLoadFailed(!loaded);
+      setVisualLoading(false);
+    });
+    return () => controller.abort();
+  }, [image.relative_path, image.original_url, image.url, image.thumb_url, image.title, image.filename, detailRetryKey]);
 
   useEffect(() => {
     if (showFilmstrip && activeThumbRef.current) {
       activeThumbRef.current.scrollIntoView({
-        behavior: "smooth",
+        behavior: preferredScrollBehavior(),
         block: "nearest",
         inline: "center",
       });
@@ -198,19 +203,21 @@ export const ImageDetailModal = ({
   }, [navigation?.currentIndex, showFilmstrip]);
 
   useEffect(() => {
+    const controller = new AbortController();
     const items = navigation?.items ?? [];
     const index = navigation?.currentIndex ?? -1;
-    [items[index - 1], items[index + 1]]
-      .filter((item): item is ImageRecord => Boolean(item))
-      .forEach((item) => {
-        void preloadLightboxImage(makeLightboxVisual(item).src);
-      });
+    [items[index - 1], items[index + 1]].filter((item): item is ImageRecord => Boolean(item))
+      .forEach(item => { void loadDecodedImage(makeLightboxVisual(item).src, controller.signal); });
+    return () => controller.abort();
   }, [navigation]);
 
   useEffect(() => {
     let cancelled = false;
 
     const loadMetadata = async () => {
+      setIsLoading(true);
+      setError(null);
+      setMetadata(null);
       try {
         const response = await galleryApi.getImageMetadata(image.relative_path);
         if (cancelled) {
@@ -297,7 +304,7 @@ export const ImageDetailModal = ({
     "data-tooltip": label,
   });
 
-  const detailStats = [formatFileSize(image.size), formatLongDateTime(image.created_at)];
+  const detailStats = [formatFileSize(image.size), formatLongDateTime(image.created_at, locale)];
   const isStateDirty =
     draftTitle !== savedStateSnapshot.title ||
     draftCategory !== savedStateSnapshot.category ||
@@ -352,6 +359,8 @@ export const ImageDetailModal = ({
 
   const handleWheelZoom = (event: ReactWheelEvent<HTMLDivElement>) => {
     event.preventDefault();
+    if (visualLoading) return;
+    setZoomAnimating(false);
 
     const multiplier = event.deltaY < 0 ? 1.16 : 0.86;
     const nextScale = Number((zoomScale * multiplier).toFixed(3));
@@ -364,6 +373,7 @@ export const ImageDetailModal = ({
     }
 
     event.preventDefault();
+    setZoomAnimating(false);
     dragStateRef.current = {
       pointerId: event.pointerId,
       startX: event.clientX,
@@ -411,6 +421,8 @@ export const ImageDetailModal = ({
     }
 
     event.stopPropagation();
+    if (visualLoading) return;
+    setZoomAnimating(true);
     if (isZoomed) {
       resetViewport();
       return;
@@ -571,6 +583,13 @@ export const ImageDetailModal = ({
         return;
       }
     }
+    if (closing.current) return;
+    closing.current = true;
+    const element = lightboxRef.current;
+    const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
+    if (element?.animate && !reduced) {
+      await element.animate([{opacity:1}, {opacity:0}], {duration:100, easing:"ease-out", fill:"forwards"}).finished.catch(() => undefined);
+    }
     onClose();
   };
 
@@ -602,7 +621,7 @@ export const ImageDetailModal = ({
   });
 
   return (
-    <div className="ue-modal-backdrop ue-modal-backdrop--lightbox" onClick={() => void handleRequestClose()}>
+    <div ref={lightboxRef} className="ue-modal-backdrop ue-modal-backdrop--lightbox" onClick={() => void handleRequestClose()}>
       <div
         className="ue-lightbox-shell"
         onClick={(event) => event.stopPropagation()}
@@ -644,7 +663,8 @@ export const ImageDetailModal = ({
         <div className={`ue-lightbox-stage ${showInspector ? "has-inspector" : ""}`}>
           <div
             ref={mediaRef}
-            className={`ue-lightbox-media ${isExpandedView ? "is-expanded" : "is-fit"} ${isZoomed ? "is-zoomed" : ""} ${isDragging ? "is-dragging" : ""}`}
+            aria-busy={visualLoading}
+            className={`ue-lightbox-media ${zoomAnimating ? "is-zoom-transition" : ""} ${isExpandedView ? "is-expanded" : "is-fit"} ${isZoomed ? "is-zoomed" : ""} ${isDragging ? "is-dragging" : ""}`}
             onWheel={handleWheelZoom}
             onPointerDown={handlePointerDown}
             onPointerMove={handlePointerMove}
@@ -652,6 +672,7 @@ export const ImageDetailModal = ({
             onPointerCancel={handlePointerEnd}
             onDoubleClick={handleDoubleClick}
           >
+            {visualLoading ? <div className="ue-lightbox-loading" role="status">{t("imageLoading")}</div> : null}
             <div className="ue-lightbox-gesture-hint">{t("modalGestureHint")}</div>
             {imageLoadFailed ? (
               <div className="ue-lightbox-fallback-card">
@@ -670,7 +691,7 @@ export const ImageDetailModal = ({
                     }}
                   >
                     <RotateCcw size={14} />
-                    <span>重试加载图片</span>
+                    <span>{t("imageRetryFull")}</span>
                   </button>
                   <a
                     href={image.original_url || image.url}
@@ -679,18 +700,18 @@ export const ImageDetailModal = ({
                     className="ue-lightbox-link-btn"
                   >
                     <ExternalLink size={14} />
-                    <span>在新标签页打开</span>
+                    <span>{t("imageOpenTab")}</span>
                   </a>
                 </div>
               </div>
             ) : (
               <img
-                key={`${activeVisual.key}-${detailRetryKey}`}
+                key={activeVisual.src}
                 className="ue-lightbox-image ue-lightbox-image--active"
-                src={detailRetryKey > 0 ? `${activeVisual.src}${activeVisual.src.includes("?") ? "&" : "?"}_retry=${detailRetryKey}` : activeVisual.src}
+                src={activeVisual.src}
                 alt={activeVisual.alt}
                 draggable={false}
-                onError={() => setImageLoadFailed(true)}
+                onError={() => { if (!visualLoading) setImageLoadFailed(true); }}
                 style={{
                   "--ue-pan-x": `${pan.x}px`,
                   "--ue-pan-y": `${pan.y}px`,
@@ -851,11 +872,11 @@ export const ImageDetailModal = ({
                               {lora.name}
                             </span>
                             <div className="ue-recipe-lora-weights">
-                              <span className="ue-recipe-lora-weight-tag" title="Model Weight">
+                              <span className="ue-recipe-lora-weight-tag" title={t("loraModelWeight")}>
                                 M:{lora.strength_model}
                               </span>
                               {lora.strength_clip !== lora.strength_model ? (
-                                <span className="ue-recipe-lora-weight-tag" title="Clip Weight">
+                                <span className="ue-recipe-lora-weight-tag" title={t("loraClipWeight")}>
                                   C:{lora.strength_clip}
                                 </span>
                               ) : null}
@@ -1090,7 +1111,7 @@ export const ImageDetailModal = ({
           </aside>
 
           {navigation && navigation.items.length > 1 && showFilmstrip ? (
-            <div className="ue-lightbox-filmstrip" role="region" aria-label="胶片缩略图传送带">
+            <div className="ue-lightbox-filmstrip" role="region" aria-label={t("imageFilmstrip")}>
               <div className="ue-lightbox-filmstrip-track">
                 {navigation.items.map((navItem, idx) => {
                   const isCurrent = idx === currentIndex;
@@ -1142,8 +1163,8 @@ export const ImageDetailModal = ({
             <button
               className={`ue-toolbar-btn ${showFilmstrip ? "is-active" : ""}`}
               onClick={() => setShowFilmstrip((current) => !current)}
-              aria-label="切换缩略图传送带"
-              title="切换缩略图传送带"
+              aria-label={t("imageFilmstripToggle")}
+              title={t("imageFilmstripToggle")}
             >
               <Film size={17} />
             </button>

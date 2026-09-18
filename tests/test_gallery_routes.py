@@ -222,3 +222,12 @@ async def test_gallery_asset_path_traversal_returns_not_found(gallery_client):
     response = await client.get("/gallery/assets/%2e%2e/README.md")
 
     assert response.status == 404
+
+
+@pytest.mark.anyio
+async def test_json_arrays_and_invalid_bulk_paths_are_rejected(gallery_client):
+    client, _ = gallery_client
+    response = await client.post("/universal_gallery/api/images/move", json=[])
+    assert response.status == 400
+    response = await client.post("/universal_gallery/api/images/move", json={"relative_paths": [None]})
+    assert response.status == 400

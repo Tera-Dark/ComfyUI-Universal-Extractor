@@ -93,4 +93,18 @@ describe("VariantGroupsView", () => {
 
     expect(screen.getAllByText("正在分析变体...").length).toBeGreaterThan(0);
   });
+  it("searches loaded groups and sorts by count without mutating the input", async () => {
+    const user=userEvent.setup();
+    const groups=[group,{...group,id:"b",title:"Other group",count:12}];
+    const {container}=render(<I18nProvider><VariantGroupsView groups={groups} selectedType="" status={null} loading={false} error="" onTypeChange={vi.fn()} onRefresh={vi.fn()} onOpenGroup={vi.fn()}/></I18nProvider>);
+    await user.selectOptions(screen.getByRole("combobox"),"count");
+    expect(container.querySelector(".ue-variant-card")).toHaveTextContent("Other group");
+    expect(groups[0]).toBe(group);
+    await user.type(screen.getByRole("textbox"),"Other group");
+    expect(container.querySelectorAll(".ue-variant-card")).toHaveLength(1);
+    await user.clear(screen.getByRole("textbox"));
+    await user.type(screen.getByRole("textbox"),"absent");
+    expect(container.querySelectorAll(".ue-variant-card")).toHaveLength(0);
+  });
+
 });

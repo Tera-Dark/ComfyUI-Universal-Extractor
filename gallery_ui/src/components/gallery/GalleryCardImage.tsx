@@ -1,6 +1,7 @@
 import { useEffect, useState, type MouseEvent } from "react";
 import { ImageOff, RotateCcw } from "lucide-react";
 
+import { useI18n } from "../../i18n/I18nProvider";
 import type { ImageRecord } from "../../types/universal-gallery";
 import { getGalleryImageUrl, isGalleryImageLoaded, markGalleryImageLoaded } from "./galleryImagePrefetch";
 
@@ -13,6 +14,7 @@ export const GalleryCardImage = ({
   priority?: boolean;
   onOpenDetail: (image: ImageRecord, event: MouseEvent<HTMLElement>) => void;
 }) => {
+  const { t } = useI18n();
   const imageUrl = getGalleryImageUrl(image);
   const [loaded, setLoaded] = useState(() => isGalleryImageLoaded(imageUrl));
   const [hasError, setHasError] = useState(false);
@@ -51,6 +53,11 @@ export const GalleryCardImage = ({
           onClick={(event) => onOpenDetail(image, event)}
           role="button"
           tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) {
+              event.preventDefault(); event.currentTarget.click();
+            }
+          }}
           title={image.filename}
         >
           <div className="ue-gallery-image-fallback-icon">
@@ -61,11 +68,11 @@ export const GalleryCardImage = ({
             type="button"
             className="ue-gallery-image-retry-btn"
             onClick={handleRetry}
-            title="重试加载"
-            aria-label="重试加载"
+            title={t("imageRetry")}
+            aria-label={t("imageRetry")}
           >
             <RotateCcw size={12} />
-            <span>重试</span>
+            <span>{t("imageRetryShort")}</span>
           </button>
         </div>
       ) : (
@@ -73,6 +80,13 @@ export const GalleryCardImage = ({
           key={retryKey}
           src={effectiveUrl}
           alt={image.title || image.filename}
+          role="button"
+          tabIndex={0}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault(); event.currentTarget.click();
+            }
+          }}
           loading={priority ? "eager" : "lazy"}
           decoding="async"
           draggable={false}

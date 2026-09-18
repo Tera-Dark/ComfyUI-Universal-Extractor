@@ -21,7 +21,7 @@ def read_image_metadata(image_path: str) -> dict:
         with guarded_image_open(image_path) as image:
             info = image.info or {}
             metadata = {}
-            for key in ("prompt", "workflow"):
+            for key in ("prompt", "workflow", "universal_prompt_snapshots"):
                 if key in info:
                     try:
                         metadata[key] = json.loads(info[key])

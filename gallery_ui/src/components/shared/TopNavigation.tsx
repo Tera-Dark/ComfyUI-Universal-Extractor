@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   Bell,
+  ChevronDown,
   ExternalLink,
   LayoutGrid,
   Library,
@@ -13,6 +14,7 @@ import {
   Wrench,
 } from "lucide-react";
 
+import { DisclosureMenu } from "./DisclosureMenu";
 import { useI18n } from "../../i18n/I18nProvider";
 import { galleryApi } from "../../services/galleryApi";
 import type { Locale } from "../../i18n/translations";
@@ -132,40 +134,50 @@ export const TopNavigation = ({
         >
           {sidebarCollapsed ? <PanelLeftOpen size={16} /> : <PanelLeftClose size={16} />}
         </button>
-        <strong>Gallery</strong>
+        <strong>Universal</strong>
         <span className="ue-topbar-scope">{t("topStatus", { tab: activeTab })}</span>
       </div>
 
-      <nav className="ue-topbar-tabs" aria-label="Primary navigation" data-tour-id="topbar-tabs">
+      <DisclosureMenu tourId="workspace-switcher" label={t("workspaceSwitch")} icon={<><span>{t(activeTab === "gallery" ? "navGallery" : activeTab === "library" ? "navLibrary" : activeTab === "workbench" ? "navWorkbench" : "navSettings")}</span><ChevronDown size={14} /></>} className="ue-workspace-switcher">
+      <nav className="ue-topbar-tabs" aria-label={t("workspaceSwitch")} data-tour-id="topbar-tabs">
         <button
           className={`ue-topbar-tab ${activeTab === "gallery" ? "active" : ""}`}
           onClick={() => onTabChange("gallery")}
+          aria-current={activeTab === "gallery" ? "page" : undefined}
+          aria-label={t("navGallery")} aria-describedby="ue-workspace-desc-gallery"
         >
           <LayoutGrid size={16} />
-          <span>{t("navGallery")}</span>
+          <span className="ue-workspace-option-copy"><strong>{t("navGallery")}</strong><small id="ue-workspace-desc-gallery">{t("workspaceDesc_gallery")}</small></span>
         </button>
         <button
           className={`ue-topbar-tab ${activeTab === "library" ? "active" : ""}`}
           onClick={() => onTabChange("library")}
+          aria-current={activeTab === "library" ? "page" : undefined}
+          aria-label={t("navLibrary")} aria-describedby="ue-workspace-desc-library"
         >
           <Library size={16} />
-          <span>{t("navLibrary")}</span>
+          <span className="ue-workspace-option-copy"><strong>{t("navLibrary")}</strong><small id="ue-workspace-desc-library">{t("workspaceDesc_library")}</small></span>
         </button>
         <button
           className={`ue-topbar-tab ${activeTab === "workbench" ? "active" : ""}`}
           onClick={() => onTabChange("workbench")}
+          aria-current={activeTab === "workbench" ? "page" : undefined}
+          aria-label={t("navWorkbench")} aria-describedby="ue-workspace-desc-workbench"
         >
           <Wrench size={16} />
-          <span>{t("navWorkbench")}</span>
+          <span className="ue-workspace-option-copy"><strong>{t("navWorkbench")}</strong><small id="ue-workspace-desc-workbench">{t("workspaceDesc_workbench")}</small></span>
         </button>
         <button
           className={`ue-topbar-tab ${activeTab === "settings" ? "active" : ""}`}
           onClick={() => onTabChange("settings")}
+          aria-current={activeTab === "settings" ? "page" : undefined}
+          aria-label={t("navSettings")} aria-describedby="ue-workspace-desc-settings"
         >
           <Settings size={16} />
-          <span>{t("navSettings")}</span>
+          <span className="ue-workspace-option-copy"><strong>{t("navSettings")}</strong><small id="ue-workspace-desc-settings">{t("workspaceDesc_settings")}</small></span>
         </button>
       </nav>
+      </DisclosureMenu>
 
       <div className="ue-topbar-tools">
         {searchEnabled ? (

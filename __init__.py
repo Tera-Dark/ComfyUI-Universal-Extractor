@@ -9,12 +9,11 @@ UniversalJsonSegmentRandomizer = _NODE_CLASSES["UniversalJsonSegmentRandomizer"]
 register_gallery_routes()
 
 
-NODE_CLASS_MAPPINGS = {
-    "UniversalJsonSegmentRandomizer": UniversalJsonSegmentRandomizer,
-}
+NODE_CLASS_MAPPINGS = dict(_NODE_CLASSES)
 
 NODE_DISPLAY_NAME_MAPPINGS = {
     "UniversalJsonSegmentRandomizer": "Universal Artist/Tag Randomizer",
+    "UniversalPromptSnapshot": "Universal Prompt Snapshot",
 }
 
 WEB_DIRECTORY = "./web/comfyui"

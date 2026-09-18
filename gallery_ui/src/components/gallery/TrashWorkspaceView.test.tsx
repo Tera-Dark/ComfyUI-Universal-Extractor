@@ -76,7 +76,7 @@ describe("TrashWorkspaceView", () => {
     await user.click(screen.getByRole("button", { name: "恢复" }));
     expect(props.onRestoreTrashItem).toHaveBeenCalledWith("trash-1");
 
-    await user.click(screen.getByRole("button", { name: "彻底删除" }));
+    await user.click(screen.getByRole("button", { name: "移至系统回收站" }));
     expect(props.onPurgeTrashItem).toHaveBeenCalledWith("trash-1");
   });
 });

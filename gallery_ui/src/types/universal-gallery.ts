@@ -103,6 +103,7 @@ export interface ImageRecipeLoraManager {
 }
 
 export interface ImageRecipe {
+  warnings?: string[];
   source_format: string;
   has_workflow: boolean;
   positive_prompt: string;

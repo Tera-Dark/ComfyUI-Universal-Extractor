@@ -15,14 +15,15 @@ const toValidDate = (timestampSeconds: number) => {
   return Number.isNaN(date.getTime()) ? null : date;
 };
 
-export const formatCompactDate = (timestampSeconds: number) =>
-  toValidDate(timestampSeconds)?.toLocaleDateString() ?? "--";
+export const formatCompactDate = (timestampSeconds: number, locale?: string) =>
+  toValidDate(timestampSeconds)?.toLocaleDateString(locale) ?? "--";
 
-export const formatPreciseDateTime = (timestampSeconds: number) => {
+export const formatPreciseDateTime = (timestampSeconds: number, locale?: string) => {
   const date = toValidDate(timestampSeconds);
   if (!date) {
     return "--";
   }
+  if (locale) return date.toLocaleString(locale, {year:"numeric",month:"2-digit",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"});
   const pad = (value: number) => String(value).padStart(2, "0");
 
   return [
@@ -31,8 +32,8 @@ export const formatPreciseDateTime = (timestampSeconds: number) => {
   ].join(" ");
 };
 
-export const formatLongDateTime = (timestampSeconds: number) =>
-  toValidDate(timestampSeconds)?.toLocaleString() ?? "--";
+export const formatLongDateTime = (timestampSeconds: number, locale?: string) =>
+  toValidDate(timestampSeconds)?.toLocaleString(locale) ?? "--";
 
 export const formatTitleCase = (value: string) =>
   value
