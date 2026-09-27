@@ -242,6 +242,8 @@ npm run build
 
 构建使用清理旧输出的内容哈希文件和 Vite manifest。部署时请**整体更新 `gallery_ui/dist/`** 并重启 ComfyUI、刷新浏览器；不要把新内容覆盖到旧 hash 文件名中，否则会破坏不可变资源的哈希语义。若旧页面仍请求已删除的文件，请刷新该页面以获取新的 `index.html` 和 manifest。LoRA 功能还需要同时更新 `web/comfyui/top_menu_extension.js`。
 
+**LoRA 追加与旧标签页：**v1.3 的 ComfyUI 桥接脚本不识别“追加”模式，会把图库发来的堆按旧逻辑写入，导致原有条目消失。更新后须重启 ComfyUI，并对**主界面和图库两个页面**进行强制刷新（Ctrl+Shift+R）。新图库会在发送前校验主界面桥接协议，发现旧脚本会阻止发送并给出提示，而不是冒险覆盖。已经被旧脚本写掉的条目不能由新版本自动恢复，请从工作流历史或备份恢复。图库默认上限为每行 6 张，已保存的密度设置不被重置，窄屏仍自动减少列数。
+
 ## 验证
 
 开发环境先安装测试依赖：
@@ -269,9 +271,9 @@ npm run audit:security
 npm run build
 ```
 
-从仓库根目录还可以运行 `node --test tests/comfy_lora_stack_bridge.test.mjs`，验证 LoRA 追加／覆盖和上游 widget 回调模拟。可选浏览器回归只应针对 `scripts/preview.py` 建立的**隔离图库**运行，不要将模拟失败／移动／导入脚本指向真实 ComfyUI：例如 `python scripts/browser_lora_stack.py http://127.0.0.1:8189`、`python scripts/browser_masonry.py http://127.0.0.1:8189`。
+从仓库根目录运行 `node --test tests/comfy_lora_stack_bridge.test.mjs` 检查桥接边界条件；真实上游行为另用 `LORA_MANAGER_SOURCE=/path/to/ComfyUI-Lora-Manager node --test tests/comfy_lora_manager_upstream.test.mjs` 测试（CI 自动拉取并固定上游提交 `0a262cbe`，不将其源码拷入本仓库）。可选浏览器回归只应针对 `scripts/preview.py` 建立的**隔离图库**运行，不要将模拟失败／移动／导入脚本指向真实 ComfyUI：例如 `python scripts/browser_lora_stack_channel.py http://127.0.0.1:8189`、`python scripts/browser_masonry_mid.py http://127.0.0.1:8189`、`python scripts/browser_masonry.py http://127.0.0.1:8189`。
 
-CI 在 Windows 执行 Python、前端、i18n 和桥接测试，Linux/macOS 运行后端测试，并用 `npm run audit:security` 阻止 moderate 及以上级别的前端依赖漏洞回归。`npm run build` 生成新的内容哈希资源与 manifest，**不会**改写旧哈希文件；CI 只验证构建，不会自动提交 `gallery_ui/dist/`。发布前需显式提交干净构建产物；真实 ComfyUI/LoRA Manager 和生产图库仍建议在工作流副本上实测。
+CI 在 Windows 执行 Python、前端、i18n 和桥接测试，Linux/macOS 运行后端测试，另有 Linux 任务固定上游源码运行 LoRA Manager 回调集成测试；并用 `npm run audit:security` 阻止 moderate 及以上级别的前端依赖漏洞回归。`npm run build` 生成新的内容哈希资源与 manifest，**不会**改写旧哈希文件；CI 只验证构建，不会自动提交 `gallery_ui/dist/`。发布前需显式提交干净构建产物；真实 ComfyUI/LoRA Manager 和生产图库仍建议在工作流副本上实测。
 
 ## 系统要求
 

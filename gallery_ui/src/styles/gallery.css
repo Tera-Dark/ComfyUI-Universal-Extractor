@@ -492,8 +492,12 @@
 .ue-gallery-meta {
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 4px 6px;
+  width: 100%;
+  min-width: 0;
+  flex-wrap: nowrap;
+  gap: 0 6px;
+  overflow: hidden;
+  white-space: nowrap;
   color: var(--ue-ink-muted);
   font-size: 11px;
   line-height: 1.2;
@@ -521,6 +525,10 @@
 .ue-gallery-category-chip {
   display: inline-flex;
   align-items: center;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   padding: 0.5px 5px;
   border-radius: 4px;
   background: rgba(37, 99, 235, 0.08);

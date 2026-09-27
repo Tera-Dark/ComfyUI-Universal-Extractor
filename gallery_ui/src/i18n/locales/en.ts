@@ -891,6 +891,7 @@ const en = {
   loraStackReplaceDetail: "{removed} old entries removed; {updated} names updated.",
   loraStackApplyNoStack: "No usable ComfyUI-Lora-Manager LoRA stack was detected in this image.",
   loraStackApplyNoComfyPage: "No ComfyUI page is ready to receive this request. Keep the main ComfyUI page open and refresh it once.",
+  loraStackBridgeOutdated: "The ComfyUI page is still running an older plugin script. Sending was blocked because its Append button could delete existing LoRAs. Restart ComfyUI, then hard-refresh the main page and gallery before retrying.",
   loraStackApplyNoTargetNode: "No writable LoRA Manager node was found in the current workflow.",
   loraStackApplySuccess: "LoRA stack applied to the current workflow",
   trashRestoreConfirm: "Restore this trash item to its original location?",

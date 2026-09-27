@@ -3,7 +3,9 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { ImageRecord } from "../../types/universal-gallery";
 
-const MIN_CARD_WIDTH_DESKTOP = 180;
+// Six columns fit a normal 1440px window after sidebar and gallery padding.
+// The metadata row is now single-line, so 160px cards do not grow while scrolling.
+const MIN_CARD_WIDTH_DESKTOP = 160;
 const MIN_CARD_WIDTH_TABLET = 190;
 const MIN_CARD_WIDTH_MOBILE = 145; // Compact mobile preset fits two tappable cards at ~390px.
 const MIN_COLUMN_WIDTH = 160;

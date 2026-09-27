@@ -1,43 +1,43 @@
 {
-  "_OperationStatusCenter-j4e7dk8j.js": {
-    "file": "assets/OperationStatusCenter-j4e7dk8j.js",
+  "_OperationStatusCenter-Bt4LOML2.js": {
+    "file": "assets/OperationStatusCenter-Bt4LOML2.js",
     "name": "OperationStatusCenter"
   },
-  "_boxes-Ckp5xsZM.js": {
-    "file": "assets/boxes-Ckp5xsZM.js",
+  "_boxes-jMgvT5e6.js": {
+    "file": "assets/boxes-jMgvT5e6.js",
     "name": "boxes",
     "imports": [
-      "_OperationStatusCenter-j4e7dk8j.js"
+      "_OperationStatusCenter-Bt4LOML2.js"
     ]
   },
-  "_save-BW-nI-Bn.js": {
-    "file": "assets/save-BW-nI-Bn.js",
+  "_save-DSAszqLx.js": {
+    "file": "assets/save-DSAszqLx.js",
     "name": "save",
     "imports": [
-      "_OperationStatusCenter-j4e7dk8j.js"
+      "_OperationStatusCenter-Bt4LOML2.js"
     ]
   },
-  "_sparkles-AC1HNNKp.js": {
-    "file": "assets/sparkles-AC1HNNKp.js",
+  "_sparkles-4wciztfM.js": {
+    "file": "assets/sparkles-4wciztfM.js",
     "name": "sparkles",
     "imports": [
-      "_OperationStatusCenter-j4e7dk8j.js"
+      "_OperationStatusCenter-Bt4LOML2.js"
     ]
   },
-  "_wand-sparkles-A5YI6NT7.js": {
-    "file": "assets/wand-sparkles-A5YI6NT7.js",
+  "_wand-sparkles-D2VcR0TL.js": {
+    "file": "assets/wand-sparkles-D2VcR0TL.js",
     "name": "wand-sparkles",
     "imports": [
-      "_OperationStatusCenter-j4e7dk8j.js"
+      "_OperationStatusCenter-Bt4LOML2.js"
     ]
   },
   "index.html": {
-    "file": "assets/index-Bs87Li6h.js",
+    "file": "assets/index-DJ8NMuvk.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_OperationStatusCenter-j4e7dk8j.js"
+      "_OperationStatusCenter-Bt4LOML2.js"
     ],
     "dynamicImports": [
       "src/components/gallery/ImageDetailModal.tsx",
@@ -46,19 +46,19 @@
       "src/components/workbench/WorkbenchWorkspace.tsx"
     ],
     "css": [
-      "assets/index-DT1ux06R.css"
+      "assets/index-DNU-Tj6w.css"
     ]
   },
   "src/components/gallery/ImageDetailModal.tsx": {
-    "file": "assets/ImageDetailModal-CjTs8lGs.js",
+    "file": "assets/ImageDetailModal-QuSpjjD7.js",
     "name": "ImageDetailModal",
     "src": "src/components/gallery/ImageDetailModal.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_OperationStatusCenter-j4e7dk8j.js",
-      "_sparkles-AC1HNNKp.js",
-      "_boxes-Ckp5xsZM.js",
-      "_save-BW-nI-Bn.js",
+      "_OperationStatusCenter-Bt4LOML2.js",
+      "_sparkles-4wciztfM.js",
+      "_boxes-jMgvT5e6.js",
+      "_save-DSAszqLx.js",
       "index.html"
     ],
     "css": [
@@ -66,27 +66,27 @@
     ]
   },
   "src/components/library/LibraryWorkspace.tsx": {
-    "file": "assets/LibraryWorkspace-C3RvkTv0.js",
+    "file": "assets/LibraryWorkspace-RKUPMvhY.js",
     "name": "LibraryWorkspace",
     "src": "src/components/library/LibraryWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_OperationStatusCenter-j4e7dk8j.js",
-      "_sparkles-AC1HNNKp.js",
-      "_wand-sparkles-A5YI6NT7.js",
-      "_boxes-Ckp5xsZM.js",
-      "_save-BW-nI-Bn.js",
+      "_OperationStatusCenter-Bt4LOML2.js",
+      "_sparkles-4wciztfM.js",
+      "_wand-sparkles-D2VcR0TL.js",
+      "_boxes-jMgvT5e6.js",
+      "_save-DSAszqLx.js",
       "index.html"
     ]
   },
   "src/components/settings/SettingsWorkspace.tsx": {
-    "file": "assets/SettingsWorkspace-CA-EGVP7.js",
+    "file": "assets/SettingsWorkspace-Dv0vBWV2.js",
     "name": "SettingsWorkspace",
     "src": "src/components/settings/SettingsWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_OperationStatusCenter-j4e7dk8j.js",
-      "_save-BW-nI-Bn.js",
+      "_OperationStatusCenter-Bt4LOML2.js",
+      "_save-DSAszqLx.js",
       "index.html"
     ],
     "css": [
@@ -94,14 +94,14 @@
     ]
   },
   "src/components/workbench/WorkbenchWorkspace.tsx": {
-    "file": "assets/WorkbenchWorkspace-qsGIc9uO.js",
+    "file": "assets/WorkbenchWorkspace-BhzXumT2.js",
     "name": "WorkbenchWorkspace",
     "src": "src/components/workbench/WorkbenchWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_OperationStatusCenter-j4e7dk8j.js",
-      "_sparkles-AC1HNNKp.js",
-      "_wand-sparkles-A5YI6NT7.js",
+      "_OperationStatusCenter-Bt4LOML2.js",
+      "_sparkles-4wciztfM.js",
+      "_wand-sparkles-D2VcR0TL.js",
       "index.html"
     ],
     "css": [

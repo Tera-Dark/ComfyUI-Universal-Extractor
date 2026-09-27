@@ -320,3 +320,18 @@ test("duplicate payload ids wait for the same async operation and do not write t
     assert.equal(node.writes, writesBeforeRetry, "retrying an older id does not change the node");
     assert.deepEqual(node.loras.map((entry) => entry.name), ["new", "another"]);
 });
+
+test("LoRA stack capability is advertised on probe and receipt to block stale ComfyUI tabs", async () => {
+    const node = createNode("Selected", [], "");
+    const { send, sent, window } = await harness([node], [node]);
+    window.bridge.onmessage({ data: {
+        type: "universal-extractor:workflow-probe", probeId: "capability-probe", payloadId: "capability-send",
+    } });
+    const reply = sent.find((message) => message.type === "universal-extractor:workflow-ack" &&
+        message.probeId === "capability-probe");
+    assert.equal(reply?.loraStackProtocol, 2);
+    const receipt = await send("append", [incoming("new")]);
+    assert.equal(receipt.ok, true);
+    assert.equal(receipt.loraStackProtocol, 2);
+    assert.deepEqual(node.loras.map((item) => item.name), ["new"]);
+});

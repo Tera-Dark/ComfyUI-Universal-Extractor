@@ -248,8 +248,8 @@ async def main():
                         steps = 0
                     lanes = await scan_all_cards(page)
                     if profile == "right-heavy":
-                        counts = [list(lanes.values()).count(lane) for lane in range(4)]
-                        assert counts[3] >= max(counts[:3]) + 2, ("not a right-heavy fixture", counts)
+                        counts = [list(lanes.values()).count(lane) for lane in range(len(set(lanes.values())))]
+                        assert max(counts[3:]) >= max(counts[:3]) + 2, ("not a right-heavy fixture", counts)
                     assert not errors, errors
                     print(f"PASS width={width} profile={profile} mobile_density={density}: "
                           f"48 cards, {len(set(lanes.values()))} columns, bottom range drift={height_change:.1f}px, "
@@ -257,7 +257,7 @@ async def main():
                 finally:
                     await page.close()
             for start_width, end_width, density in [
-                (1280, 1440, "single"), (960, 900, "single"), (390, 550, "single")
+                (1440, 1600, "single"), (960, 900, "single"), (390, 550, "single")
             ]:
                 await resize_same_lanes(browser, start_width, end_width, density)
             await resize_lane_count(browser, 390, 960, 4)

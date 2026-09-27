@@ -888,6 +888,7 @@ const zhCN = {
   loraStackReplaceDetail: "移除旧条目 {removed} 项，同名更新 {updated} 项。",
   loraStackApplyNoStack: "这张图未识别到可用的 ComfyUI-Lora-Manager LoRA 堆。",
   loraStackApplyNoComfyPage: "未找到可接收的 ComfyUI 页面。请保持 ComfyUI 主界面已打开并刷新一次。",
+  loraStackBridgeOutdated: "当前 ComfyUI 页面仍运行旧版插件脚本；本次发送已被拦截，以免“追加”误删旧 LoRA。请重启 ComfyUI，并强制刷新主页面及图库后重试。",
   loraStackApplyNoTargetNode: "当前工作流里未找到可写入的 LoRA Manager 节点。",
   loraStackApplySuccess: "LoRA 堆已应用到当前工作流",
   trashRestoreConfirm: "将这个回收站项目恢复到原位置吗？",

@@ -398,7 +398,7 @@ export const GalleryMainContent = ({
                         <i aria-hidden="true">·</i>
                         <span>{formatFileSize(image.size)}</span>
                         {resolution ? <span className="ue-gallery-resolution-chip">{resolution}</span> : null}
-                        {image.category ? <span className="ue-gallery-category-chip">{image.category}</span> : null}
+                        {image.category ? <span className="ue-gallery-category-chip" title={image.category}>{image.category}</span> : null}
                       </span>
                     </button>
                   </article>

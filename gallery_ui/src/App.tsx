@@ -16,7 +16,8 @@ import { useOperationStatus, type RunOperationOptions } from "./components/share
 import { getFolderBaseName } from "./components/shared/folderTree";
 import { buildWorkspaceUrl, isSearchOnlyLocationChange, readWorkspaceLocation, type WorkspaceLocation } from "./utils/workspaceLocation";
 import { isOnboardingTourCompleted, markOnboardingTourCompleted } from "./components/shared/onboardingTourModel";
-import type { ImageRecipeLoraManager, ImageRecord, LibraryInfo, UiPreferences, WorkspaceTab } from "./types/universal-gallery";
+import type { ImageRecord, LibraryInfo, UiPreferences, WorkspaceTab } from "./types/universal-gallery";
+import { trySendLoraStackToExistingComfyPage, trySendWorkflowToExistingComfyPage, type LoraStackApplyMode, type LoraStackPayload, type WorkflowPayload } from "./utils/comfyBridgeChannel";
 import "./App.css";
 
 const ImageDetailModal = lazy(() =>
@@ -33,15 +34,6 @@ const WorkbenchWorkspace = lazy(() =>
 );
 
 const PENDING_WORKFLOW_KEY = "universal-extractor:pending-workflow";
-const WORKFLOW_CHANNEL_NAME = "universal-extractor-workflow";
-const WORKFLOW_MESSAGE_TYPE = "universal-extractor:workflow-message";
-const LORA_STACK_MESSAGE_TYPE = "universal-extractor:lora-stack-message";
-const WORKFLOW_PROBE_TYPE = "universal-extractor:workflow-probe";
-const WORKFLOW_ACK_TYPE = "universal-extractor:workflow-ack";
-const WORKFLOW_DELIVERED_TYPE = "universal-extractor:workflow-delivered";
-const LORA_STACK_DELIVERED_TYPE = "universal-extractor:lora-stack-delivered";
-const EXISTING_COMFY_PROBE_TIMEOUT_MS = 900;
-const WORKFLOW_DELIVERY_TIMEOUT_MS = 8000;
 const UI_PREFERENCES_KEY = "universal-extractor:ui-preferences";
 const DEFAULT_OUTPUT_SOURCE_ROOT = "default_output::";
 const FOLDER_REF_SEPARATOR = "::";
@@ -74,155 +66,6 @@ const matchesLibrarySearch = (library: LibraryInfo, searchTerm: string) => {
   }
   return library.filename.toLowerCase().includes(query);
 };
-
-type WorkflowPayload = {
-  id: string;
-  workflow: Record<string, unknown> | null;
-  prompt: unknown;
-  image: string;
-  imageUrl: string | null;
-  ts: number;
-};
-
-type LoraStackApplyMode = "append" | "replace";
-
-type LoraStackPayload = {
-  id: string;
-  mode: LoraStackApplyMode;
-  loraManager: ImageRecipeLoraManager;
-  image: string;
-  imageUrl: string | null;
-  ts: number;
-};
-
-type LoraStackSummary = {
-  target: string;
-  applied: number;
-  added: number;
-  updated: number;
-  removed: number;
-};
-
-type WorkflowAck = {
-  instanceId: string;
-  visibilityState?: DocumentVisibilityState;
-  focused?: boolean;
-  ts?: number;
-};
-
-type ChannelDeliveryResult = {
-  delivered: boolean;
-  ok: boolean;
-  error?: string;
-  summary?: LoraStackSummary;
-};
-
-const readLoraStackSummary = (value: unknown): LoraStackSummary | undefined => {
-  if (!value || typeof value !== "object") return undefined;
-  const info = value as Partial<LoraStackSummary>;
-  const counts = [info.applied, info.added, info.updated, info.removed];
-  if (typeof info.target !== "string" || !counts.every((count) => Number.isSafeInteger(count) && count! >= 0)) {
-    return undefined;
-  }
-  return {
-    target: info.target.slice(0, 120),
-    applied: info.applied!,
-    added: info.added!,
-    updated: info.updated!,
-    removed: info.removed!,
-  };
-};
-
-const trySendPayloadToExistingComfyPage = (
-  payload: WorkflowPayload | LoraStackPayload,
-  messageType: string,
-  deliveredType: string,
-) =>
-  new Promise<ChannelDeliveryResult>((resolve) => {
-    if (!("BroadcastChannel" in window)) {
-      resolve({ delivered: false, ok: false });
-      return;
-    }
-
-    let resolved = false;
-    let targetInstanceId: string | null = null;
-    const probeId = `${payload.id}-probe`;
-    const channel = new BroadcastChannel(WORKFLOW_CHANNEL_NAME);
-    const candidates: WorkflowAck[] = [];
-    let deliveryTimer = 0;
-    let probeTimer = 0;
-
-    const cleanup = () => {
-      window.clearTimeout(deliveryTimer);
-      window.clearTimeout(probeTimer);
-      channel.close();
-    };
-
-    const finish = (result: ChannelDeliveryResult) => {
-      if (resolved) {
-        return;
-      }
-      resolved = true;
-      cleanup();
-      resolve(result);
-    };
-
-    channel.addEventListener("message", (event) => {
-      const data = event.data;
-      if (!data || typeof data !== "object") {
-        return;
-      }
-      if (data.type === WORKFLOW_ACK_TYPE && data.probeId === probeId && typeof data.instanceId === "string") {
-        candidates.push(data as WorkflowAck);
-        return;
-      }
-      // Only the instance selected by the probe can acknowledge this send.
-      // A background ComfyUI tab must not make another tab's delivery look successful.
-      if (data.type === deliveredType && data.payloadId === payload.id &&
-          targetInstanceId && data.instanceId === targetInstanceId) {
-        finish({
-          delivered: true,
-          ok: data.ok !== false,
-          error: typeof data.error === "string" ? data.error : undefined,
-          summary: readLoraStackSummary(data.summary),
-        });
-      }
-    });
-
-    const selectTarget = () => {
-      if (resolved) {
-        return;
-      }
-      const target =
-        candidates.find((candidate) => candidate.focused) ??
-        candidates.find((candidate) => candidate.visibilityState === "visible") ??
-        candidates[0];
-
-      if (!target) {
-        finish({ delivered: false, ok: false });
-        return;
-      }
-
-      targetInstanceId = target.instanceId;
-      channel.postMessage({
-        type: messageType,
-        targetInstanceId: target.instanceId,
-        payload,
-      });
-      deliveryTimer = window.setTimeout(() => finish({ delivered: false, ok: false }), WORKFLOW_DELIVERY_TIMEOUT_MS);
-    };
-
-    channel.postMessage({ type: WORKFLOW_PROBE_TYPE, probeId, payloadId: payload.id });
-    probeTimer = window.setTimeout(selectTarget, EXISTING_COMFY_PROBE_TIMEOUT_MS);
-  });
-
-const trySendWorkflowToExistingComfyPage = async (payload: WorkflowPayload) => {
-  const result = await trySendPayloadToExistingComfyPage(payload, WORKFLOW_MESSAGE_TYPE, WORKFLOW_DELIVERED_TYPE);
-  return result.delivered && result.ok;
-};
-
-const trySendLoraStackToExistingComfyPage = (payload: LoraStackPayload) =>
-  trySendPayloadToExistingComfyPage(payload, LORA_STACK_MESSAGE_TYPE, LORA_STACK_DELIVERED_TYPE);
 
 const clearPendingWorkflowPayload = () => {
   try {
@@ -816,6 +659,7 @@ function App() {
         ts: Date.now(),
       };
       const result = await trySendLoraStackToExistingComfyPage(payload);
+      if (result.outdatedBridge) throw new Error(t("loraStackBridgeOutdated"));
       if (!result.delivered) throw new Error(t("loraStackApplyNoComfyPage"));
       if (!result.ok) throw new Error(result.error || t("loraStackApplyNoTargetNode"));
       return result.summary;

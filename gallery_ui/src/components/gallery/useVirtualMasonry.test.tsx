@@ -33,6 +33,8 @@ describe("useVirtualMasonry", () => {
     expect(getEffectiveMasonryColumns(8, 360, 14)).toBe(2);
     expect(getEffectiveMasonryColumns(2, 280, 14)).toBe(1);
     expect(getEffectiveMasonryColumns(8, 900, 14)).toBe(4);
+    expect(getEffectiveMasonryColumns(8, 980, 14)).toBe(5);
+    expect(getEffectiveMasonryColumns(6, 1096, 14)).toBe(6);
     expect(getEffectiveMasonryColumns(3, 1600, 14)).toBe(3);
   });
 

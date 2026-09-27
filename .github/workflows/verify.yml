@@ -74,6 +74,29 @@ jobs:
       - name: Check release metadata
         run: powershell -ExecutionPolicy Bypass -File scripts\check-release.ps1
 
+  lora-manager-upstream:
+    name: LoRA Manager upstream integration
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Fetch pinned upstream sources (test only, not vendored)
+        shell: bash
+        run: |
+          git init "$RUNNER_TEMP/ComfyUI-Lora-Manager"
+          git -C "$RUNNER_TEMP/ComfyUI-Lora-Manager" remote add origin https://github.com/willmiao/ComfyUI-Lora-Manager.git
+          git -C "$RUNNER_TEMP/ComfyUI-Lora-Manager" sparse-checkout init --cone
+          git -C "$RUNNER_TEMP/ComfyUI-Lora-Manager" sparse-checkout set web/comfyui
+          git -C "$RUNNER_TEMP/ComfyUI-Lora-Manager" fetch --depth 1 --filter=blob:none origin 0a262cbe0c0a773c174e6b4570c44671d6e2b9a3
+          git -C "$RUNNER_TEMP/ComfyUI-Lora-Manager" checkout --detach FETCH_HEAD
+          test "$(git -C "$RUNNER_TEMP/ComfyUI-Lora-Manager" rev-parse HEAD)" = 0a262cbe0c0a773c174e6b4570c44671d6e2b9a3
+      - name: Test against actual upstream callbacks and widget setter
+        env:
+          LORA_MANAGER_SOURCE: ${{ runner.temp }}/ComfyUI-Lora-Manager
+        run: node --test tests/comfy_lora_manager_upstream.test.mjs
+
   backend-matrix:
     name: Backend (${{ matrix.os }}, Python ${{ matrix.python }})
     runs-on: ${{ matrix.os }}

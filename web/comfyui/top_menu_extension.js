@@ -17,6 +17,10 @@ const WORKFLOW_PROBE_TYPE = "universal-extractor:workflow-probe";
 const WORKFLOW_ACK_TYPE = "universal-extractor:workflow-ack";
 const WORKFLOW_DELIVERED_TYPE = "universal-extractor:workflow-delivered";
 const LORA_STACK_DELIVERED_TYPE = "universal-extractor:lora-stack-delivered";
+// A v1.3 ComfyUI tab ignores payload.mode and replaces the stack even when
+// the v1.4+ gallery requests append. The gallery MUST verify this capability
+// during its probe before sending any LoRA mutation to an already-open tab.
+const LORA_STACK_PROTOCOL_VERSION = 2;
 
 const MIN_VERSION_FOR_ACTION_BAR = [1, 33, 9];
 
@@ -356,13 +360,16 @@ const mergeLoraEntries = (existing, incoming, mode) => {
         updated: incoming.filter((item) => oldNames.has(item.name)).length,
         removed: mode === "replace" ? current.filter((item) => !newNames.has(item.name)).length : 0,
     };
-    if (mode === "replace") return { value: incoming.map((item) => ({ ...item })), summary };
+    if (mode === "replace") return { value: incoming.map((item) => ({ ...item, expanded: false })), summary };
 
     const value = current.map((item) => {
         const matched = incoming.find((entry) => entry.name === item.name);
-        return matched ? { ...item, ...matched } : { ...item };
+        // A send folds EVERY CLIP child row on the target, including untouched
+        // and disabled entries. Never normalize clipStrength to strength here:
+        // the upstream widget respects expanded:false and retains both values.
+        return { ...item, ...(matched || {}), expanded: false };
     });
-    value.push(...incoming.filter((item) => !oldNames.has(item.name)).map((item) => ({ ...item })));
+    value.push(...incoming.filter((item) => !oldNames.has(item.name)).map((item) => ({ ...item, expanded: false })));
     return { value, summary };
 };
 
@@ -506,27 +513,45 @@ const applyLoraStackToNode = async (node, incoming, mode) => {
         }
 
         if (loraWidgets.length || textWidgets.length) {
-            // LoRA Manager syncs list -> text asynchronously. Only report
-            // success after its callback has run, and repair a late overwrite.
-            await new Promise((resolve) => window.setTimeout(resolve, 120));
+            // Upstream's list -> text callback is debounced (80ms). A receipt
+            // cannot mean "applied" until both widgets have settled. A v1.3
+            // bridge only checked incoming names and falsely reported success
+            // after deleting every OLD entry on append.
+            await new Promise((resolve) => window.setTimeout(resolve, 180));
+            let repaired = false;
             for (const widget of loraWidgets) {
                 if (!loraValuesMatch(widget.value, preparedValue)) {
                     setWidgetValue(node, widget, cloneLoraValue(preparedValue));
-                    markNodeDirty(node);
+                    repaired = true;
                 }
+            }
+            if (repaired) {
+                markNodeDirty(node);
+                // A repair triggers another upstream reverse-sync; check its
+                // final result too, instead of acknowledging a transient state.
+                await new Promise((resolve) => window.setTimeout(resolve, 120));
+            }
+            for (const widget of loraWidgets) {
                 if (!loraValuesMatch(widget.value, preparedValue)) {
                     throw new Error("LoRA Manager rejected the stack or independent CLIP strength.");
                 }
             }
             for (const widget of textWidgets) {
-                const textEntries = parseTextLoras(widget.value);
-                const byName = new Map(textEntries.map((item) => [item.name, item]));
-                if (incoming.some((item) => !byName.has(item.name)) ||
+                const byName = new Map(parseTextLoras(widget.value).map((item) => [item.name, item]));
+                const originalNames = mode === "append"
+                    ? parseTextLoras(originalWidgets.get(widget)).map((item) => item.name)
+                    : [];
+                const requiredNames = new Set([...originalNames, ...active.map(loraItemName).filter(Boolean)]);
+                if ([...requiredNames].some((name) => !byName.has(name)) ||
                     mode === "replace" && byName.size !== incoming.length ||
-                    !loraWidgets.length && incoming.some((item) =>
-                        !numberMatches(byName.get(item.name)?.strength, item.strength) ||
-                        !numberMatches(byName.get(item.name)?.clipStrength, item.clipStrength))) {
-                    throw new Error("LoRA Manager did not retain the requested LoRA text or CLIP strengths.");
+                    active.some((item) => {
+                        const actual = byName.get(loraItemName(item));
+                        const model = item.strength ?? item.strength_model ?? 1;
+                        const clip = item.clipStrength ?? item.strength_clip ?? model;
+                        return !actual || !numberMatches(actual.strength, model) ||
+                            !numberMatches(actual.clipStrength, clip);
+                    })) {
+                    throw new Error("LoRA Manager did not retain all LoRAs and CLIP strengths in the text field.");
                 }
             }
         }
@@ -609,6 +634,7 @@ const createExtensionObject = (useActionBar) => {
                     visibilityState: document.visibilityState,
                     focused: document.hasFocus(),
                     href: window.location.href,
+                    loraStackProtocol: LORA_STACK_PROTOCOL_VERSION,
                     ts: Date.now(),
                 });
             };
@@ -621,6 +647,7 @@ const createExtensionObject = (useActionBar) => {
                     ok: result.ok !== false,
                     error: result.error || null,
                     summary: result.summary || null,
+                    loraStackProtocol: type === LORA_STACK_DELIVERED_TYPE ? LORA_STACK_PROTOCOL_VERSION : undefined,
                     href: window.location.href,
                     ts: Date.now(),
                 });

@@ -127,6 +127,17 @@ describe("useGalleryData live refresh", () => {
     vi.restoreAllMocks();
   });
 
+  it("starts at six desktop columns without a saved preference but preserves a user's four", () => {
+    window.localStorage.removeItem("universal-extractor:grid-columns");
+    const first = renderHook(() => useGalleryData({ isActive: false }), { wrapper });
+    expect(first.result.current.gridColumns).toBe(6);
+    first.unmount();
+    window.localStorage.setItem("universal-extractor:grid-columns", "4");
+    const saved = renderHook(() => useGalleryData({ isActive: false }), { wrapper });
+    expect(saved.result.current.gridColumns).toBe(4);
+    saved.unmount();
+  });
+
   it("normalizes the default output API import path for a stable folder URL", async () => {
     vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
     vi.mocked(galleryApi.importFiles).mockResolvedValue({

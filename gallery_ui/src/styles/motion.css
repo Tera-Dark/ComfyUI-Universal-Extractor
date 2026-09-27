@@ -8,6 +8,14 @@
 .ue-modal-backdrop { animation:ue-overlay-in 140ms linear both; }
 .ue-animate-in { animation:ue-fade-in 140ms ease-out; }
 .ue-app-shell .ue-gallery-card, .ue-app-shell .ue-gallery-media, .ue-app-shell .ue-gallery-image-shell { transition:box-shadow 120ms ease, border-color 120ms ease; }
+/* A stationary cursor changes which virtual card is :hover on EVERY wheel
+   step. Translating the hovered card made its photo jump during scrolling. */
+.ue-app-shell .ue-gallery-grid--virtual .ue-gallery-card,
+.ue-app-shell .ue-gallery-grid--virtual .ue-gallery-card:hover,
+.ue-app-shell .ue-gallery-grid--virtual .ue-gallery-card.is-selected:hover {
+  transform:none;
+  will-change:auto;
+}
 .ue-app-shell .ue-gallery-card:hover .ue-gallery-media img { transform:none; filter:none; }
 .ue-app-shell .ue-gallery-image-shell img { transition:opacity 120ms linear; }
 .ue-disclosure-panel, .ue-density-panel, .ue-filter-menu, .ue-sidebar-action-menu, .ue-gallery-context-menu { animation:ue-fade-in 100ms ease-out; }

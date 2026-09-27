@@ -2,6 +2,13 @@
 
 All notable changes to the ComfyUI Universal Extractor project will be documented in this file.
 
+## Unreleased
+
+- Prevent an updated gallery from sending LoRA stacks to a still-open v1.3 ComfyUI tab: its old bridge ignored Append/Replace and deleted old entries. Probe the chosen tab's LoRA protocol before any write; request a restart and hard refresh if outdated. Check both old and new entries and CLIP values after the upstream asynchronous sync before acknowledging success.
+- Fold **all** CLIP child rows on the target node after Append or Replace, keeping independent CLIP strengths including zero. Preserve unrelated workflow nodes and non-LoRA text.
+- Fix middle-gallery scroll jitter: remove photo hover translation, keep card metadata in one measured row, and default to six desktop columns where space allows. Preserve saved densities and responsive mobile limits.
+- Add a pinned-source LoRA Manager integration CI job (upstream callbacks and widget setter), version-handshake tests, and bidirectional mid-scroll Chromium regression alongside the tail/resize tests. Local tests do not substitute for a user's installed ComfyUI/device validation.
+
 ## 1.4.0 - 2026-09-27
 
 Gallery workflow, safety and LoRA-stack usability update. This release includes the previously uncommitted P0/P1/P2 refinements and masonry-scroll fix since 1.3.0.

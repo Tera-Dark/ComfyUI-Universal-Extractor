@@ -68,7 +68,9 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [gridColumns, setGridColumns] = useState(() => {
     const stored = window.localStorage.getItem("universal-extractor:grid-columns");
     const parsed = Number(stored);
-    return Number.isFinite(parsed) && parsed >= 3 && parsed <= 8 ? parsed : 4;
+    // Only change the first-use desktop default. Respect a saved density;
+    // the masonry hook and mobile preset still clamp columns to actual width.
+    return Number.isFinite(parsed) && parsed >= 3 && parsed <= 8 ? parsed : 6;
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
