@@ -7,6 +7,7 @@ import {
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import {
   BookOpen,
   Boxes,
@@ -56,6 +57,7 @@ interface ImageDetailModalProps {
   onApplyLoraStack: (image: ImageRecord) => Promise<void>;
   navigation: DetailNavigationState | null;
   onNavigate: (index: number) => void;
+  onRegisterLeave?: (guard: (() => Promise<boolean>) | null) => void;
 }
 
 interface PanPosition {
@@ -71,12 +73,35 @@ interface DragState {
   originY: number;
 }
 
-interface DraftStateSnapshot {
+interface DetailDraft {
   title: string;
   category: string;
   notes: string;
   pinned: boolean;
+  filename: string;
 }
+
+type DetailDraftField = keyof DetailDraft;
+
+interface DetailEditor {
+  imagePath: string;
+  draft: DetailDraft;
+  saved: DetailDraft;
+  touched: Partial<Record<DetailDraftField, boolean>>;
+}
+
+const draftFromImage = (image: ImageRecord): DetailDraft => ({
+  title: image.title || "",
+  category: image.category || "",
+  notes: image.notes || "",
+  pinned: image.pinned || image.favorite || false,
+  filename: image.filename || "",
+});
+
+const editorForImage = (image: ImageRecord): DetailEditor => {
+  const draft = draftFromImage(image);
+  return { imagePath: image.relative_path, draft, saved: draft, touched: {} };
+};
 
 interface LightboxVisual {
   key: string;
@@ -117,29 +142,37 @@ export const ImageDetailModal = ({
   onApplyLoraStack,
   navigation,
   onNavigate,
+  onRegisterLeave,
 }: ImageDetailModalProps) => {
   const { t, locale } = useI18n();
-  const { confirm } = useConfirm();
+  const { confirm, choose } = useConfirm();
   const { pushToast } = useToast();
   const [metadata, setMetadata] = useState<ImageMetadata | null>(null);
   const [relatedVariantGroups, setRelatedVariantGroups] = useState<VariantGroup[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [draftTitle, setDraftTitle] = useState(() => image.title || "");
-  const [draftCategory, setDraftCategory] = useState(() => image.category || "");
-  const [draftNotes, setDraftNotes] = useState(() => image.notes || "");
-  const [draftPinned, setDraftPinned] = useState(() => image.pinned || image.favorite || false);
-  const [draftFilename, setDraftFilename] = useState(() => image.filename || "");
+  const [editor, setEditor] = useState<DetailEditor>(() => editorForImage(image));
+  const { title: draftTitle, category: draftCategory, notes: draftNotes, pinned: draftPinned, filename: draftFilename } = editor.draft;
+  const savedStateSnapshot = editor.saved;
   const [isExpandedView, setIsExpandedView] = useState(false);
   const [showInspector, setShowInspector] = useState(false);
-  const [savedStateSnapshot, setSavedStateSnapshot] = useState<DraftStateSnapshot>({
-    title: image.title || "",
-    category: image.category || "",
-    notes: image.notes || "",
-    pinned: image.pinned || image.favorite || false,
-  });
   const [isSavingState, setIsSavingState] = useState(false);
+  const [isRenamingFile, setIsRenamingFile] = useState(false);
+  const [isLeaving, setIsLeaving] = useState(false);
   const [stateSaveError, setStateSaveError] = useState<string | null>(null);
+  const [fileActionError, setFileActionError] = useState<string | null>(null);
+  const leavingRef = useRef(false);
+  const workspaceLeaveRef = useRef<() => Promise<boolean>>(async () => false);
+  const isEditorBusy = isLeaving || isSavingState || isRenamingFile;
+  const setDraftField = <K extends DetailDraftField>(field: K, value: DetailDraft[K]) => {
+    // A late edit while "save and continue" is in flight must not be silently lost.
+    if (leavingRef.current || isEditorBusy) return;
+    setEditor((current) => ({
+      ...current,
+      draft: { ...current.draft, [field]: value },
+      touched: { ...current.touched, [field]: true },
+    }));
+  };
   const [zoomScale, setZoomScale] = useState(MIN_ZOOM);
   const [pan, setPan] = useState<PanPosition>({ x: 0, y: 0 });
   const [isDragging, setIsDragging] = useState(false);
@@ -161,21 +194,8 @@ export const ImageDetailModal = ({
   const [detailRetryKey, setDetailRetryKey] = useState(0);
   const activeThumbRef = useRef<HTMLButtonElement | null>(null);
 
-  useEffect(() => {
-    setDraftTitle(image.title || "");
-    setDraftCategory(image.category || "");
-    setDraftNotes(image.notes || "");
-    setDraftPinned(image.pinned || image.favorite || false);
-    setDraftFilename(image.filename || "");
-    setSavedStateSnapshot({title:image.title || "", category:image.category || "", notes:image.notes || "", pinned:image.pinned || image.favorite || false});
-    setZoomScale(MIN_ZOOM);
-    setPan({ x: 0, y: 0 });
-    setIsExpandedView(false);
-    setIsDragging(false);
-    dragStateRef.current = null;
-    setImageLoadFailed(false);
-    setDetailRetryKey(0);
-  }, [image.relative_path, image.title, image.category, image.notes, image.pinned, image.favorite, image.filename]);
+  // App keys this detail by image path. A new image gets its own draft and viewport;
+  // changes to the current image record must not reset an in-progress edit.
 
   useEffect(() => {
     const controller = new AbortController();
@@ -225,18 +245,25 @@ export const ImageDetailModal = ({
         }
 
         setMetadata(response);
-        setDraftTitle(response.state.title || image.title || "");
-        setDraftCategory(response.state.category || image.category || "");
-        setDraftNotes(response.state.notes || image.notes || "");
-        setDraftPinned(response.state.pinned || response.state.favorite || image.pinned || image.favorite || false);
-        setDraftFilename(response.filename || image.filename || "");
-        setSavedStateSnapshot({
-          title: response.state.title || image.title || "",
-          category: response.state.category || image.category || "",
-          notes: response.state.notes || image.notes || "",
-          pinned: response.state.pinned || response.state.favorite || image.pinned || image.favorite || false,
-        });
-        setStateSaveError(null);
+        const saved: DetailDraft = {
+          title: response.state.title ?? image.title ?? "",
+          category: response.state.category ?? image.category ?? "",
+          notes: response.state.notes ?? image.notes ?? "",
+          pinned: response.state.pinned ?? response.state.favorite ?? image.pinned ?? image.favorite ?? false,
+          filename: response.filename || image.filename || "",
+        };
+        setEditor((current) => current.imagePath !== image.relative_path ? current : ({
+          ...current,
+          saved,
+          // The metadata request may finish after the user has started typing.
+          draft: {
+            title: current.touched.title ? current.draft.title : saved.title,
+            category: current.touched.category ? current.draft.category : saved.category,
+            notes: current.touched.notes ? current.draft.notes : saved.notes,
+            pinned: current.touched.pinned ? current.draft.pinned : saved.pinned,
+            filename: current.touched.filename ? current.draft.filename : saved.filename,
+          },
+        }));
       } catch (fetchError) {
         if (!cancelled) {
           setError(fetchError instanceof Error ? fetchError.message : t("modalLoading"));
@@ -288,6 +315,47 @@ export const ImageDetailModal = ({
     };
   }, []);
 
+  useEffect(() => {
+    // Render outside #root, so the gallery can be truly inert while the
+    // detail (and any confirmation portal stacked above it) remains usable.
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const appRoot = document.getElementById("root");
+    const wasInert = appRoot?.inert ?? false;
+    if (appRoot) appRoot.inert = true;
+    const dialog = lightboxRef.current;
+    dialog?.querySelector<HTMLButtonElement>(".ue-lightbox-close")?.focus({ preventScroll: true });
+    const focusable = () => Array.from(dialog?.querySelectorAll<HTMLElement>(
+      'button:not(:disabled), a[href], input:not(:disabled), textarea:not(:disabled), select:not(:disabled), [tabindex]:not([tabindex="-1"])',
+    ) ?? []).filter((element) => !element.closest("[inert], [hidden], [aria-hidden='true']"));
+    const hasStackedDialog = () => Boolean(document.querySelector(".ue-confirm-backdrop, .ue-onboarding-layer"));
+    const onTab = (event: KeyboardEvent) => {
+      if (event.key !== "Tab" || hasStackedDialog()) return;
+      const items = focusable();
+      if (!items.length) { event.preventDefault(); dialog?.focus({ preventScroll: true }); return; }
+      const first = items[0], last = items[items.length - 1];
+      if (!dialog?.contains(document.activeElement) || document.activeElement === dialog) {
+        event.preventDefault(); (event.shiftKey ? last : first).focus();
+      } else if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault(); last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault(); first.focus();
+      }
+    };
+    const onFocus = (event: FocusEvent) => {
+      if (!hasStackedDialog() && !dialog?.contains(event.target as Node)) {
+        dialog?.querySelector<HTMLButtonElement>(".ue-lightbox-close")?.focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener("keydown", onTab, true);
+    document.addEventListener("focusin", onFocus);
+    return () => {
+      document.removeEventListener("keydown", onTab, true);
+      document.removeEventListener("focusin", onFocus);
+      if (appRoot) appRoot.inert = wasInert;
+      if (previous?.isConnected && !previous.closest("[inert]")) previous.focus({ preventScroll: true });
+    };
+  }, []);
+
   const metadataKeys = metadata?.metadata ? Object.keys(metadata.metadata) : [];
   const canOpenWorkflow = Boolean(
     metadata?.workflow ||
@@ -310,6 +378,8 @@ export const ImageDetailModal = ({
     draftCategory !== savedStateSnapshot.category ||
     draftNotes !== savedStateSnapshot.notes ||
     draftPinned !== savedStateSnapshot.pinned;
+  const isFilenameDirty = draftFilename !== savedStateSnapshot.filename;
+  const hasUnsavedEdits = isStateDirty || isFilenameDirty;
 
   const resetViewport = () => {
     dragStateRef.current = null;
@@ -442,61 +512,83 @@ export const ImageDetailModal = ({
     void handleRequestClose();
   };
 
-  const handleSave = async () => {
-    if (isStateDirty) {
-      const approved = await confirm({
-        title: t("modalSaveState"),
-        message: t("imageStateSaveConfirm", { name: image.filename }),
-        tone: "warning",
-        confirmLabel: t("librarySave"),
-        cancelLabel: t("libraryCancel"),
-      });
-      if (!approved) {
-        return;
-      }
+  const saveState = async (): Promise<boolean> => {
+    if (!isStateDirty) return true;
+    if (isLoading) {
+      setStateSaveError(t("modalWaitForMetadata"));
+      return false;
     }
-
+    const updates = { title: draftTitle, category: draftCategory, notes: draftNotes, pinned: draftPinned };
     setIsSavingState(true);
     setStateSaveError(null);
     try {
-      await onSaveState(image.relative_path, {
-        title: draftTitle,
-        category: draftCategory,
-        notes: draftNotes,
-        pinned: draftPinned,
-      });
-      setSavedStateSnapshot({
-        title: draftTitle,
-        category: draftCategory,
-        notes: draftNotes,
-        pinned: draftPinned,
-      });
+      await onSaveState(image.relative_path, updates);
+      setEditor((current) => current.imagePath !== image.relative_path ? current : ({
+        ...current,
+        saved: { ...current.saved, ...updates },
+      }));
       pushToast(t("modalSaveState"), "success");
+      return true;
     } catch (saveError) {
-      setStateSaveError(saveError instanceof Error ? saveError.message : t("imageStateSaveError"));
-      pushToast(saveError instanceof Error ? saveError.message : t("imageStateSaveError"), "error");
-      throw saveError;
+      const message = saveError instanceof Error ? saveError.message : t("imageStateSaveError");
+      setStateSaveError(message);
+      pushToast(message, "error");
+      return false;
     } finally {
       setIsSavingState(false);
     }
   };
 
+  const renameFile = async (): Promise<boolean> => {
+    if (!isFilenameDirty) return true;
+    if (!draftFilename.trim()) {
+      setFileActionError(t("modalFilenameRequired"));
+      return false;
+    }
+    setIsRenamingFile(true);
+    setFileActionError(null);
+    try {
+      await onRenameFile(image.relative_path, draftFilename);
+      return true;
+    } catch (renameError) {
+      setFileActionError(renameError instanceof Error ? renameError.message : t("imageRenameError"));
+      return false;
+    } finally {
+      setIsRenamingFile(false);
+    }
+  };
+
+  const handleSave = async () => {
+    if (!isStateDirty || isSavingState || isLoading) return;
+    const approved = await confirm({
+      title: t("modalSaveState"),
+      message: t("imageStateSaveConfirm", { name: image.filename }),
+      tone: "warning",
+      confirmLabel: t("librarySave"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (approved) await saveState();
+  };
+
   const handleRename = async () => {
+    if (isSavingState || isRenamingFile || leavingRef.current) return;
+    if (!isFilenameDirty) {
+      setShowInspector(true);
+      return;
+    }
     const approved = await confirm({
       title: t("modalRenameFile"),
-      message: t("imageRenameConfirm", { name: image.filename, target: draftFilename }),
+      message: t(isStateDirty ? "imageRenameWithStateConfirm" : "imageRenameConfirm", { name: image.filename, target: draftFilename }),
       tone: "warning",
       confirmLabel: t("folderRename"),
       cancelLabel: t("libraryCancel"),
     });
-    if (!approved) {
-      return;
-    }
-
-    await onRenameFile(image.relative_path, draftFilename);
+    if (!approved || (isStateDirty && !await saveState())) return;
+    await renameFile();
   };
 
   const handleDelete = async () => {
+    if (isSavingState || isRenamingFile || leavingRef.current) return;
     const approved = await confirm({
       title: t("modalDeleteFile"),
       message: t("imageDeleteConfirm", { name: image.filename }),
@@ -504,12 +596,14 @@ export const ImageDetailModal = ({
       confirmLabel: t("commonDelete"),
       cancelLabel: t("libraryCancel"),
     });
-    if (!approved) {
-      return;
+    if (!approved) return;
+    setFileActionError(null);
+    try {
+      await onDeleteFile(image.relative_path);
+      onClose();
+    } catch (deleteError) {
+      setFileActionError(deleteError instanceof Error ? deleteError.message : t("imageDeleteError"));
     }
-
-    await onDeleteFile(image.relative_path);
-    onClose();
   };
 
   const [copiedField, setCopiedField] = useState<string | null>(null);
@@ -570,20 +664,45 @@ export const ImageDetailModal = ({
     await copyText(parts.join("\n\n"), t("recipeCopiedSuccess"), "full");
   };
 
-  const handleRequestClose = async () => {
-    if (isStateDirty) {
-      const approved = await confirm({
-        title: t("modalUnsavedStateTitle"),
-        message: t("modalUnsavedStateText"),
-        tone: "warning",
-        confirmLabel: t("modalDiscardChanges"),
-        cancelLabel: t("libraryCancel"),
-      });
-      if (!approved) {
-        return;
+  const requestLeave = async (leave: () => void | Promise<void>): Promise<boolean> => {
+    if (leavingRef.current || closing.current || isSavingState || isRenamingFile) return false;
+    leavingRef.current = true;
+    setIsLeaving(true);
+    try {
+      if (hasUnsavedEdits) {
+        const choice = await choose({
+          title: t("modalUnsavedStateTitle"),
+          message: t(isLoading ? "modalUnsavedLoadingText" : isFilenameDirty ? "modalUnsavedFilenameText" : "modalUnsavedStateText", { target: draftFilename }),
+          tone: "warning",
+          confirmLabel: t("modalSaveAndContinue"),
+          alternativeLabel: t("modalDiscardChanges"),
+          cancelLabel: t("libraryCancel"),
+          confirmDisabled: isLoading,
+        });
+        if (choice === "cancel") return false;
+        if (choice === "confirm" && (!await saveState() || !await renameFile())) return false;
       }
+      await leave();
+      return true;
+    } finally {
+      leavingRef.current = false;
+      setIsLeaving(false);
     }
-    if (closing.current) return;
+  };
+
+  // A workspace change can originate outside this modal (for example via keyboard focus).
+  // Register the same leave guard rather than letting App discard an in-progress draft.
+  useEffect(() => {
+    workspaceLeaveRef.current = () => requestLeave(() => {});
+  });
+  useEffect(() => {
+    if (!onRegisterLeave) return;
+    const guard = () => workspaceLeaveRef.current();
+    onRegisterLeave(guard);
+    return () => onRegisterLeave(null);
+  }, [onRegisterLeave]);
+
+  const handleRequestClose = () => requestLeave(async () => {
     closing.current = true;
     const element = lightboxRef.current;
     const reduced = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -591,13 +710,18 @@ export const ImageDetailModal = ({
       await element.animate([{opacity:1}, {opacity:0}], {duration:100, easing:"ease-out", fill:"forwards"}).finished.catch(() => undefined);
     }
     onClose();
+  });
+
+  const handleRequestNavigate = (index: number) => {
+    if (!navigation?.items[index] || index === currentIndex) return;
+    void requestLeave(() => onNavigate(index));
   };
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
         event.preventDefault();
-        void handleSave();
+        void (isFilenameDirty && !isStateDirty ? handleRename() : handleSave());
       }
 
       if (event.key === "Escape") {
@@ -607,12 +731,12 @@ export const ImageDetailModal = ({
 
       if (!isEditableTarget(event.target) && event.key === "ArrowLeft" && navigation && currentIndex > 0) {
         event.preventDefault();
-        onNavigate(currentIndex - 1);
+        handleRequestNavigate(currentIndex - 1);
       }
 
       if (!isEditableTarget(event.target) && event.key === "ArrowRight" && navigation && currentIndex < totalItems - 1) {
         event.preventDefault();
-        onNavigate(currentIndex + 1);
+        handleRequestNavigate(currentIndex + 1);
       }
     };
 
@@ -620,8 +744,8 @@ export const ImageDetailModal = ({
     return () => window.removeEventListener("keydown", handleKeyDown);
   });
 
-  return (
-    <div ref={lightboxRef} className="ue-modal-backdrop ue-modal-backdrop--lightbox" onClick={() => void handleRequestClose()}>
+  return createPortal(
+    <div ref={lightboxRef} role="dialog" aria-modal="true" aria-label={image.title || image.filename} tabIndex={-1} className="ue-modal-backdrop ue-modal-backdrop--lightbox" onClick={() => void handleRequestClose()}>
       <div
         className="ue-lightbox-shell"
         onClick={(event) => event.stopPropagation()}
@@ -643,7 +767,7 @@ export const ImageDetailModal = ({
         <button
           className="ue-lightbox-side-nav ue-lightbox-side-nav--prev"
           disabled={!navigation || currentIndex <= 0}
-          onClick={() => onNavigate(Math.max(0, currentIndex - 1))}
+          onClick={() => handleRequestNavigate(Math.max(0, currentIndex - 1))}
           aria-label={t("galleryPrevious")}
           {...getTooltipProps(t("galleryPrevious"))}
         >
@@ -653,7 +777,7 @@ export const ImageDetailModal = ({
         <button
           className="ue-lightbox-side-nav ue-lightbox-side-nav--next"
           disabled={!navigation || currentIndex >= totalItems - 1}
-          onClick={() => onNavigate(Math.min(totalItems - 1, currentIndex + 1))}
+          onClick={() => handleRequestNavigate(Math.min(totalItems - 1, currentIndex + 1))}
           aria-label={t("galleryNext")}
           {...getTooltipProps(t("galleryNext"))}
         >
@@ -721,7 +845,7 @@ export const ImageDetailModal = ({
             )}
           </div>
 
-          <aside className={`ue-lightbox-inspector ${showInspector ? "is-open" : ""}`}>
+          <aside className={`ue-lightbox-inspector ${showInspector ? "is-open" : ""}`} inert={!showInspector} aria-hidden={!showInspector}>
             <div className="ue-lightbox-inspector-head">
               <div>
                 <h3>{draftFilename || image.filename}</h3>
@@ -750,19 +874,21 @@ export const ImageDetailModal = ({
                   <span>{t("modalTitleField")}</span>
                   <input
                     value={draftTitle}
-                    onChange={(event) => setDraftTitle(event.target.value)}
+                    disabled={isEditorBusy}
+                    onChange={(event) => setDraftField("title", event.target.value)}
                     placeholder={t("galleryTitlePlaceholder")}
                   />
                 </label>
                 <label>
                   <span>{t("modalFilenameField")}</span>
-                  <input value={draftFilename} onChange={(event) => setDraftFilename(event.target.value)} />
+                  <input value={draftFilename} disabled={isEditorBusy} onChange={(event) => { setDraftField("filename", event.target.value); setFileActionError(null); }} />
                 </label>
                 <label>
                   <span>{t("modalCategory")}</span>
                   <input
                     value={draftCategory}
-                    onChange={(event) => setDraftCategory(event.target.value)}
+                    disabled={isEditorBusy}
+                    onChange={(event) => setDraftField("category", event.target.value)}
                     placeholder={t("galleryCategoryPlaceholder")}
                   />
                 </label>
@@ -770,7 +896,8 @@ export const ImageDetailModal = ({
                   <span>{t("modalNotesField")}</span>
                   <textarea
                     value={draftNotes}
-                    onChange={(event) => setDraftNotes(event.target.value)}
+                    disabled={isEditorBusy}
+                    onChange={(event) => setDraftField("notes", event.target.value)}
                     placeholder={t("galleryNotesPlaceholder")}
                   />
                 </label>
@@ -778,13 +905,13 @@ export const ImageDetailModal = ({
 
               <div className="ue-detail-savebar">
                 <div className="ue-detail-savecopy">
-                  <strong>{isStateDirty ? t("modalUnsavedStateBadge") : t("modalSavedStateBadge")}</strong>
-                  <span>{t("modalSaveHint")}</span>
+                  <strong>{hasUnsavedEdits ? t("modalUnsavedStateBadge") : t("modalSavedStateBadge")}</strong>
+                  <span>{t(isFilenameDirty ? "modalFilenameRenameHint" : "modalSaveHint")}</span>
                 </div>
                 <button
                   className="ue-icon-action ue-icon-action--filled"
                   onClick={() => void handleSave()}
-                  disabled={!isStateDirty || isSavingState}
+                  disabled={!isStateDirty || isSavingState || isLoading}
                   aria-label={isSavingState ? t("commonLoading") : t("modalSaveState")}
                   title={isSavingState ? t("commonLoading") : t("modalSaveState")}
                 >
@@ -1025,19 +1152,21 @@ export const ImageDetailModal = ({
                       <span>{t("modalTitleField")}</span>
                       <input
                         value={draftTitle}
-                        onChange={(event) => setDraftTitle(event.target.value)}
+                        disabled={isEditorBusy}
+                        onChange={(event) => setDraftField("title", event.target.value)}
                         placeholder={t("galleryTitlePlaceholder")}
                       />
                     </label>
                     <label>
                       <span>{t("modalFilenameField")}</span>
-                      <input value={draftFilename} onChange={(event) => setDraftFilename(event.target.value)} />
+                      <input value={draftFilename} disabled={isEditorBusy} onChange={(event) => { setDraftField("filename", event.target.value); setFileActionError(null); }} />
                     </label>
                     <label>
                       <span>{t("modalCategory")}</span>
                       <input
                         value={draftCategory}
-                        onChange={(event) => setDraftCategory(event.target.value)}
+                        disabled={isEditorBusy}
+                        onChange={(event) => setDraftField("category", event.target.value)}
                         placeholder={t("galleryCategoryPlaceholder")}
                       />
                     </label>
@@ -1045,7 +1174,8 @@ export const ImageDetailModal = ({
                       <span>{t("modalNotesField")}</span>
                       <textarea
                         value={draftNotes}
-                        onChange={(event) => setDraftNotes(event.target.value)}
+                        disabled={isEditorBusy}
+                        onChange={(event) => setDraftField("notes", event.target.value)}
                         placeholder={t("galleryNotesPlaceholder")}
                       />
                     </label>
@@ -1053,13 +1183,13 @@ export const ImageDetailModal = ({
 
                   <div className="ue-detail-savebar">
                     <div className="ue-detail-savecopy">
-                      <strong>{isStateDirty ? t("modalUnsavedStateBadge") : t("modalSavedStateBadge")}</strong>
-                      <span>{t("modalSaveHint")}</span>
+                      <strong>{hasUnsavedEdits ? t("modalUnsavedStateBadge") : t("modalSavedStateBadge")}</strong>
+                      <span>{t(isFilenameDirty ? "modalFilenameRenameHint" : "modalSaveHint")}</span>
                     </div>
                     <button
                       className="ue-icon-action ue-icon-action--filled"
                       onClick={() => void handleSave()}
-                      disabled={!isStateDirty || isSavingState}
+                      disabled={!isStateDirty || isSavingState || isLoading}
                       aria-label={isSavingState ? t("commonLoading") : t("modalSaveState")}
                       title={isSavingState ? t("commonLoading") : t("modalSaveState")}
                     >
@@ -1122,7 +1252,7 @@ export const ImageDetailModal = ({
                       ref={isCurrent ? activeThumbRef : undefined}
                       type="button"
                       className={`ue-lightbox-filmstrip-item ${isCurrent ? "is-active" : ""}`}
-                      onClick={() => onNavigate(idx)}
+                      onClick={() => handleRequestNavigate(idx)}
                       title={navItem.title || navItem.filename}
                       aria-label={navItem.title || navItem.filename}
                     >
@@ -1136,10 +1266,11 @@ export const ImageDetailModal = ({
         </div>
 
         <div className="ue-lightbox-toolbar">
+          {fileActionError ? <div className="ue-inline-error ue-lightbox-action-error" role="alert">{fileActionError}</div> : null}
           <button
             className="ue-toolbar-btn"
             disabled={!navigation || currentIndex <= 0}
-            onClick={() => onNavigate(Math.max(0, currentIndex - 1))}
+            onClick={() => handleRequestNavigate(Math.max(0, currentIndex - 1))}
             aria-label={t("galleryPrevious")}
             {...getTooltipProps(t("galleryPrevious"))}
           >
@@ -1152,7 +1283,7 @@ export const ImageDetailModal = ({
           <button
             className="ue-toolbar-btn"
             disabled={!navigation || currentIndex >= totalItems - 1}
-            onClick={() => onNavigate(Math.min(totalItems - 1, currentIndex + 1))}
+            onClick={() => handleRequestNavigate(Math.min(totalItems - 1, currentIndex + 1))}
             aria-label={t("galleryNext")}
             {...getTooltipProps(t("galleryNext"))}
           >
@@ -1216,7 +1347,7 @@ export const ImageDetailModal = ({
             onClick={() => void handleSave()}
             aria-label={t("modalSaveState")}
             {...getTooltipProps(t("modalSaveState"))}
-            disabled={isSavingState}
+            disabled={!isStateDirty || isSavingState || isLoading}
           >
             <Save size={17} />
           </button>
@@ -1242,7 +1373,8 @@ export const ImageDetailModal = ({
           ) : null}
           <button
             className="ue-toolbar-btn"
-            onClick={() => setDraftPinned((current) => !current)}
+            onClick={() => setDraftField("pinned", !draftPinned)}
+            disabled={isEditorBusy}
             aria-label={pinLabel}
             {...getTooltipProps(pinLabel)}
           >
@@ -1277,6 +1409,7 @@ export const ImageDetailModal = ({
           </a>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 };

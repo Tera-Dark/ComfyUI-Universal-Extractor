@@ -22,8 +22,9 @@ import {
 
 import { useI18n } from "../../i18n/I18nProvider";
 import { galleryApi } from "../../services/galleryApi";
-import type { BoardMutationResult, BoardSummary, GalleryContext, ImageRecord, MoveImagesResult } from "../../types/universal-gallery";
+import type { BoardMutationResult, BoardSummary, DeleteImagesResult, GalleryContext, ImageRecord, MoveImagesResult } from "../../types/universal-gallery";
 import { formatFileSize } from "../../utils/formatters";
+import { describeFailedPaths, getDeleteOutcome, getMoveOutcome } from "../../utils/galleryOperationResults";
 import { getPositivePromptText } from "../../utils/metadata";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
@@ -49,6 +50,7 @@ import {
 const pageSize = 80;
 
 interface FolderPaneState {
+  scopeKey: string;
   images: ImageRecord[];
   total: number;
   loading: boolean;
@@ -77,16 +79,20 @@ interface DualFolderWorkspaceProps {
   sortBy: string;
   sortOrder: string;
   boards: BoardSummary[];
-  onOpenDetail: (image: ImageRecord) => void;
+  onOpenDetail: (image: ImageRecord, scope?: ImageRecord[]) => void;
+  onSelectionChange?: (relativePaths: string[]) => void;
+  onVisibleImagesChange?: (images: ImageRecord[]) => void;
+  inspectorClearSignal?: number;
   onOpenWorkflow: (image: ImageRecord) => Promise<void>;
   onMoveImages: (relativePaths: string[], targetSubfolder: string, targetSourceId?: string) => Promise<MoveImagesResult>;
-  onDeleteImages: (relativePaths: string[]) => Promise<unknown>;
+  onDeleteImages: (relativePaths: string[]) => Promise<DeleteImagesResult>;
   onUpdateImageState: (relativePath: string, updates: Record<string, unknown>) => Promise<void>;
   onCreateBoard: (name: string, description?: string) => Promise<BoardMutationResult>;
   onUpdateBoardPins: (boardId: string, relativePaths: string[], pinned?: boolean) => Promise<unknown>;
 }
 
 const emptyPaneState = (): FolderPaneState => ({
+  scopeKey: "",
   images: [],
   total: 0,
   loading: false,
@@ -268,6 +274,9 @@ export const DualFolderWorkspace = ({
   sortOrder,
   boards,
   onOpenDetail,
+  onSelectionChange,
+  onVisibleImagesChange,
+  inspectorClearSignal,
   onOpenWorkflow,
   onMoveImages,
   onDeleteImages,
@@ -377,7 +386,11 @@ export const DualFolderWorkspace = ({
   const [boardPickerPaths, setBoardPickerPaths] = useState<string[]>([]);
   const [metadataViewerImage, setMetadataViewerImage] = useState<ImageRecord | null>(null);
 
-  const getPaneState = useCallback((pane: PaneId) => (pane === "left" ? leftState : rightState), [leftState, rightState]);
+  const getPaneState = useCallback((pane: PaneId) => {
+    const state = pane === "left" ? leftState : rightState;
+    const folder = pane === "left" ? leftFolder : rightFolder;
+    return state.scopeKey === JSON.stringify([folder, sortBy, sortOrder]) ? state : { ...emptyPaneState(), loading: true };
+  }, [leftFolder, leftState, rightFolder, rightState, sortBy, sortOrder]);
   const getPaneFolder = useCallback((pane: PaneId) => (pane === "left" ? leftFolder : rightFolder), [leftFolder, rightFolder]);
   const getPaneSelection = useCallback((pane: PaneId) => (pane === "left" ? leftSelection : rightSelection), [leftSelection, rightSelection]);
   const setPaneSelection = useCallback((pane: PaneId, updater: (current: PaneSelectionState) => PaneSelectionState) => {
@@ -391,6 +404,22 @@ export const DualFolderWorkspace = ({
   const clearPaneSelection = useCallback((pane: PaneId) => {
     setPaneSelection(pane, () => emptySelectionState());
   }, [setPaneSelection]);
+
+  const visiblePaneImages = useMemo(() => {
+    const left = leftState.scopeKey === JSON.stringify([leftFolder, sortBy, sortOrder]) ? leftState.images : [];
+    const right = rightState.scopeKey === JSON.stringify([rightFolder, sortBy, sortOrder]) ? rightState.images : [];
+    return [...new Map([...left, ...right].map((image) => [image.relative_path, image])).values()];
+  }, [leftFolder, leftState.images, leftState.scopeKey, rightFolder, rightState.images, rightState.scopeKey, sortBy, sortOrder]);
+  useEffect(() => { onVisibleImagesChange?.(visiblePaneImages); }, [onVisibleImagesChange, visiblePaneImages]);
+  useEffect(() => {
+    const visible = new Set(visiblePaneImages.map((image) => image.relative_path));
+    onSelectionChange?.([...new Set([...leftSelection.selectedPaths, ...rightSelection.selectedPaths])].filter((path) => visible.has(path)));
+  }, [leftSelection.selectedPaths, onSelectionChange, rightSelection.selectedPaths, visiblePaneImages]);
+  useEffect(() => {
+    if (!inspectorClearSignal) return;
+    clearPaneSelection("left");
+    clearPaneSelection("right");
+  }, [clearPaneSelection, inspectorClearSignal]);
 
   useEffect(() => {
     if (normalizedInitialFolder) {
@@ -414,9 +443,13 @@ export const DualFolderWorkspace = ({
 
   const loadPane = useCallback(async (pane: PaneId, folderRef: string, forceRefresh = false, append = false) => {
     const requestId = ++requestIds.current[pane];
+    const scopeKey = JSON.stringify([folderRef, sortBy, sortOrder]);
     const page = append ? pages.current[pane] + 1 : 1;
     const setPaneState = pane === "left" ? setLeftState : setRightState;
-    setPaneState((current) => ({ ...current, loading: true, error: "" }));
+    setPaneState((current) => ({
+      ...(current.scopeKey === scopeKey ? current : emptyPaneState()),
+      scopeKey, loading: true, error: "",
+    }));
     try {
       const response = await galleryApi.listImages(
         page,
@@ -436,6 +469,7 @@ export const DualFolderWorkspace = ({
       if (requestId !== requestIds.current[pane]) return;
       pages.current[pane] = page;
       setPaneState(current => ({
+        scopeKey,
         images: append ? [...new Map([...current.images,...response.images].map(image=>[image.relative_path,image])).values()] : response.images,
         total: response.total, loading:false, error:"",
       }));
@@ -547,13 +581,32 @@ export const DualFolderWorkspace = ({
       const {targetSourceId,targetSubfolder} = getTargetFolderPayload(targetFolder);
       const result = await runOperation(()=>onMoveImages(relativePaths,targetSubfolder,targetSourceId),{
         pending:t("operationMoveImages"),
-        success: value=>t("qolMoveResult",{moved:value.moved.length,missing:value.missing.length,blocked:value.blocked?.length ?? 0}),
+        success: value => {
+          const { unaccounted } = getMoveOutcome(relativePaths, value);
+          return [
+            t("qolMoveResult", { moved:value.moved.length, missing:value.missing.length, blocked:value.blocked?.length ?? 0 }),
+            value.unchanged?.length ? t("operationMoveUnchanged", { count:value.unchanged.length }) : "",
+            unaccounted ? t("operationUnaccounted", { count:unaccounted }) : "",
+          ].filter(Boolean).join(" ");
+        },
+        successTone: value => getMoveOutcome(relativePaths, value).complete ? "success" : "error",
+        successDetail: value => {
+          const { failedPaths } = getMoveOutcome(relativePaths, value);
+          return failedPaths.length ? t("operationUnprocessedPaths", { target:describeFailedPaths(failedPaths) }) : "";
+        },
         error:error=>error instanceof Error ? error.message : text.moveError,
       });
+      const { movedSources } = getMoveOutcome(relativePaths, result);
       setTimedMessage(t("qolMoveResult",{moved:result.moved.length,missing:result.missing.length,blocked:result.blocked?.length ?? 0}),0);
-      const failed = new Set([...result.missing,...(result.blocked ?? [])]);
-      setPaneSelection(targetPane === "left" ? "right" : "left",current=>({...current,selectedPaths:current.selectedPaths.filter(path=>failed.has(path))}));
-      clearPaneSelection(targetPane);
+      setPaneSelection(targetPane === "left" ? "right" : "left",current => {
+        const selectedPaths = current.selectedPaths.filter(path => !movedSources.has(path));
+        return {
+          ...current,
+          selectedPaths,
+          focusedPath: movedSources.has(current.focusedPath) ? selectedPaths.at(-1) ?? "" : current.focusedPath,
+          lastSelectedPath: movedSources.has(current.lastSelectedPath) ? selectedPaths.at(-1) ?? "" : current.lastSelectedPath,
+        };
+      });
       await reloadBothPanes(true);
     } catch (error) {
       setTimedMessage(error instanceof Error ? error.message : text.moveError,0);
@@ -561,7 +614,7 @@ export const DualFolderWorkspace = ({
       moveLock.current=false;
       setIsMoving(false);
     }
-  }, [clearPaneSelection,confirm,context,getPaneFolder,onMoveImages,reloadBothPanes,runOperation,setPaneSelection,setTimedMessage,t,text]);
+  }, [confirm,context,getPaneFolder,onMoveImages,reloadBothPanes,runOperation,setPaneSelection,setTimedMessage,t,text]);
 
   const moveActiveSelectionToOtherPane = useCallback(async (pane: PaneId) => {
     const selection = getPaneSelection(pane);
@@ -642,18 +695,36 @@ export const DualFolderWorkspace = ({
       return;
     }
     try {
-      await runOperation(() => onDeleteImages(paths), {
+      const result = await runOperation(() => onDeleteImages(paths), {
         pending: t("operationDeleteImages"),
-        success: text.deleteSuccess,
+        success: (value) => t("operationDeleteImagesResult", {
+          count: value.deleted.length,
+          missing: getDeleteOutcome(paths, value).failedPaths.length,
+        }),
+        successTone: (value) => getDeleteOutcome(paths, value).complete ? "success" : "error",
+        successDetail: (value) => {
+          const { failedPaths } = getDeleteOutcome(paths, value);
+          return failedPaths.length ? t("operationUnprocessedPaths", { target: describeFailedPaths(failedPaths) }) : "";
+        },
         error: (error) => (error instanceof Error ? error.message : text.deleteError),
       });
-      clearPaneSelection("left");
-      clearPaneSelection("right");
+      const { deletedPaths } = getDeleteOutcome(paths, result);
+      for (const pane of ["left", "right"] as const) {
+        setPaneSelection(pane, current => {
+          const selectedPaths = current.selectedPaths.filter(path => !deletedPaths.has(path));
+          return {
+            ...current,
+            selectedPaths,
+            focusedPath: deletedPaths.has(current.focusedPath) ? selectedPaths.at(-1) ?? "" : current.focusedPath,
+            lastSelectedPath: deletedPaths.has(current.lastSelectedPath) ? selectedPaths.at(-1) ?? "" : current.lastSelectedPath,
+          };
+        });
+      }
       await reloadBothPanes(true);
     } catch (error) {
       setTimedMessage(error instanceof Error ? error.message : text.deleteError);
     }
-  }, [clearPaneSelection, confirm, onDeleteImages, reloadBothPanes, runOperation, setTimedMessage, t, text]);
+  }, [confirm, onDeleteImages, reloadBothPanes, runOperation, setPaneSelection, setTimedMessage, t, text]);
 
   const handleOpenContextMenu = (event: React.MouseEvent, pane: PaneId, image: ImageRecord) => {
     event.preventDefault();
@@ -678,7 +749,7 @@ export const DualFolderWorkspace = ({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (moveLock.current || isEditableTarget(event.target)) {
+      if (document.querySelector('[aria-modal="true"]') || moveLock.current || isEditableTarget(event.target)) {
         return;
       }
       const pane = activePane;
@@ -708,7 +779,7 @@ export const DualFolderWorkspace = ({
         void deletePaths(selection.selectedPaths);
       } else if (action === "openDetail" && focusedImage) {
         event.preventDefault();
-        onOpenDetail(focusedImage);
+        onOpenDetail(focusedImage, state.images);
       } else if (action === "togglePane") {
         event.preventDefault();
         setActivePane((current) => current === "left" ? "right" : "left");
@@ -874,7 +945,7 @@ export const DualFolderWorkspace = ({
                   }}
                   onDoubleClick={(event) => {
                     event.stopPropagation();
-                    onOpenDetail(image);
+                    onOpenDetail(image, state.images);
                   }}
                   onContextMenu={(event) => handleOpenContextMenu(event, pane, image)}
                   onDragStart={(event, nextDraggedPaths) => {
@@ -931,7 +1002,7 @@ export const DualFolderWorkspace = ({
           <span>{selectedPaths.length > 1 ? text.selected(selectedPaths.length) : formatFileSize(image.size)}</span>
         </div>
         <div className="ue-context-menu-grid">
-          <button className="ue-context-menu-item" onClick={() => menuAction(() => onOpenDetail(image))}>
+          <button className="ue-context-menu-item" onClick={() => menuAction(() => onOpenDetail(image, getPaneState(contextMenu.pane).images))}>
             <ImageIcon size={14} />
             <span>{text.openDetail}</span>
           </button>
@@ -1109,9 +1180,9 @@ export const DualFolderWorkspace = ({
       {movingMessage ? <div className="ue-qol-status" role="status" aria-live="polite">{movingMessage}</div> : null}
       <fieldset className="ue-dual-operation-lock" disabled={isMoving} aria-busy={isMoving}>
       <div className="ue-dual-layout">
-        {renderPane("left", leftFolder, setLeftFolder, leftState)}
+        {renderPane("left", leftFolder, setLeftFolder, getPaneState("left"))}
         {renderTransferRail()}
-        {renderPane("right", rightFolder, setRightFolder, rightState)}
+        {renderPane("right", rightFolder, setRightFolder, getPaneState("right"))}
       </div></fieldset>
 
       {renderContextMenu()}

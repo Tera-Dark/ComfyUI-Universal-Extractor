@@ -121,7 +121,7 @@ const renderWorkspace = (overrides: Partial<Parameters<typeof GalleryWorkspace>[
     onCreateBoard: vi.fn().mockResolvedValue({ ok: true, boards: [] }),
     onUpdateBoardPins: vi.fn().mockResolvedValue(undefined),
     onDeleteBoard: vi.fn().mockResolvedValue(undefined),
-    onDeleteImages: vi.fn().mockResolvedValue(undefined),
+    onDeleteImages: vi.fn().mockResolvedValue({ ok: true, deleted: [], missing: [], categories: [] }),
     onMoveImages: vi.fn().mockResolvedValue({ ok: true, moved: [], missing: [], categories: [], subfolders: [] }),
     onImportFiles: vi.fn().mockResolvedValue(undefined),
     onApplyPendingLiveRefresh: noop,
@@ -191,7 +191,7 @@ describe("GalleryWorkspace smoke", () => {
     expect(menu).toBeInTheDocument();
     expect(menu).toHaveStyle({ left: "42px", top: "64px" });
     fireEvent.click(screen.getByText("查看详情"));
-    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample.png" }));
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample.png" }), [galleryImage]);
     expect(onSelectionChange).not.toHaveBeenCalled();
   });
 
@@ -234,7 +234,7 @@ describe("GalleryWorkspace smoke", () => {
 
     fireEvent.click(card!);
 
-    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample.png" }));
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample.png" }), [galleryImage]);
     expect(onSelectionChange).not.toHaveBeenCalled();
   });
 
@@ -331,7 +331,7 @@ describe("GalleryWorkspace smoke", () => {
 
     fireEvent.keyDown(window, { key: "Enter" });
 
-    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample.png" }));
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample.png" }), [galleryImage]);
   });
 
   it("starts box selection in the normal gallery while keeping normal click-to-open detail", async () => {
@@ -372,7 +372,7 @@ describe("GalleryWorkspace smoke", () => {
     await new Promise((resolve) => window.setTimeout(resolve, 180));
     fireEvent.click(rows[1]);
 
-    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample-2.png" }));
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "sample-2.png" }), expect.arrayContaining([expect.objectContaining({ filename: "sample-2.png" })]));
   });
 
   it("keeps earlier box-selected images when scrolling during a drag", async () => {
@@ -576,5 +576,60 @@ describe("GalleryWorkspace smoke", () => {
       expect(onImportFiles).toHaveBeenCalledWith([file], expect.any(String));
     });
     expect(onImportFiles.mock.calls[0][0][0]).toBe(file);
+  });
+
+  it("explains missing sources, empty sources, filtered results and request failures separately", () => {
+    const source = { id: "default_output", name: "Output", kind: "output" as const, path: "D:/out", enabled: true, writable: true, recursive: true, import_target: true, exists: true };
+    const root = { isTrashView: false, selectedSubfolder: "default_output::", trashItems: [], images: [] };
+    const onOpenSettings = vi.fn();
+    const unconfigured = renderWorkspace({ ...root, onOpenSettings });
+    expect(screen.getByText("暂无可用图源")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "设置" }));
+    expect(onOpenSettings).toHaveBeenCalled();
+    unconfigured.unmount();
+
+    const configured = { ...context, active_source_count: 1, sources: [source] };
+    const empty = renderWorkspace({ ...root, context: configured });
+    expect(screen.getByText("这个图源还没有图片")).toBeInTheDocument();
+    empty.unmount();
+
+    const onCategoryChange = vi.fn();
+    const filtered = renderWorkspace({ ...root, context: configured, selectedCategory: "no-match", onCategoryChange });
+    expect(screen.getByText("没有符合筛选条件的图片")).toBeInTheDocument();
+    fireEvent.click(screen.getAllByRole("button", { name: "清除筛选" }).at(-1)!);
+    expect(onCategoryChange).toHaveBeenCalledWith("");
+    filtered.unmount();
+
+    const onApplyPendingLiveRefresh = vi.fn();
+    renderWorkspace({ ...root, context: configured, error: "offline", onApplyPendingLiveRefresh });
+    expect(screen.getByText("图库加载失败")).toBeInTheDocument();
+    expect(screen.getByText("offline")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "刷新" }));
+    expect(onApplyPendingLiveRefresh).toHaveBeenCalled();
+  });
+
+  it("links a successful image import directly to the server-returned folder", () => {
+    const onOpenImportFolder = vi.fn();
+    renderWorkspace({
+      isTrashView: false, selectedSubfolder: "default_output::", images: [galleryImage], total: 1,
+      importMessage: "图片已存入 Output / universal_gallery_imports/",
+      importFolderRef: "default_output::universal_gallery_imports", onOpenImportFolder,
+    });
+    fireEvent.click(screen.getByRole("button", { name: "打开导入目录" }));
+    expect(onOpenImportFolder).toHaveBeenCalledWith("default_output::universal_gallery_imports");
+  });
+
+  it("scrolls to the top when moving to another results page", () => {
+    const onPageChange = vi.fn();
+    const { container } = renderWorkspace({
+      isTrashView: false, selectedSubfolder: "default_output::", images: [galleryImage],
+      total: 50, page: 1, totalPages: 2, onPageChange,
+    });
+    const viewport = container.querySelector<HTMLElement>(".ue-main-shell")!;
+    const scrollTo = vi.fn();
+    Object.defineProperty(viewport, "scrollTo", { configurable: true, value: scrollTo });
+    fireEvent.click(screen.getByRole("button", { name: "下一页" }));
+    expect(onPageChange).toHaveBeenCalledWith(2);
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, behavior: "instant" });
   });
 });

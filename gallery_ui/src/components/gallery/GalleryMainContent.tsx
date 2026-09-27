@@ -20,7 +20,7 @@ import { GalleryCardImage } from "./GalleryCardImage";
 import { getGalleryImageUrl } from "./galleryImagePrefetch";
 import type { SelectionBoxState } from "./gallerySelectionModel";
 import type { ContentViewMode } from "./galleryWorkspaceModel";
-import type { VirtualMasonryItem } from "./useVirtualMasonry";
+import { getMasonryImageHeightRatio, type VirtualMasonryItem } from "./useVirtualMasonry";
 
 interface MasonryLayout {
   items: VirtualMasonryItem[];
@@ -30,6 +30,7 @@ interface MasonryLayout {
 
 interface GalleryMainContentProps {
   images: ImageRecord[];
+  emptyState?: { title: string; description: string; actionLabel?: string; onAction?: () => void };
   galleryViewMode: ContentViewMode;
   selectionMode: boolean;
   selectionEnabled: boolean;
@@ -78,6 +79,7 @@ const SelectionBoxOverlay = ({ selectionEnabled, selectionBox }: { selectionEnab
 
 export const GalleryMainContent = ({
   images,
+  emptyState,
   galleryViewMode,
   selectionMode,
   selectionEnabled,
@@ -121,8 +123,11 @@ export const GalleryMainContent = ({
       <div className="ue-gallery-state ue-gallery-state--empty">
         <ImageIcon size={44} strokeWidth={1.2} />
         <div>
-          <h3>{t("galleryEmptyTitle")}</h3>
-          <p>{t("galleryEmptyText")}</p>
+          <h3>{emptyState?.title || t("galleryEmptyTitle")}</h3>
+          <p>{emptyState?.description || t("galleryEmptyText")}</p>
+          {emptyState?.onAction && emptyState.actionLabel ? (
+            <button className="ue-secondary-action" type="button" onClick={emptyState.onAction}>{emptyState.actionLabel}</button>
+          ) : null}
         </div>
       </div>
     );
@@ -268,7 +273,10 @@ export const GalleryMainContent = ({
                 const imgWidth = Number(image.width ?? 0);
                 const imgHeight = Number(image.height ?? 0);
                 const resolution = imgWidth > 0 && imgHeight > 0 ? `${imgWidth} × ${imgHeight}` : "";
-                const mediaAspectStyle = imgWidth > 0 && imgHeight > 0 ? { aspectRatio: `${imgWidth} / ${imgHeight}` } : undefined;
+                // Reserve the media height before a lazy thumbnail decodes. In
+                // particular, files without width/height must not grow as the
+                // user scrolls toward the last masonry lane.
+                const mediaAspectStyle = { aspectRatio: `1 / ${getMasonryImageHeightRatio(image)}` };
 
                 return (
                   <article

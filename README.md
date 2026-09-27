@@ -1,12 +1,12 @@
 # ComfyUI Universal Extractor
 
-## 1.3.0 · Minimal Workspace & Interaction Update
+## 1.4.0 · 图库体验与 LoRA 堆应用更新
 
-基于上游 `87960b0` 的全新稳定版本。极简中性 UI、高精度框选、视口滚动修复、缓存正确性、日志化文件操作、跨平台回收站、后台执行隔离与可选提示词快照。
+在 1.3.0 的极简工作台基础上，改进了未保存草稿保护、批量操作结果反馈、图源与搜索切换、移动端密度、瀑布流尾部滚动，以及图片 LoRA 堆到现有 ComfyUI 工作流的定向应用。**仅提交源码和构建产物不会自动创建 GitHub Release 或发布 ComfyUI Registry 版本。**
 
-**更新与安装说明：** 请参见 [CHANGELOG.md](CHANGELOG.md)。
+**更新内容：** [CHANGELOG.md](CHANGELOG.md) · **架构和联动细节：** [docs/architecture.md](docs/architecture.md)。
 
-开发验证：`powershell -ExecutionPolicy Bypass -File scripts\verify.ps1`。新版采用干净构建与 manifest 检查。
+开发验证：`powershell -ExecutionPolicy Bypass -File scripts\verify.ps1`（Windows），或依次运行 Python 测试、桥接测试与 `cd gallery_ui && npm run verify`。前端使用干净构建和 manifest 校验。
 
 独立 UI 预览（无真实 ComfyUI/GPU）：`python scripts/preview.py`，访问 `http://127.0.0.1:8189/gallery/`。示例数据放在临时目录，不接触用户图源。
 
@@ -15,7 +15,7 @@ ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台�
 - **Universal Artist/Tag Randomizer 节点**：按字段路径从 `data/` 词库条目中抽取特定词段，例如 `name`、`other_names`、`meta.tags`，并可直接输出 Anima、artist、NAI、加权画师串或通用 tag 串。
 - **Universal Gallery 图库工作台**：在浏览器中管理 ComfyUI 图片输出、图版、分类、垃圾箱、词库和画师工作台。
 
-前端支持中文和英文界面，图库页面使用轻量、偏工具型的工作台布局：左侧资源栏、中间浏览区，以及不会挤压主图库的覆盖式右侧 Inspector。
+前端支持中文和英文界面，图库页面使用轻量工作台布局：左侧资源栏、中间浏览区和右侧 Inspector。打开 Inspector 时桌面端会预留右侧空间、移动端预留下方空间，并重新测量瀑布流，避免遮挡卡片。
 
 ## 功能概览
 
@@ -57,13 +57,14 @@ ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台�
 - **变体整理 / 智能分组**：图库工具栏可进入变体整理视图，按重复图、近似图、同 Prompt、同 Workflow 和文件名序列聚合同一批 ComfyUI 输出；分组只提供建议整理和批量选择，删除/移动仍走安全确认。
 - **统一筛选面板**：分类、排序字段、升降序、日期范围、Pin 状态和色系筛选统一收纳在筛选入口中；面板采用固定头部、可滚动内容区和固定底部，色系筛选使用紧凑调色板布局。
 - **色系筛选**：支持红、橙、黄、绿、青、蓝、紫、粉、棕、黑、白、灰，以及暖色、冷色、低饱和分组；单个色系占比达到 25% 才会命中筛选。
-- **网格/列表模式**：图库、垃圾箱、词库子项目均支持两种常见排列方式；普通图库列表视图在宽屏下使用两列紧凑卡片，显示秒级时间和真实分辨率；垃圾箱网格使用自适应瀑布流，长文件名和原始路径会限制在卡片内部。
+- **网格/列表模式**：图库、垃圾箱、词库子项目均支持两种常见排列方式；普通图库列表视图在宽屏下使用两列紧凑卡片，显示秒级时间和真实分辨率；垃圾箱网格使用自适应瀑布流，长文件名和原始路径会限制在卡片内部。移动端可选择舒适单列或紧凑双列；缺失图片尺寸时先预留稳定媒体高度，减少滚到瀑布流底部时的跳动。
 - **资源栏导航**：快捷入口固定在侧边栏顶部，输出图库和输入图库是独立 source 范围；目录区只显示当前入口对应的目录。目录支持搜索、树形/列表切换、置顶、默认按修改时间排序、名称排序备选和右键管理。
 - **选择交互**：默认关闭选择模式，单击图片打开详情；开启选择模式后支持左键拖选、滚动框选、Shift 连选、右键菜单和悬浮操作。
 - **双栏目录整理**：可在图库中开启左右双栏目录视图，两个目录独立搜索选择；支持单击选择、Ctrl/Meta 多选、Shift 连选、双击详情、批量拖拽移动、右键菜单、栏级全选/反选/清空/刷新/移动和键盘快捷键。双栏卡片会展示真实分辨率、文件大小和日期，并尽量保持与普通图库一致的 hover、选中和溢出控制体验。
-- **右侧 Inspector**：普通图库页选中图片后，桌面端以贴屏覆盖层显示，避免改变中间图库宽度和瀑布流列数；移动端以抽屉展示。
-- **图片详情页**：支持左右翻页、键盘导航、缩放、双击背景退出、发送工作流到 ComfyUI；发送前会安全确认，发送过程和结果会进入右下角状态中心，工作流会定向发送到一个已刷新并可接收的现有 ComfyUI 页面，不会自动创建新的 ComfyUI 窗口。
-- **Metadata 与提示词**：支持查看图片 Metadata，并可从右键菜单或详情入口一键复制正面提示词；`/api/metadata` 同时返回结构化 `recipe` 字段，归纳 prompt、checkpoint、LoRA、尺寸和采样参数。若图片 workflow 使用了 ComfyUI-Lora-Manager，`recipe.lora_manager` 会提取 LoRA 堆并允许从右键菜单或详情按钮确认后一键应用到当前 ComfyUI 工作流。
+- **右侧 Inspector**：普通图库页选中图片后，桌面端以贴屏覆盖层显示并为它预留宽度，瀑布流随可用空间重新排布；移动端以下方抽屉展示。
+- **图片详情页与安全操作**：支持左右翻页、键盘导航、缩放与胶片条；标题、分类、备注、Pin、文件名的未保存草稿，在关闭、翻页或切换工作区前都会提示保存／放弃／取消。发送工作流前始终确认，进度和结果进入右下角状态中心；只向一个已刷新并可接收的现有 ComfyUI 页面发送，不会自动创建窗口。批量移动／删除按服务端实际结果反馈，失败时保留未完成的选择。
+- **Metadata 与提示词**：支持查看图片 Metadata，并可从右键菜单或详情入口一键复制正面提示词；`/api/metadata` 同时返回结构化 `recipe` 字段，归纳 prompt、checkpoint、LoRA、尺寸和采样参数。
+- **LoRA 堆应用**：图片包含 ComfyUI-Lora-Manager 配方时，右键菜单和详情页提供统一的 **追加到原堆／覆盖旧堆／取消**。只操作选中的一个兼容节点（没有选中时操作第一个）；追加保留已有条目并更新同名，覆盖只清除目标节点旧 LoRA。新发送条目的 CLIP 子行默认折叠，保留独立 CLIP 权重（包括 0）；若在折叠后手动改主权重，LoRA Manager 原生行为会同步覆盖 CLIP，请先展开再单独编辑。桥接不会主动改写其他节点，但原插件自身可能联动连接的触发词节点。
 - **更新检查**：主页右上角铃铛会检查 GitHub Releases，有新版本时显示红点；弹窗中可查看当前/最新版本、更新日志，并手动重新检查。
 - **文件管理**：移动、重命名、批量重命名、创建目录、删除到垃圾箱、恢复和彻底删除。
 - **图版与分类**：支持 Pin 图、加入图版、分类管理和批量分类。
@@ -239,7 +240,7 @@ npm run dev
 npm run build
 ```
 
-构建后如果 ComfyUI 或浏览器仍请求旧 hash 文件，可能出现静态资源 404。发布或本地验证时，需要把当前构建产物同步到旧 hash 兼容文件名，或清理浏览器和 ComfyUI 侧缓存。
+构建使用清理旧输出的内容哈希文件和 Vite manifest。部署时请**整体更新 `gallery_ui/dist/`** 并重启 ComfyUI、刷新浏览器；不要把新内容覆盖到旧 hash 文件名中，否则会破坏不可变资源的哈希语义。若旧页面仍请求已删除的文件，请刷新该页面以获取新的 `index.html` 和 manifest。LoRA 功能还需要同时更新 `web/comfyui/top_menu_extension.js`。
 
 ## 验证
 
@@ -268,7 +269,9 @@ npm run audit:security
 npm run build
 ```
 
-CI 会在 Windows 上执行同一组 Python 和前端检查，并用 `npm run audit:security` 阻止 moderate 及以上级别的前端依赖漏洞回归。`npm run build` 会自动把当前 CSS/JS 内容同步到已跟踪的旧 hash 兼容文件名，降低 ComfyUI 或浏览器旧缓存请求静态资源 404 的概率。CI 只验证构建可以通过，不会自动提交 `gallery_ui/dist/`；发布前仍需显式提交构建产物。
+从仓库根目录还可以运行 `node --test tests/comfy_lora_stack_bridge.test.mjs`，验证 LoRA 追加／覆盖和上游 widget 回调模拟。可选浏览器回归只应针对 `scripts/preview.py` 建立的**隔离图库**运行，不要将模拟失败／移动／导入脚本指向真实 ComfyUI：例如 `python scripts/browser_lora_stack.py http://127.0.0.1:8189`、`python scripts/browser_masonry.py http://127.0.0.1:8189`。
+
+CI 在 Windows 执行 Python、前端、i18n 和桥接测试，Linux/macOS 运行后端测试，并用 `npm run audit:security` 阻止 moderate 及以上级别的前端依赖漏洞回归。`npm run build` 生成新的内容哈希资源与 manifest，**不会**改写旧哈希文件；CI 只验证构建，不会自动提交 `gallery_ui/dist/`。发布前需显式提交干净构建产物；真实 ComfyUI/LoRA Manager 和生产图库仍建议在工作流副本上实测。
 
 ## 系统要求
 

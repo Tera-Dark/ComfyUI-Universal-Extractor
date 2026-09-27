@@ -5,21 +5,25 @@ import { AlertTriangle, Check, Info, X } from "lucide-react";
 import { useI18n } from "../../i18n/I18nProvider";
 
 type ConfirmTone = "info" | "warning" | "danger";
+export type ConfirmChoice = "confirm" | "alternative" | "cancel";
 
 export interface ConfirmOptions {
   title: string;
   message: string;
   confirmLabel?: string;
   cancelLabel?: string;
+  alternativeLabel?: string;
+  confirmDisabled?: boolean;
   tone?: ConfirmTone;
 }
 
 interface ConfirmRequest extends ConfirmOptions {
-  resolve: (value: boolean) => void;
+  resolve: (value: ConfirmChoice) => void;
 }
 
 interface ConfirmContextValue {
   confirm: (options: ConfirmOptions) => Promise<boolean>;
+  choose: (options: ConfirmOptions) => Promise<ConfirmChoice>;
 }
 
 const ConfirmContext = createContext<ConfirmContextValue | null>(null);
@@ -30,14 +34,24 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
 
   const pending = useRef<ConfirmRequest | null>(null);
   const dialog = useRef<HTMLDivElement>(null);
-  const value = useMemo(() => ({confirm:(options:ConfirmOptions)=>new Promise<boolean>(resolve=>{
-    // A replaced confirmation must never leave its caller waiting forever.
-    pending.current?.resolve(false);
-    pending.current={...options,resolve};
-    setRequest(pending.current);
-  })}),[]);
-  const finish=(approved:boolean)=>{pending.current?.resolve(approved);pending.current=null;setRequest(null);};
-  useEffect(()=>()=>{pending.current?.resolve(false);pending.current=null;},[]);
+  const value = useMemo<ConfirmContextValue>(() => {
+    const choose = (options: ConfirmOptions) => new Promise<ConfirmChoice>((resolve) => {
+      // A replaced confirmation must never leave its caller waiting forever.
+      pending.current?.resolve("cancel");
+      pending.current = { ...options, resolve };
+      setRequest(pending.current);
+    });
+    return {
+      choose,
+      confirm: async (options) => (await choose(options)) === "confirm",
+    };
+  }, []);
+  const finish = (choice: ConfirmChoice) => {
+    pending.current?.resolve(choice);
+    pending.current = null;
+    setRequest(null);
+  };
+  useEffect(() => () => { pending.current?.resolve("cancel"); pending.current = null; }, []);
   useEffect(()=>{
     if(!request)return;
     const previous=document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -46,7 +60,7 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
     dialog.current?.querySelector<HTMLButtonElement>(".ue-secondary-btn")?.focus({preventScroll:true});
     const key=(event:KeyboardEvent)=>{
       event.stopPropagation();
-      if(event.key==="Escape"){event.preventDefault();pending.current?.resolve(false);pending.current=null;setRequest(null);}
+      if(event.key==="Escape"){event.preventDefault();pending.current?.resolve("cancel");pending.current=null;setRequest(null);}
       if(event.key!=="Tab")return;
       const buttons=dialog.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)");
       if(!buttons?.length)return;
@@ -63,13 +77,13 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
       {children}
       {request ? createPortal(
         <div className="ue-modal-backdrop ue-confirm-backdrop" onClick={() => {
-          finish(false);
+          finish("cancel");
         }}>
           <div ref={dialog} role="alertdialog" aria-modal="true" aria-labelledby="ue-confirm-title" aria-describedby="ue-confirm-body" className="ue-confirm-modal ue-dialog-modal" onClick={(event) => event.stopPropagation()}>
             <button
               className="ue-modal-close ue-modal-close--light"
               onClick={() => {
-                finish(false);
+                finish("cancel");
               }}
               aria-label={t("modalClose")}
             >
@@ -83,21 +97,23 @@ export const ConfirmProvider = ({ children }: { children: ReactNode }) => {
               <h2 id="ue-confirm-title">{request.title}</h2>
               <p id="ue-confirm-body">{request.message}</p>
             </div>
-            <div className="ue-library-modal-actions ue-dialog-actions">
+            <div className={`ue-library-modal-actions ue-dialog-actions${request.alternativeLabel ? " ue-dialog-actions--choice" : ""}`}>
               <button
                 className="ue-secondary-btn"
-                onClick={() => {
-                  finish(false);
-                }}
+                onClick={() => finish("cancel")}
               >
                 <X size={14} />
                 <span>{request.cancelLabel || t("libraryCancel")}</span>
               </button>
+              {request.alternativeLabel ? (
+                <button className="ue-secondary-btn" onClick={() => finish("alternative")}>
+                  <span>{request.alternativeLabel}</span>
+                </button>
+              ) : null}
               <button
                 className={`ue-primary-btn ${request.tone === "danger" ? "ue-primary-btn--danger" : ""}`}
-                onClick={() => {
-                  finish(true);
-                }}
+                disabled={request.confirmDisabled}
+                onClick={() => finish("confirm")}
               >
                 <Check size={14} />
                 <span>{request.confirmLabel || t("commonConfirm")}</span>

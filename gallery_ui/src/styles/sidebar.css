@@ -795,7 +795,7 @@
 .ue-tree-label span,
 .ue-tree-item span,
 .ue-library-main strong,
-.ue-library-main p {
+.ue-library-main small {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -912,9 +912,16 @@
   align-items: center;
   gap: 8px;
   min-width: 0;
+  flex: 1 1 auto;
+  border: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
 }
 
-.ue-library-main > div {
+.ue-library-main > span {
   min-width: 0;
 }
 
@@ -924,7 +931,7 @@
   font-weight: 500;
 }
 
-.ue-library-main p {
+.ue-library-main small {
   margin: 0;
   color: var(--ue-ink-muted);
   font-size: 11px;
@@ -943,7 +950,8 @@
     background-color var(--ue-duration-fast) var(--ue-ease);
 }
 
-.ue-library-list-item:hover .ue-library-delete {
+.ue-library-list-item:hover .ue-library-delete,
+.ue-library-list-item:focus-within .ue-library-delete {
   opacity: 1;
 }
 

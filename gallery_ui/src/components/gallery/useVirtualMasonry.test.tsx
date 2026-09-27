@@ -1,8 +1,15 @@
-import { renderHook } from "@testing-library/react";
+import { act, renderHook } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
 import type { ImageRecord } from "../../types/universal-gallery";
-import { getEffectiveMasonryColumns, getMasonryColumnWidth, mapVirtualMasonryItems, useVirtualMasonry } from "./useVirtualMasonry";
+import {
+  estimateMasonryCardHeight,
+  getEffectiveMasonryColumns,
+  getMasonryColumnWidth,
+  getMasonryImageHeightRatio,
+  mapVirtualMasonryItems,
+  useVirtualMasonry,
+} from "./useVirtualMasonry";
 
 const makeImage = (index: number): ImageRecord => ({
   filename: `image-${index}.png`,
@@ -23,7 +30,8 @@ const makeImage = (index: number): ImageRecord => ({
 
 describe("useVirtualMasonry", () => {
   it("clamps requested columns to the available width", () => {
-    expect(getEffectiveMasonryColumns(8, 360, 14)).toBe(1);
+    expect(getEffectiveMasonryColumns(8, 360, 14)).toBe(2);
+    expect(getEffectiveMasonryColumns(2, 280, 14)).toBe(1);
     expect(getEffectiveMasonryColumns(8, 900, 14)).toBe(4);
     expect(getEffectiveMasonryColumns(3, 1600, 14)).toBe(3);
   });
@@ -51,6 +59,51 @@ describe("useVirtualMasonry", () => {
       { image: images[1], index: 1, top: 0, left: 234, width: 220, lane: 1 },
       { image: images[2], index: 2, top: 280, left: 0, width: 220, lane: 0 },
     ]);
+  });
+
+  it("uses the same intrinsic ratio for unknown image dimensions and estimated height", () => {
+    const image = makeImage(0);
+    expect(getMasonryImageHeightRatio(image)).toBe(1.36);
+    expect(getMasonryImageHeightRatio({ ...image, width: 0, height: 700 })).toBe(1.36);
+    expect(getMasonryImageHeightRatio({ ...image, width: Number.POSITIVE_INFINITY, height: 500 })).toBe(1.36);
+    expect(getMasonryImageHeightRatio({ ...image, width: Number.MIN_VALUE, height: Number.MAX_VALUE })).toBe(1.36);
+    expect(estimateMasonryCardHeight(220, image)).toBe(Math.round(218 * 1.36 + 43));
+    // Very wide media must respect the 100px CSS minimum; very tall media
+    // must retain its actual height rather than an unrelated 2.2x estimate.
+    expect(estimateMasonryCardHeight(220, { ...image, width: 1100, height: 340 })).toBe(143);
+    expect(estimateMasonryCardHeight(220, { ...image, width: 200, height: 600 })).toBe(697);
+  });
+
+  it("discards cached measurements when the column width changes without changing lane count", () => {
+    const scrollElement = document.createElement("div");
+    document.body.append(scrollElement);
+    Object.defineProperty(scrollElement, "clientHeight", { configurable: true, value: 720 });
+    const images = Array.from({ length: 16 }, (_, index) => makeImage(index));
+    const node = document.createElement("article");
+    node.setAttribute("data-index", "0");
+    Object.defineProperty(node, "offsetHeight", { configurable: true, value: 900 });
+    scrollElement.append(node);
+    const { result, rerender, unmount } = renderHook(
+      ({ gridWidth }: { gridWidth: number }) => useVirtualMasonry({
+        images, requestedColumns: 1, gridWidth, viewportWidth: 800, scrollElement, gap: 14,
+      }),
+      { initialProps: { gridWidth: 220 } },
+    );
+    try {
+      act(() => result.current.measureElement(node));
+      expect(result.current.totalHeight).toBeGreaterThan(16 * estimateMasonryCardHeight(220));
+      rerender({ gridWidth: 220.3 });
+      // Fractional changes accumulate; many tiny resize steps still invalidate
+      // old offscreen measurements once the width has moved by half a pixel.
+      rerender({ gridWidth: 220.7 });
+      expect(result.current.totalHeight).toBe(16 * estimateMasonryCardHeight(220.7) + 15 * 14);
+      rerender({ gridWidth: 320 });
+      expect(result.current.columnCount).toBe(1);
+      expect(result.current.totalHeight).toBe(16 * estimateMasonryCardHeight(320) + 15 * 14);
+    } finally {
+      unmount();
+      scrollElement.remove();
+    }
   });
 
   it("returns stable layout metadata from the hook", () => {

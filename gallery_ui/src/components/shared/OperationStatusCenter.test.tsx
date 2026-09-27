@@ -31,6 +31,24 @@ const RunHarness = () => {
   );
 };
 
+const PartialFailureHarness = () => {
+  const { runOperation } = useOperationStatus();
+  return <button onClick={() => void runOperation(async () => ({ moved: 1, failed: "a.png; b.png; c.png; d.png" }), {
+    pending: "Moving",
+    success: ({ moved }) => `Moved ${moved}; some not processed`,
+    successTone: () => "error",
+    successDetail: ({ failed }) => failed,
+  })}>Move partially</button>;
+};
+
+const ErrorOverflowHarness = () => {
+  const { notify } = useOperationStatus();
+  return <button onClick={() => {
+    notify("Delete failed", "error", "a.png");
+    Array.from({ length: 8 }, (_, index) => notify(`Done ${index + 1}`, "success"));
+  }}>Fill after error</button>;
+};
+
 const OverflowHarness = () => {
   const { notify, startOperation } = useOperationStatus();
   return (
@@ -83,6 +101,23 @@ describe("OperationStatusProvider", () => {
     expect(screen.queryByText("Working")).toBeNull();
   });
 
+  it("keeps partial failures until dismissed and exposes every failed path through details", async () => {
+    vi.useFakeTimers();
+    renderWithStatus(<PartialFailureHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Move partially" }));
+    await act(async () => { await Promise.resolve(); });
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Moved 1; some not processed");
+    expect(alert.querySelector("details")).not.toHaveAttribute("open");
+    fireEvent.click(screen.getByText("查看详情"));
+    expect(alert.querySelector("details")).toHaveAttribute("open");
+    expect(alert).toHaveTextContent("d.png");
+    act(() => { vi.advanceTimersByTime(15_000); });
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "关闭提醒" }));
+    expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  });
+
   it("keeps pending operations when the list is capped", async () => {
     renderWithStatus(<OverflowHarness />);
 
@@ -91,6 +126,13 @@ describe("OperationStatusProvider", () => {
     expect(screen.getByText("Still working")).toBeInTheDocument();
     expect(screen.queryByText("Done 1")).toBeNull();
     expect(screen.getAllByRole("status")).toHaveLength(5);
+  });
+
+  it("does not evict an error when later success notifications exceed the cap", () => {
+    renderWithStatus(<ErrorOverflowHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Fill after error" }));
+    expect(screen.getByRole("alert")).toHaveTextContent("Delete failed");
+    expect(screen.getAllByRole("status")).toHaveLength(4);
   });
 
   it("clears dismiss timers on unmount", async () => {

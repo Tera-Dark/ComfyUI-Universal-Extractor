@@ -755,6 +755,18 @@
   box-shadow: 0 18px 36px rgba(0, 0, 0, 0.22);
 }
 
+.ue-lightbox-action-error {
+  position: absolute;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  width: max-content;
+  min-width: 220px;
+  max-width: min(460px, calc(100vw - 32px));
+  text-align: center;
+  overflow-wrap: anywhere;
+  transform: translateX(-50%);
+}
+
 .ue-toolbar-btn {
   position: relative;
   display: inline-flex;

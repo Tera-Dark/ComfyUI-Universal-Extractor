@@ -1,14 +1,28 @@
-import { useMemo } from "react";
+import { useLayoutEffect, useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { ImageRecord } from "../../types/universal-gallery";
 
 const MIN_CARD_WIDTH_DESKTOP = 180;
 const MIN_CARD_WIDTH_TABLET = 190;
-const MIN_CARD_WIDTH_MOBILE = 220;
+const MIN_CARD_WIDTH_MOBILE = 145; // Compact mobile preset fits two tappable cards at ~390px.
 const MIN_COLUMN_WIDTH = 160;
 const DEFAULT_CARD_RATIO = 1.36;
-const CARD_CHROME_HEIGHT = 54;
+// gallery.css + minimal.css: 1px borders, 100px minimum media height, and
+// ~43px for the caption on a single line. Wrapped metadata is RO-measured.
+const CARD_BORDER_WIDTH = 2;
+const MIN_MEDIA_HEIGHT = 100;
+const CARD_CHROME_HEIGHT = 43;
+
+// The media box and the virtualizer must agree on the size of images without
+// dimensions. Otherwise a lazy thumbnail expands the card when it finally loads
+// (often at the bottom of a page) and scroll anchoring jumps with it.
+export const getMasonryImageHeightRatio = (image?: ImageRecord) => {
+  const width = Number(image?.width ?? 0);
+  const height = Number(image?.height ?? 0);
+  const ratio = width > 0 && height > 0 ? height / width : 0;
+  return Number.isFinite(ratio) && ratio > 0 ? ratio : DEFAULT_CARD_RATIO;
+};
 
 export interface VirtualMasonryItem {
   image: ImageRecord;
@@ -30,13 +44,10 @@ export const getMasonryColumnWidth = (availableWidth: number, columnCount: numbe
   Math.max(MIN_COLUMN_WIDTH, (availableWidth - gap * (columnCount - 1)) / columnCount);
 
 export const estimateMasonryCardHeight = (columnWidth: number, image?: ImageRecord) => {
-  const width = Number(image?.width ?? 0);
-  const height = Number(image?.height ?? 0);
-  if (width > 0 && height > 0) {
-    const ratio = Math.max(0.4, Math.min(2.2, height / width));
-    return Math.round(columnWidth * ratio + CARD_CHROME_HEIGHT);
-  }
-  return Math.round(columnWidth * DEFAULT_CARD_RATIO + CARD_CHROME_HEIGHT);
+  const ratio = getMasonryImageHeightRatio(image);
+  // CSS gives very wide images a 100px media minimum. Use the same aspect
+  // ratio as the rendered card, including the fallback for missing metadata.
+  return Math.round(Math.max(MIN_MEDIA_HEIGHT, (columnWidth - CARD_BORDER_WIDTH) * ratio) + CARD_CHROME_HEIGHT);
 };
 
 export const mapVirtualMasonryItems = ({
@@ -104,6 +115,17 @@ export const useVirtualMasonry = ({
     useAnimationFrameWithResizeObserver: true,
     laneAssignmentMode: "estimate",
   });
+
+  const measuredColumnWidth = useRef(columnWidth);
+  useLayoutEffect(() => {
+    if (Math.abs(measuredColumnWidth.current - columnWidth) > 0.5) {
+      // Cached card heights (and their cached lanes) belong to the old width.
+      // Mounted cards get ResizeObserver updates, but offscreen cards do not;
+      // without invalidation they move as the user scrolls back toward the end.
+      measuredColumnWidth.current = columnWidth;
+      virtualizer.measure();
+    }
+  }, [columnWidth, virtualizer]);
 
   const virtualItems = virtualizer.getVirtualItems();
   const items = useMemo<VirtualMasonryItem[]>(

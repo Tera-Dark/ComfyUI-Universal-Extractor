@@ -47,7 +47,13 @@ export const useLibraryData = (enabled: boolean) => {
   const [statusMessage, setStatusMessage] = useState("");
   const [validationIssues, setValidationIssues] = useState<LibraryValidationIssue[]>([]);
   const hasLoadedLibrariesRef = useRef(false);
-  const hasLoadedEntriesRef = useRef(false);
+  const entryRequestRef = useRef(0);
+  const generatorRequestRef = useRef(0);
+  const editorRequestRef = useRef(0);
+  const [loadedEntryScope, setLoadedEntryScope] = useState("");
+  const loadedEntryScopeRef = useRef("");
+  const lastSearchRef = useRef(searchTerm);
+  const entryScope = JSON.stringify([activeLibraryName, searchTerm, entryPage]);
 
   const loadLibraries = useCallback(async () => {
     if (hasLoadedLibrariesRef.current) {
@@ -70,23 +76,39 @@ export const useLibraryData = (enabled: boolean) => {
   }, [t]);
 
   const loadEntryPage = useCallback(async (name: string, nextSearch: string, nextPage: number) => {
-    if (hasLoadedEntriesRef.current) {
+    const requestId = ++entryRequestRef.current;
+    const scope = JSON.stringify([name, nextSearch, nextPage]);
+    if (loadedEntryScopeRef.current === scope) {
       setIsRefreshing(true);
     } else {
       setIsLoading(true);
+      setIsRefreshing(false);
     }
+    setError(null);
 
     try {
       const response = await galleryApi.getLibraryEntries(name, nextSearch, nextPage, entryLimit);
+      if (entryRequestRef.current !== requestId) return;
       setEntries(response.data ?? []);
       setEntryTotal(response.total ?? 0);
-      setEntryPage(response.page ?? 1);
+      setEntryPage(response.page ?? nextPage);
+      loadedEntryScopeRef.current = JSON.stringify([name, nextSearch, response.page ?? nextPage]);
+      setLoadedEntryScope(loadedEntryScopeRef.current);
+    } catch (fetchError) {
+      if (entryRequestRef.current !== requestId) return;
+      setError(fetchError instanceof Error ? fetchError.message : t("errorOpenLibrary"));
+      setEntries([]);
+      setEntryTotal(0);
+      loadedEntryScopeRef.current = scope;
+      setLoadedEntryScope(scope);
+      throw fetchError;
     } finally {
-      hasLoadedEntriesRef.current = true;
-      setIsLoading(false);
-      setIsRefreshing(false);
+      if (entryRequestRef.current === requestId) {
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
     }
-  }, [entryLimit]);
+  }, [entryLimit, t]);
 
   const refreshActiveLibrary = async () => {
     if (!activeLibraryName) {
@@ -95,7 +117,16 @@ export const useLibraryData = (enabled: boolean) => {
     await loadEntryPage(activeLibraryName, searchTerm, entryPage);
   };
 
-  const openLibrary = async (name: string) => {
+  const openLibrary = async (name: string | null) => {
+    // Selecting the already-open row is navigation to the same scope, not a
+    // reload. Clearing records here would not retrigger the scope-keyed effect.
+    if (name === activeLibraryName) return;
+    ++entryRequestRef.current;
+    ++generatorRequestRef.current;
+    ++editorRequestRef.current;
+    setEntries([]);
+    setEntryTotal(0);
+    setIsRefreshing(false);
     setActiveLibraryName(name);
     setError(null);
     setStatusMessage("");
@@ -116,8 +147,9 @@ export const useLibraryData = (enabled: boolean) => {
       return generatorEntries;
     }
 
+    const requestId = ++generatorRequestRef.current;
     const data = await galleryApi.getLibrary(targetName);
-    setGeneratorEntries(data);
+    if (generatorRequestRef.current === requestId) setGeneratorEntries(data);
     return data;
   };
 
@@ -126,19 +158,23 @@ export const useLibraryData = (enabled: boolean) => {
       return;
     }
 
+    const requestId = ++editorRequestRef.current;
     setIsRefreshing(true);
     setValidationIssues([]);
     setStatusMessage("");
 
     try {
       const response = await galleryApi.getLibraryRaw(activeLibraryName);
+      if (editorRequestRef.current !== requestId) return;
       setEditorValue(response.text);
       setSavedSnapshot(response.text);
       setIsEditing(true);
     } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : t("errorOpenLibrary"));
+      if (editorRequestRef.current === requestId) {
+        setError(fetchError instanceof Error ? fetchError.message : t("errorOpenLibrary"));
+      }
     } finally {
-      setIsRefreshing(false);
+      if (editorRequestRef.current === requestId) setIsRefreshing(false);
     }
   };
 
@@ -350,18 +386,27 @@ export const useLibraryData = (enabled: boolean) => {
   }, [enabled, loadLibraries]);
 
   useEffect(() => {
-    if (!activeLibraryName || isEditing) {
-      return;
-    }
-    void loadEntryPage(activeLibraryName, searchTerm, entryPage).catch((fetchError) => {
-      setError(fetchError instanceof Error ? fetchError.message : t("errorOpenLibrary"));
-    });
-  }, [activeLibraryName, searchTerm, entryPage, isEditing, loadEntryPage, t]);
+    // Invalidate the previous request before scheduling a new query. A short
+    // debounce only applies to typing; library and page switches stay immediate.
+    ++entryRequestRef.current;
+    const searchChanged = lastSearchRef.current !== searchTerm;
+    lastSearchRef.current = searchTerm;
+    if (!activeLibraryName || isEditing) return;
+    const timer = window.setTimeout(() => {
+      void loadEntryPage(activeLibraryName, searchTerm, entryPage).catch(() => undefined);
+    }, searchChanged ? 250 : 0);
+    const requests = entryRequestRef;
+    return () => {
+      window.clearTimeout(timer);
+      ++requests.current;
+    };
+  }, [activeLibraryName, searchTerm, entryPage, isEditing, loadEntryPage]);
 
+  const entriesReady = loadedEntryScope === entryScope;
   return {
     libraries,
     activeLibraryName,
-    entries,
+    entries: entriesReady ? entries : [],
     generatorEntries,
     editorValue,
     setEditorValue,
@@ -371,11 +416,11 @@ export const useLibraryData = (enabled: boolean) => {
     setSearchTerm,
     entryPage,
     setEntryPage,
-    entryTotal,
+    entryTotal: entriesReady ? entryTotal : 0,
     entryLimit,
     isEditing,
     isDirty: isEditing && editorValue !== savedSnapshot,
-    isLoading,
+    isLoading: isLoading || (Boolean(activeLibraryName) && !entriesReady && !isEditing),
     isRefreshing,
     isSubmitting,
     error,

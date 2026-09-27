@@ -24,6 +24,8 @@ const renderToolbar = (overrides: Partial<Parameters<typeof GalleryToolbar>[0]> 
     variantMode: false,
     selectionMode: false,
     writableSources: [{ id: "default_output", name: "Output", kind: "output", path: "D:/out", enabled: true, writable: true, recursive: true, import_target: true, exists: true }],
+    sources: [{ id: "default_output", name: "Output", kind: "output", path: "D:/out", enabled: true, writable: true, recursive: true, import_target: true, exists: true }],
+    importSubfolder: "universal_gallery_imports",
     activeImportSourceId: "default_output",
     categories: ["portrait", "landscape"],
     selectedCategory: "",
@@ -70,6 +72,17 @@ const renderToolbar = (overrides: Partial<Parameters<typeof GalleryToolbar>[0]> 
 };
 
 describe("GalleryToolbar", () => {
+  it("uses the selected source name for an input root and shows the real import folder", async () => {
+    renderToolbar({
+      selectedSubfolder: "default_input::",
+      sources: [
+        { id: "default_input", name: "Input gallery", kind: "input", path: "D:/in", enabled: true, writable: false, recursive: true, import_target: false, exists: true },
+      ],
+    });
+    expect(screen.getByText("Input gallery")).toBeInTheDocument();
+    expect(screen.queryByText("输出目录")).not.toBeInTheDocument();
+  });
+
   it("opens filters and changes view options through callbacks", async () => {
     const user = userEvent.setup();
     const { props } = renderToolbar({ activeFilterControlCount: 2, showColumnsMenu: true });
@@ -125,6 +138,7 @@ describe("GalleryToolbar", () => {
     expect(actionGroup?.querySelector("[data-tour-id='gallery-selection']")).toBeNull();
     expect(container.querySelector("[data-tour-id='gallery-selection']")).toBeInTheDocument();
     expect(sourceGroup?.querySelector("select")).toBeInTheDocument();
+    expect(sourceGroup?.querySelector('option[value="import_target"]')).toHaveTextContent("Import Target / universal_gallery_imports/");
 
     await user.click(screen.getByLabelText("更多操作", { selector: "summary" }));
     await user.selectOptions(screen.getByRole("combobox"), "import_target");

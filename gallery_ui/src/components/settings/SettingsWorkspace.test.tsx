@@ -10,7 +10,6 @@ import { SettingsWorkspace } from "./SettingsWorkspace";
 
 const preferences: UiPreferences = {
   defaultSelectionMode: false,
-  confirmWorkflowSend: true,
   collapseSidebarOnLaunch: false,
   enableImagePrefetch: true,
   enableLiveGalleryRefresh: true,

@@ -17,6 +17,9 @@ vi.mock("../services/galleryApi", () => ({
     getColorIndexStatus: vi.fn(),
     updateImageState: vi.fn(),
     batchUpdateImages: vi.fn(),
+    moveImages: vi.fn(),
+    deleteImages: vi.fn(),
+    importFiles: vi.fn(),
   },
 }));
 
@@ -124,6 +127,73 @@ describe("useGalleryData live refresh", () => {
     vi.restoreAllMocks();
   });
 
+  it("normalizes the default output API import path for a stable folder URL", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
+    vi.mocked(galleryApi.importFiles).mockResolvedValue({
+      ok: true, imported_images: [{ filename: "new.png", relative_path: "universal_gallery_imports/new.png" }],
+      imported_libraries: [], skipped: [],
+    });
+    const { result } = renderHook(() => useGalleryData({ liveRefreshEnabled: false }), { wrapper });
+    await flushAsyncEffects();
+    await act(async () => { await result.current.importFiles([new File(["x"], "new.png")], "default_output"); });
+    expect(result.current.importFolderRef).toBe("default_output::universal_gallery_imports");
+    expect(result.current.importMessage).toContain("universal_gallery_imports/");
+  });
+
+  it("reports the actual imported directory and keeps a link to it", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
+    vi.mocked(galleryApi.importFiles).mockResolvedValue({
+      ok: true, imported_images: [{ filename: "renamed.png", relative_path: "custom::universal_gallery_imports/renamed.png" }],
+      imported_libraries: [{ filename: "artists.json" }], skipped: [],
+    });
+    const { result } = renderHook(() => useGalleryData({ liveRefreshEnabled: false }), { wrapper });
+    await flushAsyncEffects();
+    await act(async () => { await result.current.importFiles([new File(["x"], "sample.png")], "custom"); });
+    expect(result.current.importFolderRef).toBe("custom::universal_gallery_imports");
+    expect(result.current.importMessage).toContain("universal_gallery_imports/");
+    expect(result.current.importMessage).toContain("data/");
+  });
+
+  it("hides old cards, count and selection immediately during a slow source switch", async () => {
+    const input = deferred<ImageListResponse>();
+    vi.mocked(galleryApi.listImages).mockImplementation((_page, _limit, _search, _category, folder) =>
+      folder === "default_input::" ? input.promise : Promise.resolve(imagePage("output", 18)));
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: false }), { wrapper });
+    await flushAsyncEffects();
+    await act(async () => { result.current.setSelectedImagePaths(["image-output.png"]); });
+    expect(result.current.total).toBe(18);
+    await act(async () => { result.current.setSelectedSubfolder("default_input::"); });
+    expect(result.current.images).toEqual([]);
+    expect(result.current.total).toBe(0);
+    expect(result.current.selectedImagePaths).toEqual([]);
+    expect(result.current.isLoading).toBe(true);
+    await act(async () => { input.resolve(imagePage("input", 1)); });
+    expect(result.current.images[0]?.filename).toBe("image-input.png");
+    expect(result.current.total).toBe(1);
+    expect(result.current.isLoading).toBe(false);
+  });
+
+  it("tracks real refresh requests instead of completing when the key changes", async () => {
+    const pendingImages = deferred<ImageListResponse>();
+    const pendingContext = deferred<GalleryContext>();
+    vi.mocked(galleryApi.listImages).mockResolvedValueOnce(imagePage("initial", 1)).mockImplementation(() => pendingImages.promise);
+    vi.mocked(galleryApi.getContext).mockResolvedValueOnce(contextResponse).mockImplementation(() => pendingContext.promise);
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: false }), { wrapper });
+    await flushAsyncEffects();
+    let refresh!: Promise<void>;
+    let settled = false;
+    await act(async () => {
+      refresh = result.current.refreshAndWait().then(() => { settled = true; });
+      await Promise.resolve();
+    });
+    expect(settled).toBe(false);
+    await act(async () => { pendingImages.resolve(imagePage("latest", 2)); });
+    expect(settled).toBe(false);
+    await act(async () => { pendingContext.resolve(contextResponse); await refresh; });
+    expect(settled).toBe(true);
+    expect(result.current.images[0]?.filename).toBe("image-latest.png");
+  });
+
   it("quietly refreshes the first gallery page while visible", async () => {
     vi.mocked(galleryApi.listImages)
       .mockResolvedValueOnce(imagePage("initial", 1))
@@ -154,6 +224,26 @@ describe("useGalleryData live refresh", () => {
     expect(result.current.images[0]?.filename).toBe("image-refresh.png");
     expect(result.current.total).toBe(2);
     expect(vi.mocked(galleryApi.listImages).mock.calls.at(-1)?.at(-1)).toBe(true);
+  });
+
+  it("defers new-first-page images while the user is scrolled down", async () => {
+    const viewport = document.createElement("main");
+    viewport.className = "ue-main-shell";
+    viewport.scrollTop = 500;
+    document.body.appendChild(viewport);
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
+    vi.mocked(galleryApi.getImageFreshness).mockResolvedValue({
+      fingerprint: "new", changed: true, image_count: 2, latest_created_at: 101,
+      latest_relative_path: "image-new.png", checked_at: 2, subfolder: "",
+    });
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: true }), { wrapper });
+    await flushAsyncEffects();
+    const before = vi.mocked(galleryApi.listImages).mock.calls.length;
+    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
+    expect(galleryApi.listImages).toHaveBeenCalledTimes(before);
+    expect(result.current.hasPendingLiveRefresh).toBe(true);
+    expect(result.current.images[0]?.filename).toBe("image-initial.png");
+    viewport.remove();
   });
 
   it("does not force a list refresh when freshness is unchanged", async () => {
@@ -332,6 +422,51 @@ describe("useGalleryData live refresh", () => {
 
     expect(result.current.images[0]?.pinned).toBe(true);
     expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforePin);
+  });
+
+  it("keeps every selected item except confirmed moved sources after a partial batch move", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 3));
+    vi.mocked(galleryApi.moveImages).mockResolvedValue({
+      ok: true, moved: ["target/image-initial.png"], moved_sources: ["image-initial.png"],
+      missing: ["image-second.png"], blocked: ["image-third.png"], unchanged: [], categories: [], subfolders: [],
+    });
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: false }), { wrapper });
+    await flushAsyncEffects();
+    await act(async () => {
+      result.current.setSelectedImagePaths(["image-initial.png", "image-second.png", "image-third.png"]);
+    });
+    await act(async () => {
+      await result.current.moveImages(result.current.selectedImagePaths, "target", "default_output");
+    });
+    expect(result.current.selectedImagePaths).toEqual(["image-second.png", "image-third.png"]);
+  });
+
+  it("keeps selected items after a partial delete or failed request", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 2));
+    vi.mocked(galleryApi.deleteImages).mockResolvedValue({
+      ok: true, deleted: ["image-initial.png"], missing: ["image-second.png"], categories: [],
+    });
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: false }), { wrapper });
+    await flushAsyncEffects();
+    await act(async () => {
+      result.current.setSelectedImagePaths(["image-initial.png", "image-second.png"]);
+    });
+    await act(async () => {
+      await result.current.deleteImages(result.current.selectedImagePaths);
+    });
+    expect(result.current.selectedImagePaths).toEqual(["image-second.png"]);
+
+    vi.mocked(galleryApi.moveImages).mockRejectedValue(new Error("network down"));
+    await act(async () => {
+      await expect(result.current.moveImages(result.current.selectedImagePaths, "target", "default_output")).rejects.toThrow("network down");
+    });
+    expect(result.current.selectedImagePaths).toEqual(["image-second.png"]);
+
+    vi.mocked(galleryApi.deleteImages).mockResolvedValue({ ok: false, deleted: ["image-second.png"], missing: [], categories: [] });
+    await act(async () => {
+      await expect(result.current.deleteImages(result.current.selectedImagePaths)).rejects.toThrow();
+    });
+    expect(result.current.selectedImagePaths).toEqual(["image-second.png"]);
   });
 
   it("normalizes malformed batch update paths before patching pin counts", async () => {

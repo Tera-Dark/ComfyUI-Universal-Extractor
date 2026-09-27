@@ -14,6 +14,7 @@ import { useConfirm, type ConfirmOptions } from "./components/shared/ConfirmDial
 import { useToast } from "./components/shared/ToastViewport";
 import { useOperationStatus, type RunOperationOptions } from "./components/shared/OperationStatusCenter";
 import { getFolderBaseName } from "./components/shared/folderTree";
+import { buildWorkspaceUrl, isSearchOnlyLocationChange, readWorkspaceLocation, type WorkspaceLocation } from "./utils/workspaceLocation";
 import { isOnboardingTourCompleted, markOnboardingTourCompleted } from "./components/shared/onboardingTourModel";
 import type { ImageRecipeLoraManager, ImageRecord, LibraryInfo, UiPreferences, WorkspaceTab } from "./types/universal-gallery";
 import "./App.css";
@@ -47,7 +48,6 @@ const FOLDER_REF_SEPARATOR = "::";
 
 const DEFAULT_UI_PREFERENCES: UiPreferences = {
   defaultSelectionMode: false,
-  confirmWorkflowSend: true,
   collapseSidebarOnLaunch: false,
   enableImagePrefetch: true,
   enableLiveGalleryRefresh: true,
@@ -84,12 +84,23 @@ type WorkflowPayload = {
   ts: number;
 };
 
+type LoraStackApplyMode = "append" | "replace";
+
 type LoraStackPayload = {
   id: string;
+  mode: LoraStackApplyMode;
   loraManager: ImageRecipeLoraManager;
   image: string;
   imageUrl: string | null;
   ts: number;
+};
+
+type LoraStackSummary = {
+  target: string;
+  applied: number;
+  added: number;
+  updated: number;
+  removed: number;
 };
 
 type WorkflowAck = {
@@ -103,6 +114,23 @@ type ChannelDeliveryResult = {
   delivered: boolean;
   ok: boolean;
   error?: string;
+  summary?: LoraStackSummary;
+};
+
+const readLoraStackSummary = (value: unknown): LoraStackSummary | undefined => {
+  if (!value || typeof value !== "object") return undefined;
+  const info = value as Partial<LoraStackSummary>;
+  const counts = [info.applied, info.added, info.updated, info.removed];
+  if (typeof info.target !== "string" || !counts.every((count) => Number.isSafeInteger(count) && count! >= 0)) {
+    return undefined;
+  }
+  return {
+    target: info.target.slice(0, 120),
+    applied: info.applied!,
+    added: info.added!,
+    updated: info.updated!,
+    removed: info.removed!,
+  };
 };
 
 const trySendPayloadToExistingComfyPage = (
@@ -117,6 +145,7 @@ const trySendPayloadToExistingComfyPage = (
     }
 
     let resolved = false;
+    let targetInstanceId: string | null = null;
     const probeId = `${payload.id}-probe`;
     const channel = new BroadcastChannel(WORKFLOW_CHANNEL_NAME);
     const candidates: WorkflowAck[] = [];
@@ -147,11 +176,15 @@ const trySendPayloadToExistingComfyPage = (
         candidates.push(data as WorkflowAck);
         return;
       }
-      if (data.type === deliveredType && data.payloadId === payload.id) {
+      // Only the instance selected by the probe can acknowledge this send.
+      // A background ComfyUI tab must not make another tab's delivery look successful.
+      if (data.type === deliveredType && data.payloadId === payload.id &&
+          targetInstanceId && data.instanceId === targetInstanceId) {
         finish({
           delivered: true,
           ok: data.ok !== false,
           error: typeof data.error === "string" ? data.error : undefined,
+          summary: readLoraStackSummary(data.summary),
         });
       }
     });
@@ -170,6 +203,7 @@ const trySendPayloadToExistingComfyPage = (
         return;
       }
 
+      targetInstanceId = target.instanceId;
       channel.postMessage({
         type: messageType,
         targetInstanceId: target.instanceId,
@@ -211,7 +245,6 @@ const getStoredUiPreferences = (): UiPreferences => {
     const parsed = JSON.parse(window.localStorage.getItem(UI_PREFERENCES_KEY) || "{}") as Partial<UiPreferences>;
     return {
       defaultSelectionMode: typeof parsed.defaultSelectionMode === "boolean" ? parsed.defaultSelectionMode : DEFAULT_UI_PREFERENCES.defaultSelectionMode,
-      confirmWorkflowSend: typeof parsed.confirmWorkflowSend === "boolean" ? parsed.confirmWorkflowSend : DEFAULT_UI_PREFERENCES.confirmWorkflowSend,
       collapseSidebarOnLaunch: typeof parsed.collapseSidebarOnLaunch === "boolean" ? parsed.collapseSidebarOnLaunch : DEFAULT_UI_PREFERENCES.collapseSidebarOnLaunch,
       enableImagePrefetch: typeof parsed.enableImagePrefetch === "boolean" ? parsed.enableImagePrefetch : DEFAULT_UI_PREFERENCES.enableImagePrefetch,
       enableLiveGalleryRefresh: typeof parsed.enableLiveGalleryRefresh === "boolean" ? parsed.enableLiveGalleryRefresh : DEFAULT_UI_PREFERENCES.enableLiveGalleryRefresh,
@@ -224,12 +257,13 @@ const getStoredUiPreferences = (): UiPreferences => {
 
 function App() {
   const { t } = useI18n();
-  const { confirm } = useConfirm();
+  const { confirm, choose } = useConfirm();
   const { pushToast } = useToast();
   const { runOperation } = useOperationStatus();
-  const [workbenchVisited,setWorkbenchVisited] = useState(false);
+  const initialLocation = useMemo(() => readWorkspaceLocation(window.location.search), []);
+  const [workbenchVisited,setWorkbenchVisited] = useState(initialLocation.tab === "workbench");
   const [settingsDirty,setSettingsDirty] = useState(false);
-  const [activeTab, setActiveTab] = useState<WorkspaceTab>("gallery");
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>(initialLocation.tab);
   const [librarySearchTerm, setLibrarySearchTerm] = useState("");
   const [uiPreferences, setUiPreferences] = useState<UiPreferences>(() => getStoredUiPreferences());
   const [folderViewMode, setFolderViewMode] = useState<"tree" | "list">(() => getStoredUiPreferences().defaultFolderTreeView ? "tree" : "list");
@@ -239,6 +273,12 @@ function App() {
   });
   const [galleryDragging,setGalleryDragging] = useState(false);
   const [gallerySelectionModeActive, setGallerySelectionModeActive] = useState(false);
+  const [visibleWorkspaceImages, setVisibleWorkspaceImages] = useState<ImageRecord[]>([]);
+  const [inspectorClearSignal, setInspectorClearSignal] = useState(0);
+  const detailLeaveGuardRef = useRef<(() => Promise<boolean>) | null>(null);
+  const registerDetailLeaveGuard = useCallback((guard: (() => Promise<boolean>) | null) => {
+    detailLeaveGuardRef.current = guard;
+  }, []);
   const [folderDialog, setFolderDialog] = useState<FolderDialogState | null>(null);
   const [boardDialogOpen, setBoardDialogOpen] = useState(false);
   const [onboardingOpen, setOnboardingOpen] = useState(() => !isOnboardingTourCompleted());
@@ -246,9 +286,17 @@ function App() {
   const gallery = useGalleryData({
     isActive: activeTab === "gallery",
     liveRefreshEnabled: uiPreferences.enableLiveGalleryRefresh,
+    initialScope: initialLocation.gallery,
   });
   const libraryDataEnabled = activeTab === "library" || activeTab === "workbench";
   const library = useLibraryData(libraryDataEnabled);
+  const initialLibraryRef = useRef(initialLocation.tab === "library" || initialLocation.tab === "workbench" ? initialLocation.library : "");
+  useEffect(() => {
+    const name = initialLibraryRef.current;
+    if (!name) return;
+    initialLibraryRef.current = "";
+    void library.openLibrary(name);
+  }, [library]);
 
   const filteredLibraries = useMemo(
     () => library.libraries.filter((item) => matchesLibrarySearch(item, librarySearchTerm)),
@@ -271,10 +319,8 @@ function App() {
     });
   };
 
-  const confirmDiscardLibraryEdits = async () => {
-    if (!library.isDirty) {
-      return true;
-    }
+  const confirmDiscardLibraryEdits = useCallback(async () => {
+    if (!library.isDirty) return true;
     return confirm({
       title: t("libraryUnsavedTitle"),
       message: t("libraryUnsavedConfirm"),
@@ -282,7 +328,7 @@ function App() {
       confirmLabel: t("libraryDiscardChanges"),
       cancelLabel: t("libraryCancel"),
     });
-  };
+  }, [confirm, library.isDirty, t]);
 
   const runConfirmedOperation = async <T,>({
     confirmOptions,
@@ -300,11 +346,23 @@ function App() {
     return runOperation(operation, operationOptions);
   };
 
+  const activeDetailImage = gallery.selectedImage;
+  const setDetailImage = gallery.setSelectedImage;
+  const closeDetailForWorkspace = useCallback(async (): Promise<boolean> => {
+    if (!activeDetailImage) return true;
+    const guard = detailLeaveGuardRef.current;
+    if (!guard || !await guard()) return false;
+    setDetailImage(null);
+    return true;
+  }, [activeDetailImage, setDetailImage]);
+
   const handleTabChange = async (tab: WorkspaceTab) => {
+    if (tab === activeTab) return;
     if (activeTab === "settings" && tab !== "settings" && settingsDirty && !await confirm({title:t("qolDiscardTitle"),message:t("qolDiscardBody"),tone:"warning",confirmLabel:t("modalDiscardChanges"),cancelLabel:t("libraryCancel")})) return;
     if (activeTab === "library" && tab !== "library" && !(await confirmDiscardLibraryEdits())) {
       return;
     }
+    if (!await closeDetailForWorkspace()) return;
     startTransition(() => {
       if(tab === "workbench")setWorkbenchVisited(true);
       setActiveTab(tab);
@@ -332,6 +390,7 @@ function App() {
     if (activeTab === "library" && library.activeLibraryName !== name && !(await confirmDiscardLibraryEdits())) {
       return;
     }
+    if (!await closeDetailForWorkspace()) return;
     startTransition(() => {
       setActiveTab("library");
     });
@@ -406,16 +465,12 @@ function App() {
     if (activeTab === "library" && !(await confirmDiscardLibraryEdits())) {
       return;
     }
-    if (activeTab === "gallery") {
-      await runOperation(async () => gallery.refresh(), {
+    if (activeTab === "gallery" || activeTab === "settings") {
+      await runOperation(() => gallery.refreshAndWait(), {
         pending: t("operationRefresh"),
-      });
-      return;
-    }
-    if (activeTab === "settings") {
-      await runOperation(async () => gallery.refresh(), {
-        pending: t("operationRefresh"),
-      });
+        success: t("operationRefreshSuccess"),
+        error: (error) => error instanceof Error ? error.message : t("galleryEmptyErrorTitle"),
+      }).catch(() => undefined);
       return;
     }
     await runOperation(async () => {
@@ -617,12 +672,14 @@ function App() {
     if (!files.length) {
       return;
     }
-    const targetSource = gallery.context?.sources.find((source) => source.id === targetSourceId);
+    const targetSource = gallery.context?.sources.find((source) => source.id === targetSourceId) ||
+      gallery.context?.sources.find((source) => source.enabled && source.writable && source.import_target);
+    const importDirectory = gallery.context?.import_image_subfolder || "universal_gallery_imports";
     const approved = await confirm({
       title: t("galleryImportConfirmTitle"),
       message: t("galleryImportConfirm", {
         count: files.length,
-        target: targetSource?.name || targetSourceId || t("galleryOutputFolder"),
+        target: `${targetSource?.name || targetSourceId || t("galleryOutputFolder")} / ${importDirectory}/`,
       }),
       tone: "info",
       confirmLabel: t("libraryImport"),
@@ -655,15 +712,18 @@ function App() {
       pending: t("operationRenameImage"),
       success: t("modalRenameFile"),
       error: (error) => (error instanceof Error ? error.message : t("imageRenameError")),
-    }).catch(() => undefined);
+    });
   };
 
   const handleDeleteSingleImage = async (relativePath: string) => {
-    await runOperation(() => gallery.deleteImages([relativePath]), {
+    await runOperation(async () => {
+      const result = await gallery.deleteImages([relativePath]);
+      if (result.deleted.length !== 1) throw new Error(t("imageDeleteMissing"));
+    }, {
       pending: t("operationDeleteImage"),
       success: t("imageDelete"),
       error: (error) => (error instanceof Error ? error.message : t("imageDeleteError")),
-    }).catch(() => undefined);
+    });
   };
 
   const handleOpenImageWorkflow = async (image: { relative_path: string; original_url?: string; url?: string }) => {
@@ -709,50 +769,74 @@ function App() {
   };
 
   const handleApplyImageLoraStack = async (image: ImageRecord) => {
-    const approved = await confirm({
-      title: t("loraStackApply"),
-      message: t("loraStackApplyConfirm", { name: image.relative_path }),
-      tone: "warning",
-      confirmLabel: t("loraStackApply"),
-      cancelLabel: t("libraryCancel"),
-    });
-    if (!approved) {
-      return;
-    }
-
-    await runOperation(async () => {
+    // Read the recipe first so an image with no active LoRAs does not offer
+    // destructive choices, and the confirmation can show the actual count.
+    const loraManager = await runOperation(async () => {
       const metadata = await galleryApi.getImageMetadata(image.relative_path);
-      const loraManager = metadata.recipe?.lora_manager;
-      if (!loraManager?.detected || loraManager.loras.length === 0) {
+      const stack = metadata.recipe?.lora_manager;
+      if (!stack?.detected || !Array.isArray(stack.loras) ||
+          !stack.loras.some((item) => item && item.enabled !== false && typeof item.name === "string" && item.name.trim())) {
         throw new Error(t("loraStackApplyNoStack"));
       }
+      return stack;
+    }, {
+      pending: t("loraStackReading"),
+      error: (error) => (error instanceof Error ? error.message : t("loraStackApplyNoStack")),
+    }).catch(() => null);
+    if (!loraManager) return;
 
+    // Mirror the bridge's last-name-wins deduplication in the confirmation.
+    const activeByName = new Map(loraManager.loras
+      .filter((item) => item && item.enabled !== false && typeof item.name === "string" && item.name.trim())
+      .map((item) => [item.name.trim(), item]));
+    const differentClipCount = [...activeByName.values()].filter((item) => {
+      const model = Number(item.strength_model ?? 1);
+      const clip = Number(item.strength_clip ?? model);
+      return Number.isFinite(model) && Number.isFinite(clip) && model !== clip;
+    }).length;
+    const choice = await choose({
+      title: t("loraStackApply"),
+      message: t("loraStackApplyConfirm", { name: image.relative_path, count: activeByName.size }) +
+        (differentClipCount ? `\n${t("loraStackClipWarning", { count: differentClipCount })}` : ""),
+      tone: "warning",
+      confirmLabel: t("loraStackAppend"),
+      alternativeLabel: t("loraStackReplace"),
+      cancelLabel: t("libraryCancel"),
+    });
+    if (choice === "cancel") return;
+    const mode: LoraStackApplyMode = choice === "confirm" ? "append" : "replace";
+
+    await runOperation(async () => {
       const payload: LoraStackPayload = {
         id: `lora-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        mode,
         loraManager,
         image: image.relative_path,
         imageUrl: image.original_url || image.url || null,
         ts: Date.now(),
       };
-
       const result = await trySendLoraStackToExistingComfyPage(payload);
-      if (!result.delivered) {
-        throw new Error(t("loraStackApplyNoComfyPage"));
-      }
-      if (!result.ok) {
-        throw new Error(result.error || t("loraStackApplyNoTargetNode"));
-      }
+      if (!result.delivered) throw new Error(t("loraStackApplyNoComfyPage"));
+      if (!result.ok) throw new Error(result.error || t("loraStackApplyNoTargetNode"));
+      return result.summary;
     }, {
       pending: t("operationApplyLoraStack"),
-      success: t("loraStackApplySuccess"),
+      success: (summary) => summary
+        ? t(mode === "append" ? "loraStackAppendedSuccess" : "loraStackReplacedSuccess",
+          { count: summary.applied, name: summary.target })
+        : t("loraStackApplySuccess"),
+      successDetail: (summary) => summary
+        ? t(mode === "append" ? "loraStackAppendDetail" : "loraStackReplaceDetail",
+          { added: summary.added, updated: summary.updated, removed: summary.removed })
+        : "",
       error: (error) => (error instanceof Error ? error.message : t("loraStackApplyNoStack")),
     }).catch(() => undefined);
   };
 
   const selectedGalleryImages = useMemo(() => {
     const selectedPathSet = new Set(gallery.selectedImagePaths);
-    return gallery.images.filter((image) => selectedPathSet.has(image.relative_path));
-  }, [gallery.images, gallery.selectedImagePaths]);
+    return visibleWorkspaceImages.filter((image) => selectedPathSet.has(image.relative_path));
+  }, [visibleWorkspaceImages, gallery.selectedImagePaths]);
 
   const selectedGalleryBoard = useMemo(
     () => gallery.boards.find((board) => board.id === gallery.selectedBoardId) ?? null,
@@ -772,13 +856,105 @@ function App() {
     !gallery.isTrashView &&
     (galleryDragging ? inspectorDuringDrag : selectedGalleryImages.length > 0);
 
-  const handleOpenGalleryDetail = (image: ImageRecord) => {
+  const handleOpenGalleryDetail = (image: ImageRecord, scope?: ImageRecord[]) => {
+    const items = scope?.some((item) => item.relative_path === image.relative_path) ? scope : [image];
     gallery.setSelectedImage(image);
     gallery.setDetailNavigation({
-      items: gallery.images,
-      currentIndex: gallery.images.findIndex((item) => item.relative_path === image.relative_path),
+      items,
+      currentIndex: items.findIndex((item) => item.relative_path === image.relative_path),
     });
   };
+
+  const urlState = useMemo<WorkspaceLocation>(() => ({
+    tab: activeTab,
+    library: activeTab === "library" || activeTab === "workbench" ? library.activeLibraryName ?? "" : "",
+    gallery: {
+      folder: gallery.selectedSubfolder, board: gallery.selectedBoardId, query: gallery.searchTerm,
+      category: gallery.selectedCategory, dateFrom: gallery.dateFrom, dateTo: gallery.dateTo,
+      favorites: gallery.favoritesOnly, color: gallery.selectedColorFamily,
+      sort: gallery.sortBy, order: gallery.sortOrder, page: gallery.page,
+    },
+  }), [activeTab, library.activeLibraryName, gallery.selectedSubfolder, gallery.selectedBoardId,
+    gallery.searchTerm, gallery.selectedCategory, gallery.dateFrom, gallery.dateTo,
+    gallery.favoritesOnly, gallery.selectedColorFamily, gallery.sortBy, gallery.sortOrder, gallery.page]);
+  const lastUrlRef = useRef(`${window.location.pathname}${window.location.search}${window.location.hash}`);
+  const writtenStateRef = useRef(initialLocation);
+  const restoringUrlRef = useRef(false);
+  const popPendingRef = useRef(false);
+
+  useEffect(() => {
+    // Do not overwrite a deep-linked library before its first open is committed.
+    if (initialLocation.library && (initialLocation.tab === "library" || initialLocation.tab === "workbench") &&
+        !library.activeLibraryName) return;
+    const next = buildWorkspaceUrl(window.location.href, urlState);
+    const current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    if (restoringUrlRef.current) {
+      if (next === current) {
+        restoringUrlRef.current = false;
+        writtenStateRef.current = urlState;
+        lastUrlRef.current = current;
+      }
+      return;
+    }
+    if (next === current) {
+      writtenStateRef.current = urlState;
+      lastUrlRef.current = current;
+      return;
+    }
+    const searchOnly = isSearchOnlyLocationChange(writtenStateRef.current, urlState);
+    const write = () => {
+      const actual = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+      if (actual !== next) window.history[searchOnly ? "replaceState" : "pushState"](window.history.state, "", next);
+      writtenStateRef.current = urlState;
+      lastUrlRef.current = next;
+    };
+    if (searchOnly) {
+      const timer = window.setTimeout(write, 400);
+      return () => window.clearTimeout(timer);
+    }
+    write();
+  }, [initialLocation, library.activeLibraryName, urlState]);
+
+  useEffect(() => {
+    const restorePreviousUrl = () => window.history.pushState(window.history.state, "", lastUrlRef.current);
+    const onPopState = async () => {
+      if (popPendingRef.current) { restorePreviousUrl(); return; }
+      popPendingRef.current = true;
+      try {
+        const target = readWorkspaceLocation(window.location.search);
+        const leavesLibrary = activeTab === "library" && (target.tab !== "library" || target.library !== (library.activeLibraryName ?? ""));
+        if (leavesLibrary && !(await confirmDiscardLibraryEdits())) { restorePreviousUrl(); return; }
+        if (activeTab === "settings" && target.tab !== "settings" && settingsDirty && !await confirm({
+          title: t("qolDiscardTitle"), message: t("qolDiscardBody"), tone: "warning",
+          confirmLabel: t("modalDiscardChanges"), cancelLabel: t("libraryCancel"),
+        })) { restorePreviousUrl(); return; }
+        if (!await closeDetailForWorkspace()) { restorePreviousUrl(); return; }
+        if (leavesLibrary && library.isEditing) library.cancelEditing();
+        const canonical = buildWorkspaceUrl(window.location.href, target);
+        if (canonical !== `${window.location.pathname}${window.location.search}${window.location.hash}`) {
+          window.history.replaceState(window.history.state, "", canonical);
+        }
+        restoringUrlRef.current = true;
+        gallery.applyUrlScope(target.gallery);
+        if (target.tab === "library" || target.tab === "workbench") void library.openLibrary(target.library || null);
+        if (target.tab === "workbench") setWorkbenchVisited(true);
+        setActiveTab(target.tab);
+        // A pop may point to a distinct URL with the same app state (for
+        // example an unrelated query parameter). No React commit is needed.
+        if (buildWorkspaceUrl(window.location.href, urlState) === canonical) {
+          restoringUrlRef.current = false;
+          writtenStateRef.current = target;
+          lastUrlRef.current = canonical;
+        }
+      } catch {
+        restorePreviousUrl();
+      } finally {
+        popPendingRef.current = false;
+      }
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, [activeTab, closeDetailForWorkspace, confirm, confirmDiscardLibraryEdits, gallery, library, settingsDirty, t, urlState]);
 
   return (
     <div className="ue-app-shell">
@@ -873,18 +1049,27 @@ function App() {
               trashItems={gallery.trashItems}
               isTrashView={gallery.isTrashView}
               importMessage={gallery.importMessage}
+              importFolderRef={gallery.importFolderRef}
+              onOpenImportFolder={(folderRef) => {
+                gallery.setSelectedBoardId("");
+                gallery.setFavoritesOnly(false);
+                gallery.setSelectedSubfolder(folderRef);
+                gallery.setPage(1);
+              }}
               isLoading={gallery.isLoading}
               isRefreshing={gallery.isRefreshing}
               hasPendingLiveRefresh={gallery.hasPendingLiveRefresh}
               error={gallery.error}
               boards={gallery.boards}
               searchValue={gallery.searchTerm}
-              onSearchChange={gallery.setSearchTerm}
+              onSearchChange={(value) => { gallery.setSearchTerm(value); gallery.setPage(1); }}
               defaultSelectionMode={uiPreferences.defaultSelectionMode}
               enableImagePrefetch={uiPreferences.enableImagePrefetch}
               onSelectionDragChange={handleGalleryDragChange}
               onSelectionModeActiveChange={setGallerySelectionModeActive}
               onOpenDetail={handleOpenGalleryDetail}
+              onVisibleImagesChange={setVisibleWorkspaceImages}
+              inspectorClearSignal={inspectorClearSignal}
               onPageChange={gallery.setPage}
               onCategoryChange={gallery.setSelectedCategory}
               onBoardChange={gallery.setSelectedBoardId}
@@ -906,6 +1091,7 @@ function App() {
               onMoveImages={gallery.moveImages}
               onImportFiles={handleImportFiles}
               onApplyPendingLiveRefresh={gallery.refresh}
+              onOpenSettings={() => void handleTabChange("settings")}
               onRestoreTrashItem={async (id) => {
                 const approved = await confirm({
                   title: t("trashRestore"),
@@ -1101,7 +1287,10 @@ function App() {
               boards={gallery.boards}
               page={gallery.page}
               targetFolderOptions={gallery.targetFolderOptions}
-              onClose={() => gallery.setSelectedImagePaths([])}
+              onClose={() => {
+                gallery.setSelectedImagePaths([]);
+                setInspectorClearSignal((current) => current + 1);
+              }}
               onBatchUpdateImages={gallery.batchUpdateImages}
               onCreateBoard={gallery.createBoard}
               onUpdateBoardPins={gallery.updateBoardPins}
@@ -1122,6 +1311,7 @@ function App() {
       {gallery.selectedImage ? (
         <Suspense fallback={null}>
           <ImageDetailModal
+            key={gallery.selectedImage.relative_path}
             image={gallery.selectedImage}
             onClose={() => gallery.setSelectedImage(null)}
             onSaveState={handleUpdateImageState}
@@ -1130,6 +1320,7 @@ function App() {
             onOpenWorkflow={handleOpenImageWorkflow}
             onApplyLoraStack={handleApplyImageLoraStack}
             navigation={gallery.detailNavigation}
+            onRegisterLeave={registerDetailLeaveGuard}
             onNavigate={(nextIndex) => {
               const items = gallery.detailNavigation?.items ?? [];
               const nextImage = items[nextIndex];

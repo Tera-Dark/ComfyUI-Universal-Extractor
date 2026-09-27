@@ -4,6 +4,8 @@ import { useI18n } from "../i18n/I18nProvider";
 import { galleryApi } from "../services/galleryApi";
 import type { BoardSummary, ColorIndexStatus, DetailNavigationState, GalleryContext, ImageRecord, MoveTargetOption, TrashItem } from "../types/universal-gallery";
 import { PAGE_SIZE } from "../utils/formatters";
+import { getDeleteOutcome, getMoveOutcome } from "../utils/galleryOperationResults";
+import type { GalleryUrlScope } from "../utils/workspaceLocation";
 
 const TRASH_SUBFOLDER_KEY = "__trash__";
 const DEFAULT_OUTPUT_SOURCE_ROOT = "default_output::";
@@ -11,6 +13,8 @@ const FOLDER_REF_SEPARATOR = "::";
 const LIVE_GALLERY_REFRESH_INTERVAL_MS = 6_000;
 const LIVE_GALLERY_REFRESH_FOCUS_DEBOUNCE_MS = 4_000;
 const INITIAL_THUMBNAIL_PREWARM_LIMIT = 24;
+const EMPTY_IMAGES: ImageRecord[] = [];
+const EMPTY_TRASH: TrashItem[] = [];
 
 const normalizeUpdatedPaths = (value: unknown, fallback: string[]) => {
   if (Array.isArray(value)) {
@@ -25,6 +29,14 @@ const normalizeUpdatedPaths = (value: unknown, fallback: string[]) => {
 interface UseGalleryDataOptions {
   isActive?: boolean;
   liveRefreshEnabled?: boolean;
+  initialScope?: GalleryUrlScope;
+}
+
+interface RefreshWaiter {
+  parts: Set<"context" | "images">;
+  error: Error | null;
+  resolve: () => void;
+  reject: (error: Error) => void;
 }
 
 const getSourceRootRef = (folderRef: string) => {
@@ -42,17 +54,17 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [context, setContext] = useState<GalleryContext | null>(null);
   const [colorIndexStatus, setColorIndexStatus] = useState<ColorIndexStatus | null>(null);
   const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState("");
-  const [selectedSubfolder, setSelectedSubfolder] = useState(DEFAULT_OUTPUT_SOURCE_ROOT);
-  const [selectedBoardId, setSelectedBoardId] = useState("");
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
-  const [favoritesOnly, setFavoritesOnly] = useState(false);
-  const [selectedColorFamily, setSelectedColorFamily] = useState("");
-  const [sortBy, setSortBy] = useState("created_at");
-  const [sortOrder, setSortOrder] = useState("desc");
+  const [page, setPage] = useState(() => options.initialScope?.page ?? 1);
+  const [searchTerm, setSearchTerm] = useState(() => options.initialScope?.query ?? "");
+  const [selectedCategory, setSelectedCategory] = useState(() => options.initialScope?.category ?? "");
+  const [selectedSubfolder, setSelectedSubfolder] = useState(() => options.initialScope?.folder ?? DEFAULT_OUTPUT_SOURCE_ROOT);
+  const [selectedBoardId, setSelectedBoardId] = useState(() => options.initialScope?.board ?? "");
+  const [dateFrom, setDateFrom] = useState(() => options.initialScope?.dateFrom ?? "");
+  const [dateTo, setDateTo] = useState(() => options.initialScope?.dateTo ?? "");
+  const [favoritesOnly, setFavoritesOnly] = useState(() => options.initialScope?.favorites ?? false);
+  const [selectedColorFamily, setSelectedColorFamily] = useState(() => options.initialScope?.color ?? "");
+  const [sortBy, setSortBy] = useState(() => options.initialScope?.sort ?? "created_at");
+  const [sortOrder, setSortOrder] = useState(() => options.initialScope?.order ?? "desc");
   const [gridColumns, setGridColumns] = useState(() => {
     const stored = window.localStorage.getItem("universal-extractor:grid-columns");
     const parsed = Number(stored);
@@ -67,7 +79,21 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [selectedImagePaths, setSelectedImagePaths] = useState<string[]>([]);
   const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
   const [importMessage, setImportMessage] = useState("");
+  const [importFolderRef, setImportFolderRef] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const refreshSequenceRef = useRef(0);
+  const refreshWaitersRef = useRef<Map<number, RefreshWaiter>>(new Map());
+  const completeRefreshPart = useCallback((key: number, part: "context" | "images", error?: Error) => {
+    const waiter = refreshWaitersRef.current.get(key);
+    if (!waiter) return;
+    waiter.parts.delete(part);
+    if (error) waiter.error ??= error;
+    if (!waiter.parts.size) {
+      refreshWaitersRef.current.delete(key);
+      if (waiter.error) waiter.reject(waiter.error);
+      else waiter.resolve();
+    }
+  }, []);
   const hasLoadedImagesRef = useRef(false);
   const hasLoadedTrashRef = useRef(false);
   const consumedContextRefreshKeyRef = useRef(0);
@@ -77,13 +103,23 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const liveRefreshFingerprintsRef = useRef<Map<string, string>>(new Map());
   const thumbnailPrewarmTimerRef = useRef<number | null>(null);
   const thumbnailPrewarmIdleRef = useRef<number | null>(null);
-  const deferredSearchTerm = useDeferredValue(searchTerm);
+  const [debouncedSearchTerm, setDebouncedSearchTerm] = useState(searchTerm);
+  useEffect(() => {
+    if (searchTerm === debouncedSearchTerm) return;
+    const timer = window.setTimeout(() => setDebouncedSearchTerm(searchTerm), searchTerm ? 280 : 0);
+    return () => window.clearTimeout(timer);
+  }, [debouncedSearchTerm, searchTerm]);
+  const deferredSearchTerm = useDeferredValue(debouncedSearchTerm);
   const isTrashView = selectedSubfolder === TRASH_SUBFOLDER_KEY;
+  // A response belongs to one exact browse scope. Never expose the previous
+  // source/page's actionable cards under a newly selected scope.
+  const [loadedViewKey, setLoadedViewKey] = useState<string | null>(null);
+  const loadedViewKeyRef = useRef<string | null>(null);
   const liveRefreshViewKey = useMemo(
     () =>
       JSON.stringify({
         subfolder: selectedSubfolder,
-        search: deferredSearchTerm.trim(),
+        search: deferredSearchTerm,
         category: selectedCategory,
         board: selectedBoardId,
         dateFrom,
@@ -147,6 +183,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     }
 
     const loadContext = async () => {
+      let requestError: Error | undefined;
       try {
         const contextResponse = await galleryApi.getContext(shouldForceRefresh);
         if (isCancelled) {
@@ -156,20 +193,25 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
         setColorIndexStatus(contextResponse.color_index_status ?? null);
         if (contextResponse.index_error) {
           setError(contextResponse.index_error);
+          requestError = new Error(contextResponse.index_error);
         }
       } catch (fetchError) {
         if (!isCancelled) {
-          setError(fetchError instanceof Error ? fetchError.message : t("galleryLoading"));
+          requestError = fetchError instanceof Error ? fetchError : new Error(t("galleryLoading"));
+          setError(requestError.message);
         }
+      } finally {
+        if (!isCancelled) completeRefreshPart(refreshKey, "context", requestError);
       }
     };
 
-    loadContext();
+    void loadContext();
 
     return () => {
       isCancelled = true;
+      if (shouldForceRefresh) completeRefreshPart(refreshKey, "context", new Error(t("galleryRefreshInterrupted")));
     };
-  }, [refreshKey, t]);
+  }, [completeRefreshPart, refreshKey, t]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -178,16 +220,18 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       consumedImagesRefreshKeyRef.current = refreshKey;
     }
 
-    const hasLoadedCurrentView = isTrashView ? hasLoadedTrashRef.current : hasLoadedImagesRef.current;
-
+    const hasLoadedCurrentView = loadedViewKeyRef.current === liveRefreshViewKey;
     if (hasLoadedCurrentView) {
       setIsRefreshing(true);
     } else {
       setIsLoading(true);
+      setIsRefreshing(false);
     }
     setError(null);
 
     const loadImages = async () => {
+      let requestError: Error | undefined;
+      let loadedCurrentImages = false;
       try {
         if (isTrashView) {
           const items = await galleryApi.listTrash();
@@ -220,11 +264,13 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
         }
 
         setImages(imageResponse.images ?? []);
+        loadedCurrentImages = true;
         setTrashItems([]);
         setTotal(imageResponse.total ?? 0);
         setColorIndexStatus(imageResponse.color_index_status ?? null);
         if (imageResponse.index_error) {
           setError(imageResponse.index_error);
+          requestError = new Error(imageResponse.index_error);
         }
         if (shouldForceRefresh) {
           const contextResponse = await galleryApi.getContext(false);
@@ -233,16 +279,26 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
             setColorIndexStatus(contextResponse.color_index_status ?? imageResponse.color_index_status ?? null);
             if (contextResponse.index_error) {
               setError(contextResponse.index_error);
+              requestError = new Error(contextResponse.index_error);
             }
           }
         }
         scheduleThumbnailPrewarm(imageResponse.images ?? []);
       } catch (fetchError) {
         if (!isCancelled) {
-          setError(fetchError instanceof Error ? fetchError.message : t("galleryLoading"));
+          if (!hasLoadedCurrentView && !loadedCurrentImages) {
+            setImages([]);
+            setTrashItems([]);
+            setTotal(0);
+          }
+          requestError = fetchError instanceof Error ? fetchError : new Error(t("galleryLoading"));
+          setError(requestError.message);
         }
       } finally {
         if (!isCancelled) {
+          completeRefreshPart(refreshKey, "images", requestError);
+          loadedViewKeyRef.current = liveRefreshViewKey;
+          setLoadedViewKey(liveRefreshViewKey);
           if (isTrashView) {
             hasLoadedTrashRef.current = true;
           } else {
@@ -254,18 +310,20 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       }
     };
 
-    loadImages();
+    void loadImages();
 
     return () => {
       isCancelled = true;
+      if (shouldForceRefresh) completeRefreshPart(refreshKey, "images", new Error(t("galleryRefreshInterrupted")));
     };
-  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, t, isTrashView, scheduleThumbnailPrewarm]);
+  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, t, isTrashView, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart]);
 
   useEffect(() => {
     if (!liveRefreshEnabled || !isActive || isTrashView) {
       return;
     }
 
+    let cancelled = false;
     const refreshSilently = async (reason: "interval" | "focus") => {
       if (liveRefreshRunningRef.current || document.visibilityState === "hidden") {
         return;
@@ -281,12 +339,14 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       try {
         const knownFingerprint = liveRefreshFingerprintsRef.current.get(liveRefreshViewKey) ?? "";
         const freshness = await galleryApi.getImageFreshness(selectedSubfolder, knownFingerprint);
+        if (cancelled) return;
         liveRefreshFingerprintsRef.current.set(liveRefreshViewKey, freshness.fingerprint);
         if (!freshness.changed) {
           return;
         }
 
-        const canReplaceCurrentPage = page === 1 && sortBy === "created_at" && sortOrder === "desc";
+        const canReplaceCurrentPage = page === 1 && sortBy === "created_at" && sortOrder === "desc" &&
+          (document.querySelector<HTMLElement>(".ue-main-shell")?.scrollTop ?? 0) <= 80;
         if (!canReplaceCurrentPage) {
           setHasPendingLiveRefresh(true);
           return;
@@ -307,6 +367,11 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
           sortOrder,
           true,
         );
+        if (cancelled) return;
+        if ((document.querySelector<HTMLElement>(".ue-main-shell")?.scrollTop ?? 0) > 80) {
+          setHasPendingLiveRefresh(true);
+          return;
+        }
         const nextImages = imageResponse.images ?? [];
 
         setTotal(imageResponse.total ?? 0);
@@ -316,6 +381,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
         scheduleThumbnailPrewarm(nextImages);
 
         const contextResponse = await galleryApi.getContext(false);
+        if (cancelled) return;
         setContext(contextResponse);
         setColorIndexStatus(contextResponse.color_index_status ?? imageResponse.color_index_status ?? null);
       } catch {
@@ -338,6 +404,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     document.addEventListener("visibilitychange", handleVisibleRefresh);
 
     return () => {
+      cancelled = true;
       window.clearInterval(interval);
       window.removeEventListener("focus", handleVisibleRefresh);
       document.removeEventListener("visibilitychange", handleVisibleRefresh);
@@ -379,17 +446,49 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     return () => window.clearInterval(interval);
   }, [colorIndexStatus, isTrashView]);
 
-  useEffect(() => {
-    if (!liveRefreshEnabled || !isActive || isTrashView || !hasLoadedImagesRef.current) {
-      return;
-    }
-    setRefreshKey((value) => value + 1);
-  }, [liveRefreshEnabled, isActive, isTrashView]);
-
-  const refresh = () => {
+  const triggerRefresh = useCallback(() => {
+    const key = ++refreshSequenceRef.current;
     setHasPendingLiveRefresh(false);
-    setRefreshKey((value) => value + 1);
+    setRefreshKey(key);
+    return key;
+  }, []);
+
+  useEffect(() => {
+    if (!liveRefreshEnabled || !isActive || isTrashView || !hasLoadedImagesRef.current) return;
+    triggerRefresh();
+  }, [liveRefreshEnabled, isActive, isTrashView, triggerRefresh]);
+
+  const applyUrlScope = (next: GalleryUrlScope) => {
+    setPage(next.page);
+    setSearchTerm(next.query);
+    setDebouncedSearchTerm(next.query);
+    setSelectedSubfolder(next.folder);
+    setSelectedBoardId(next.board);
+    setSelectedCategory(next.category);
+    setDateFrom(next.dateFrom);
+    setDateTo(next.dateTo);
+    setFavoritesOnly(next.favorites);
+    setSelectedColorFamily(next.color);
+    setSortBy(next.sort);
+    setSortOrder(next.order);
+    setSelectedImagePaths([]);
+    setSelectedImage(null);
+    setDetailNavigation(null);
   };
+
+  const refresh = () => { triggerRefresh(); };
+  const refreshAndWait = () => new Promise<void>((resolve, reject) => {
+    const key = triggerRefresh();
+    refreshWaitersRef.current.set(key, { parts: new Set(["context", "images"]), error: null, resolve, reject });
+  });
+
+  useEffect(() => {
+    const waiters = refreshWaitersRef.current;
+    return () => {
+      waiters.forEach((waiter) => waiter.reject(new Error(t("galleryRefreshInterrupted"))));
+      waiters.clear();
+    };
+  }, [t]);
 
   const applyContextPatch = (
     updater: (current: GalleryContext) => GalleryContext,
@@ -543,12 +642,14 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
 
   const moveImages = async (relativePaths: string[], targetSubfolder: string, targetSourceId = "") => {
     const response = await galleryApi.moveImages(relativePaths, targetSubfolder, targetSourceId);
+    if (!response.ok) throw new Error(t("dual_moveError"));
     applyContextPatch((current) => ({
       ...current,
       categories: response.categories ?? current.categories,
       subfolders: response.subfolders ?? current.subfolders,
     }));
-    setSelectedImagePaths([]);
+    const { movedSources } = getMoveOutcome(relativePaths, response);
+    setSelectedImagePaths((current) => current.filter((path) => !movedSources.has(path)));
     refresh();
     return response;
   };
@@ -568,11 +669,13 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
 
   const deleteImages = async (relativePaths: string[]) => {
     const response = await galleryApi.deleteImages(relativePaths);
+    if (!response.ok) throw new Error(t("dual_deleteError"));
     applyContextPatch((current) => ({
       ...current,
       categories: response.categories ?? current.categories,
     }));
-    setSelectedImagePaths((current) => current.filter((path) => !relativePaths.includes(path)));
+    const { deletedPaths } = getDeleteOutcome(relativePaths, response);
+    setSelectedImagePaths((current) => current.filter((path) => !deletedPaths.has(path)));
     refresh();
     return response;
   };
@@ -652,17 +755,29 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   };
 
   const importFiles = async (files: File[], targetSourceId = "") => {
+    setImportMessage("");
+    setImportFolderRef("");
     const response = await galleryApi.importFiles(files, targetSourceId);
     const importedCount = response.imported_images.length + response.imported_libraries.length;
     const skippedCount = response.skipped.length;
+    // Use the path returned by the server rather than assuming the requested
+    // source won the import-target fallback or that filenames were unchanged.
+    const firstPath = response.imported_images[0]?.relative_path ?? "";
+    const serverFolder = firstPath.includes("/") ? firstPath.slice(0, firstPath.lastIndexOf("/")) : "";
+    // The API returns legacy unprefixed refs for default_output, but includes
+    // `source::` for other sources. Normalize the server result for sidebar/URL.
+    const folderRef = serverFolder && !serverFolder.includes(FOLDER_REF_SEPARATOR)
+      ? `${DEFAULT_OUTPUT_SOURCE_ROOT}${serverFolder}` : serverFolder;
+    setImportFolderRef(folderRef);
+    const sourceId = getSourceRootRef(folderRef).replace(FOLDER_REF_SEPARATOR, "");
+    const sourceName = context?.sources.find((source) => source.id === sourceId)?.name || sourceId;
+    const folderName = folderRef.split(FOLDER_REF_SEPARATOR).pop() || context?.import_image_subfolder || "universal_gallery_imports";
 
     const messages = [];
-    if (importedCount > 0) {
-      messages.push(t("galleryImportSuccess", { count: importedCount }));
-    }
-    if (skippedCount > 0) {
-      messages.push(t("galleryImportSkipped", { count: skippedCount }));
-    }
+    if (importedCount > 0) messages.push(t("galleryImportSuccess", { count: importedCount }));
+    if (response.imported_images.length) messages.push(t("galleryImportSavedTo", { target: `${sourceName} / ${folderName}/` }));
+    if (response.imported_libraries.length) messages.push(t("galleryImportLibrariesSavedTo", { count: response.imported_libraries.length }));
+    if (skippedCount > 0) messages.push(t("galleryImportSkipped", { count: skippedCount }));
 
     setImportMessage(messages.join(" · "));
     startTransition(() => {
@@ -728,14 +843,17 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     refresh();
   };
 
+  const viewReady = loadedViewKey === liveRefreshViewKey && (isTrashView || searchTerm === deferredSearchTerm);
+  const scopedTotal = viewReady ? total : 0;
+
   return {
-    images,
+    images: viewReady ? images : EMPTY_IMAGES,
     context,
     colorIndexStatus,
-    total,
+    total: scopedTotal,
     page,
     setPage,
-    totalPages: Math.max(1, Math.ceil(total / PAGE_SIZE)),
+    totalPages: Math.max(1, Math.ceil(scopedTotal / PAGE_SIZE)),
     searchTerm,
     setSearchTerm,
     selectedCategory,
@@ -758,23 +876,26 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     setSortOrder,
     gridColumns,
     setGridColumns,
-    isLoading,
-    isRefreshing,
+    isLoading: isLoading || !viewReady,
+    isRefreshing: isRefreshing && viewReady,
     hasPendingLiveRefresh,
-    error,
+    error: viewReady ? error : null,
     selectedImage,
     setSelectedImage,
     detailNavigation,
     setDetailNavigation,
-    selectedImagePaths,
+    selectedImagePaths: viewReady ? selectedImagePaths : [],
     setSelectedImagePaths,
-    trashItems,
+    trashItems: viewReady ? trashItems : EMPTY_TRASH,
     isTrashView,
     importMessage,
+    importFolderRef,
     setImportMessage,
     targetFolderOptions,
     boards,
     refresh,
+    refreshAndWait,
+    applyUrlScope,
     updateImageState,
     batchUpdateImages,
     moveImages,

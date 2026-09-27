@@ -218,8 +218,8 @@
   border: 1px solid rgba(0, 0, 0, 0.04);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.5);
-  content-visibility: auto;
-  contain-intrinsic-size: 240px 320px;
+  /* Already DOM-virtualized: avoid a second, fixed offscreen placeholder
+     that can disagree with the real box measured by the virtualizer. */
   transform: translateY(0);
   transition:
     background-color var(--ue-duration-base) var(--ue-ease),

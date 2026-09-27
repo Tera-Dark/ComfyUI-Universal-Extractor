@@ -785,28 +785,27 @@ export const WorkspaceSidebar = ({
             <span>{libraries.length}</span>
           </div>
 
-          <div className="ue-library-list">
+          <div className="ue-library-list" role="list" aria-label={t("sidebarLibraries")}>
             {libraries.length === 0 ? <div className="ue-sidebar-empty">{t("sidebarNoLibraries")}</div> : null}
 
             {libraries.map((library) => (
               <div
                 key={library.filename}
+                role="listitem"
                 className={`ue-library-list-item ${activeLibraryName === library.filename ? "active" : ""}`}
-                onClick={() => onLibrarySelect(library.filename)}
               >
-                <div className="ue-library-main">
+                <button type="button" className="ue-library-main" aria-current={activeLibraryName === library.filename ? "page" : undefined}
+                  onClick={() => onLibrarySelect(library.filename)}>
                   <BookOpen size={14} />
-                  <div>
+                  <span>
                     <strong>{library.filename}</strong>
-                    <p>{t("commonEntries", { count: library.count })}</p>
-                  </div>
-                </div>
+                    <small>{t("commonEntries", { count: library.count })}</small>
+                  </span>
+                </button>
                 <button
+                  type="button"
                   className="ue-library-delete"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onLibraryDelete(library.filename);
-                  }}
+                  onClick={() => onLibraryDelete(library.filename)}
                   aria-label={`${t("commonDelete")} ${library.filename}`}
                 >
                   <Trash2 size={14} />

@@ -20,12 +20,14 @@ import {
 
 import { useI18n } from "../../i18n/I18nProvider";
 import { useConfirm } from "../shared/ConfirmDialog";
+import { parseFolderRef } from "../shared/folderTree";
 import { useToast } from "../shared/ToastViewport";
 import { useOperationStatus } from "../shared/OperationStatusCenter";
 import type {
   BoardMutationResult,
   BoardSummary,
   ColorIndexStatus,
+  DeleteImagesResult,
   FingerprintIndexStatus,
   GalleryContext,
   ImageRecord,
@@ -35,6 +37,7 @@ import type {
   VariantGroupType,
 } from "../../types/universal-gallery";
 import { formatFileSize } from "../../utils/formatters";
+import { describeFailedPaths, getDeleteOutcome } from "../../utils/galleryOperationResults";
 import { getPositivePromptText } from "../../utils/metadata";
 import { galleryApi } from "../../services/galleryApi";
 import { BoardPickerModal } from "./BoardPickerModal";
@@ -55,6 +58,7 @@ const MASONRY_GAP = 14;
 const SELECTION_AUTO_SCROLL_EDGE_PX = 72;
 const SELECTION_AUTO_SCROLL_MAX_STEP_PX = 30;
 const GALLERY_VIEW_MODE_STORAGE_KEY = "universal-extractor:gallery-view-mode";
+const MOBILE_DENSITY_STORAGE_KEY = "universal-extractor:mobile-density";
 
 interface GalleryWorkspaceProps {
   images: ImageRecord[];
@@ -77,6 +81,8 @@ interface GalleryWorkspaceProps {
   trashItems: TrashItem[];
   isTrashView: boolean;
   importMessage: string;
+  importFolderRef?: string;
+  onOpenImportFolder?: (folderRef: string) => void;
   isLoading: boolean;
   isRefreshing: boolean;
   hasPendingLiveRefresh: boolean;
@@ -86,7 +92,9 @@ interface GalleryWorkspaceProps {
   enableImagePrefetch: boolean;
   onSelectionDragChange?: (active: boolean) => void;
   onSelectionModeActiveChange?: (active: boolean) => void;
-  onOpenDetail: (image: ImageRecord) => void;
+  onOpenDetail: (image: ImageRecord, scope?: ImageRecord[]) => void;
+  onVisibleImagesChange?: (images: ImageRecord[]) => void;
+  inspectorClearSignal?: number;
   onPageChange: (page: number) => void;
   onCategoryChange: (category: string) => void;
   onBoardChange: (boardId: string) => void;
@@ -104,10 +112,11 @@ interface GalleryWorkspaceProps {
   onCreateBoard: (name: string, description?: string) => Promise<BoardMutationResult>;
   onUpdateBoardPins: (boardId: string, relativePaths: string[], pinned?: boolean) => Promise<unknown>;
   onDeleteBoard: (boardId: string) => Promise<unknown>;
-  onDeleteImages: (relativePaths: string[]) => Promise<unknown>;
+  onDeleteImages: (relativePaths: string[]) => Promise<DeleteImagesResult>;
   onMoveImages: (relativePaths: string[], targetSubfolder: string, targetSourceId?: string) => Promise<MoveImagesResult>;
   onImportFiles: (files: File[], targetSourceId?: string) => Promise<unknown>;
   onApplyPendingLiveRefresh: () => void;
+  onOpenSettings?: () => void;
   searchValue?: string;
   onSearchChange?: (value: string) => void;
   onRestoreTrashItem: (id: string) => Promise<void>;
@@ -149,6 +158,8 @@ export const GalleryWorkspace = ({
   trashItems,
   isTrashView,
   importMessage,
+  importFolderRef,
+  onOpenImportFolder,
   isLoading,
   isRefreshing,
   hasPendingLiveRefresh,
@@ -159,6 +170,8 @@ export const GalleryWorkspace = ({
   onSelectionDragChange,
   onSelectionModeActiveChange,
   onOpenDetail,
+  onVisibleImagesChange,
+  inspectorClearSignal,
   onPageChange,
   onCategoryChange,
   onBoardChange,
@@ -180,6 +193,7 @@ export const GalleryWorkspace = ({
   onMoveImages,
   onImportFiles,
   onApplyPendingLiveRefresh,
+  onOpenSettings,
   searchValue,
   onSearchChange,
   onRestoreTrashItem,
@@ -206,6 +220,9 @@ export const GalleryWorkspace = ({
   const [selectionBox, setSelectionBox] = useState<SelectionBoxState | null>(null);
   const [galleryViewMode, setGalleryViewMode] = useState<ContentViewMode>(() =>
     getStoredViewMode(GALLERY_VIEW_MODE_STORAGE_KEY, "grid"),
+  );
+  const [mobileDensity, setMobileDensity] = useState<"single" | "double">(() =>
+    window.localStorage.getItem(MOBILE_DENSITY_STORAGE_KEY) === "double" ? "double" : "single",
   );
   const [dualFolderMode, setDualFolderMode] = useState(false);
   const [variantMode, setVariantMode] = useState(false);
@@ -239,10 +256,17 @@ export const GalleryWorkspace = ({
   const scrollContainerRef = useRef<HTMLElement | null>(null);
 
   const activeImages = variantMode && selectedVariantGroup ? variantImages : images;
+  useEffect(() => {
+    if (!dualFolderMode) onVisibleImagesChange?.(isTrashView || (variantMode && !selectedVariantGroup) ? [] : activeImages);
+  }, [activeImages, dualFolderMode, isTrashView, onVisibleImagesChange, selectedVariantGroup, variantMode]);
+  const openActiveDetail = useCallback((image: ImageRecord) => onOpenDetail(image, activeImages), [activeImages, onOpenDetail]);
   const activePage = variantMode && selectedVariantGroup ? variantPage : page;
   const activeTotal = variantMode && selectedVariantGroup ? variantTotal : total;
   const activeTotalPages = variantMode && selectedVariantGroup ? Math.max(1, Math.ceil(variantTotal / 60)) : totalPages;
-  const visibleImagePaths = useMemo(() => activeImages.map((image) => image.relative_path), [activeImages]);
+  const visibleImagePaths = useMemo(
+    () => variantMode && !selectedVariantGroup ? [] : activeImages.map((image) => image.relative_path),
+    [activeImages, selectedVariantGroup, variantMode],
+  );
   const imageIndexByPath = useMemo(
     () => new Map(activeImages.map((image, index) => [image.relative_path, index])),
     [activeImages],
@@ -261,7 +285,7 @@ export const GalleryWorkspace = ({
   const selectionLayoutLocked = Boolean(selectionBox);
   useEffect(()=>{onSelectionDragChange?.(selectionLayoutLocked);return ()=>onSelectionDragChange?.(false);},[selectionLayoutLocked,onSelectionDragChange]);
   const selectionEnabled = !dualFolderMode;
-  const inspectorSelectionActive = !isTrashView && (selectionMode || selectedCount > 0);
+  const inspectorSelectionActive = !isTrashView && (dualFolderMode ? selectedImagePaths.length > 0 : selectionMode || selectedCount > 0);
   const selectedTrashItems = useMemo(
     () => (isTrashView ? trashItems.filter((item) => selectedImagePathSet.has(item.id)) : []),
     [isTrashView, selectedImagePathSet, trashItems],
@@ -287,7 +311,8 @@ export const GalleryWorkspace = ({
     () => (context?.sources ?? []).filter((source) => source.enabled && source.exists && source.writable),
     [context?.sources],
   );
-  const activeImportSourceId = importTargetSourceId || writableSources.find((source) => source.import_target)?.id || writableSources[0]?.id || "";
+  const activeImportSourceId = (writableSources.some((source) => source.id === importTargetSourceId) && importTargetSourceId) ||
+    writableSources.find((source) => source.import_target)?.id || writableSources[0]?.id || "";
 
   useEffect(() => {
     if (activeImportSourceId && activeImportSourceId !== importTargetSourceId) {
@@ -304,6 +329,9 @@ export const GalleryWorkspace = ({
   useEffect(() => {
     window.localStorage.setItem(GALLERY_VIEW_MODE_STORAGE_KEY, galleryViewMode);
   }, [galleryViewMode]);
+  useEffect(() => {
+    window.localStorage.setItem(MOBILE_DENSITY_STORAGE_KEY, mobileDensity);
+  }, [mobileDensity]);
 
   const closeContextMenus = useCallback(() => {
     setContextMenu(null);
@@ -333,6 +361,7 @@ export const GalleryWorkspace = ({
   }, [inspectorSelectionActive, onSelectionModeActiveChange]);
 
   useEffect(() => {
+    if (dualFolderMode) return; // Each pane reports its own selection.
     if (
       selectedImagePaths.length === pageSelectedPaths.length &&
       selectedImagePaths.every((path) => pageSelectedPaths.includes(path))
@@ -340,7 +369,7 @@ export const GalleryWorkspace = ({
       return;
     }
     onSelectionChange(pageSelectedPaths);
-  }, [onSelectionChange, pageSelectedPaths, selectedImagePaths]);
+  }, [dualFolderMode, onSelectionChange, pageSelectedPaths, selectedImagePaths]);
 
   useEffect(() => {
     if (selectionEnabled) {
@@ -401,7 +430,7 @@ export const GalleryWorkspace = ({
   }, [dualFolderMode, galleryViewMode, activeImages.length, isTrashView, trashItems.length]);
   const masonryLayout = useVirtualMasonry({
     images: activeImages,
-    requestedColumns: gridColumns,
+    requestedColumns: viewportWidth <= 560 ? (mobileDensity === "double" ? 2 : 1) : gridColumns,
     gridWidth: selectionLayoutLocked && selectionFrozenGridWidth > 0 ? selectionFrozenGridWidth : gridWidth,
     viewportWidth,
     scrollElement,
@@ -618,6 +647,8 @@ export const GalleryWorkspace = ({
     async (group: VariantGroup, nextPage = 1) => {
       const requestId=++variantRequest.current;
       setVariantLoading(true);
+      setVariantImages([]);
+      clearSelection();
       setVariantError("");
       try {
         const response = await galleryApi.getVariantGroupImages({
@@ -667,7 +698,7 @@ export const GalleryWorkspace = ({
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (isEditableTarget(event.target)) {
+      if (document.querySelector('[aria-modal="true"]') || isEditableTarget(event.target)) {
         return;
       }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "a") {
@@ -686,14 +717,14 @@ export const GalleryWorkspace = ({
         const targetImage = activeImages.find((image) => image.relative_path === targetPath);
         if (targetImage) {
           event.preventDefault();
-          onOpenDetail(targetImage);
+          openActiveDetail(targetImage);
         }
       }
     };
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeImages, clearSelection, isTrashView, onOpenDetail, selectedImagePaths, selectAllVisible, selectionMode]);
+  }, [activeImages, clearSelection, isTrashView, openActiveDetail, selectedImagePaths, selectAllVisible, selectionMode]);
 
   const handleBatchDelete = async () => {
     if (!hasSelection) {
@@ -714,12 +745,24 @@ export const GalleryWorkspace = ({
       return;
     }
 
-    await runOperation(() => onDeleteImages(pageSelectedPaths), {
-      pending: t("operationDeleteImages"),
-      success: t("imageDelete"),
-      error: (error) => (error instanceof Error ? error.message : t("imageDeleteError")),
-    });
-    clearSelection();
+    try {
+      await runOperation(() => onDeleteImages(pageSelectedPaths), {
+        pending: t("operationDeleteImages"),
+        success: (result) => t("operationDeleteImagesResult", {
+          count: result.deleted.length,
+          missing: getDeleteOutcome(pageSelectedPaths, result).failedPaths.length,
+        }),
+        successTone: (result) => getDeleteOutcome(pageSelectedPaths, result).complete ? "success" : "error",
+        successDetail: (result) => {
+          const { failedPaths } = getDeleteOutcome(pageSelectedPaths, result);
+          return failedPaths.length ? t("operationUnprocessedPaths", { target: describeFailedPaths(failedPaths) }) : "";
+        },
+        error: (error) => (error instanceof Error ? error.message : t("imageDeleteError")),
+      });
+      // The data hook removes only confirmed deletions; failures stay selected.
+    } catch {
+      // runOperation already displayed the failure; do not clear the selection.
+    }
   };
 
   const handleAddToBoard = async (boardId: string) => {
@@ -840,6 +883,13 @@ export const GalleryWorkspace = ({
     clearSelection();
   };
 
+  const changePage = (nextPage: number) => {
+    if (nextPage === page) return;
+    onPageChange(nextPage);
+    const viewport = scrollContainerRef.current || galleryWorkspaceRef.current?.closest<HTMLElement>(".ue-main-shell");
+    viewport?.scrollTo?.({ top: 0, behavior: "instant" });
+  };
+
   const handlePageJump = (formData: FormData) => {
     const requestedPage = Number(formData.get("page"));
     if (!Number.isFinite(requestedPage)) {
@@ -847,9 +897,7 @@ export const GalleryWorkspace = ({
     }
 
     const nextPage = Math.min(Math.max(1, Math.trunc(requestedPage)), totalPages);
-    if (nextPage !== page) {
-      onPageChange(nextPage);
-    }
+    changePage(nextPage);
   };
 
   const getAbsoluteImageUrl = (image: ImageRecord) =>
@@ -1158,7 +1206,8 @@ export const GalleryWorkspace = ({
 
     await runOperation(() => onDeleteImages([image.relative_path]), {
       pending: t("operationDeleteImage"),
-      success: t("imageDelete"),
+      success: (result) => getDeleteOutcome([image.relative_path], result).complete ? t("imageDelete") : t("imageDeleteMissing"),
+      successTone: (result) => getDeleteOutcome([image.relative_path], result).complete ? "success" : "error",
       error: (error) => (error instanceof Error ? error.message : t("imageDeleteError")),
     }).catch(() => undefined);
   };
@@ -1191,6 +1240,34 @@ export const GalleryWorkspace = ({
     scrollContainerRef.current?.scrollTo({ top: 0, behavior: preferredScrollBehavior() });
   };
 
+  const resetEmptyFilters = () => {
+    onSearchChange?.("");
+    onCategoryChange("");
+    onColorFamilyChange("");
+    onDateFromChange("");
+    onDateToChange("");
+    onFavoritesOnlyChange(false);
+    changePage(1);
+  };
+  const scopeSourceId = selectedSubfolder ? parseFolderRef(selectedSubfolder).sourceId : "";
+  const configuredSources = (context?.sources ?? []).filter((source) => source.enabled && source.exists);
+  const sourceConfigured = scopeSourceId
+    ? configuredSources.some((source) => source.id === scopeSourceId)
+    : configuredSources.length > 0;
+  const activeSearchFilters = Boolean(searchValue?.trim() || selectedCategory || selectedColorFamily || dateFrom || dateTo || favoritesOnly);
+  const emptyState = error ? {
+    title: t("galleryEmptyErrorTitle"), description: error,
+    actionLabel: t("navRefresh"), onAction: onApplyPendingLiveRefresh,
+  } : !sourceConfigured ? {
+    title: t("galleryEmptyNoSourceTitle"), description: t("galleryEmptyNoSourceText"),
+    actionLabel: onOpenSettings ? t("navSettings") : undefined, onAction: onOpenSettings,
+  } : activeSearchFilters ? {
+    title: t("galleryEmptyFilteredTitle"), description: t("galleryEmptyFilteredText"),
+    actionLabel: t("filterReset"), onAction: resetEmptyFilters,
+  } : {
+    title: t("galleryEmptySourceTitle"), description: t("galleryEmptySourceText"),
+  };
+
   return (
     <div
       className={`ue-drop-shell ${dragActive ? "is-dragging" : ""}`}
@@ -1221,10 +1298,16 @@ export const GalleryWorkspace = ({
           showColumnsMenu={showColumnsMenu}
           galleryViewMode={galleryViewMode}
           gridColumns={gridColumns}
+          effectiveColumns={effectiveColumns}
+          isMobile={viewportWidth <= 560}
+          mobileDensity={mobileDensity}
+          onMobileDensityChange={setMobileDensity}
           dualFolderMode={dualFolderMode}
           variantMode={variantMode}
           selectionMode={selectionMode}
           writableSources={writableSources}
+          sources={context?.sources ?? []}
+          importSubfolder={context?.import_image_subfolder || "universal_gallery_imports"}
           activeImportSourceId={activeImportSourceId}
           categories={context?.categories ?? []}
           selectedCategory={selectedCategory}
@@ -1258,11 +1341,23 @@ export const GalleryWorkspace = ({
           onColorFamilyChange={onColorFamilyChange}
           onSortByChange={onSortByChange}
           onSortOrderChange={onSortOrderChange}
-          onPageChange={onPageChange}
+          onPageChange={changePage}
         />
 
-        {importMessage ? <div className="ue-inline-success">{importMessage}</div> : null}
-        {error ? <div className="ue-inline-error">{error}</div> : null}
+        {importMessage ? (
+          <div className="ue-inline-success" role="status">
+            <span>{importMessage}</span>
+            {importFolderRef && onOpenImportFolder ? (
+              <button type="button" className="ue-secondary-action" onClick={() => {
+                setDualFolderMode(false);
+                setVariantMode(false);
+                clearSelection();
+                onOpenImportFolder(importFolderRef);
+              }}>{t("galleryOpenImportFolder")}</button>
+            ) : null}
+          </div>
+        ) : null}
+        {error && (images.length > 0 || isTrashView || dualFolderMode || variantMode) ? <div className="ue-inline-error">{error}</div> : null}
 
         {dualFolderMode && !isTrashView ? (
           <DualFolderWorkspace
@@ -1273,6 +1368,9 @@ export const GalleryWorkspace = ({
             sortOrder={sortOrder}
             boards={boards}
             onOpenDetail={onOpenDetail}
+            onSelectionChange={onSelectionChange}
+            onVisibleImagesChange={onVisibleImagesChange}
+            inspectorClearSignal={inspectorClearSignal}
             onOpenWorkflow={onOpenWorkflow}
             onMoveImages={onMoveImages}
             onDeleteImages={onDeleteImages}
@@ -1346,7 +1444,7 @@ export const GalleryWorkspace = ({
                 gridRef={gridRef}
                 cardRefs={cardRefs}
                 isDraggingSelectionRef={isDraggingSelectionRef}
-                onOpenDetail={onOpenDetail}
+                onOpenDetail={openActiveDetail}
                 onOpenWorkflow={onOpenWorkflow}
                 onUpdateImageState={handleUpdateImageStateWithConfirm}
                 onBoardPickerPathsChange={setBoardPickerPaths}
@@ -1394,6 +1492,7 @@ export const GalleryWorkspace = ({
         ) : (
           <GalleryMainContent
             images={activeImages}
+            emptyState={emptyState}
             galleryViewMode={galleryViewMode}
             selectionMode={selectionMode}
             selectionEnabled={selectionEnabled}
@@ -1407,14 +1506,14 @@ export const GalleryWorkspace = ({
             gridRef={gridRef}
             cardRefs={cardRefs}
             isDraggingSelectionRef={isDraggingSelectionRef}
-            onOpenDetail={onOpenDetail}
+            onOpenDetail={openActiveDetail}
             onOpenWorkflow={onOpenWorkflow}
             onUpdateImageState={handleUpdateImageStateWithConfirm}
             onBoardPickerPathsChange={setBoardPickerPaths}
             onImageSelectionClick={handleImageSelectionClick}
             onOpenContextMenu={handleOpenContextMenu}
             onSelectAllVisible={selectAllVisible}
-            onPageChange={onPageChange}
+            onPageChange={changePage}
             onPageJump={handlePageJump}
           />
         )}
@@ -1437,7 +1536,7 @@ export const GalleryWorkspace = ({
         onClose={() => setShowCategoryPicker(false)}
         onSelect={(category) => {
           onCategoryChange(category);
-          onPageChange(1);
+          changePage(1);
         }}
       />
 
@@ -1472,7 +1571,7 @@ export const GalleryWorkspace = ({
               <button
                 className="ue-context-menu-item"
                 onClick={() => {
-                  onOpenDetail(contextMenu.image);
+                  openActiveDetail(contextMenu.image);
                   setContextMenu(null);
                 }}
               >

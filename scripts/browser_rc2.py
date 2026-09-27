@@ -78,11 +78,24 @@ async def main():
                 await expect(panel).to_be_visible()
                 pb=await panel.bounding_box()
                 assert pb['x']>=0 and pb['x']+pb['width']<=width+1
-                await panel.locator('.ue-density-presets button').last.click()
-                assert await panel.locator('input').input_value()=='6'
-                await panel.locator('input').focus()
-                await page.keyboard.press('ArrowRight')
-                assert await panel.locator('input').input_value()=='7'
+                if width <= 560:
+                    # P2 uses explicit touch-friendly mobile presets in place of
+                    # the desktop 3–8 column range; report effective, not requested, columns.
+                    presets = panel.locator('.ue-density-presets--mobile button')
+                    await expect(presets).to_have_count(3)
+                    await presets.nth(1).click()
+                    await expect(presets.nth(1)).to_have_attribute('aria-pressed', 'true')
+                    await expect(panel.locator('.ue-density-note')).to_contain_text(
+                        'Currently 2 per row' if locale == 'en' and width == 390 else
+                        '当前实际每行 2 列' if locale == 'zh-CN' and width == 390 else
+                        'Currently 1 per row' if locale == 'en' else '当前实际每行 1 列'
+                    )
+                else:
+                    await panel.locator('.ue-density-presets button').last.click()
+                    assert await panel.locator('input').input_value()=='6'
+                    await panel.locator('input').focus()
+                    await page.keyboard.press('ArrowRight')
+                    assert await panel.locator('input').input_value()=='7'
                 if width in (1440,390) and locale=='zh-CN':
                     await page.screenshot(animations='disabled',path=str(OUT/f'density-{width}.png'))
                 await page.keyboard.press('Escape')

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   Calendar,
   CheckSquare,
@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 
 import { DisclosureMenu } from "../shared/DisclosureMenu";
+import { DEFAULT_OUTPUT_SOURCE_ID, parseFolderRef } from "../shared/folderTree";
 import { useI18n } from "../../i18n/I18nProvider";
 import type { BoardSummary, ColorIndexStatus, GallerySource } from "../../types/universal-gallery";
 import { isEditableTarget } from "../../utils/interaction";
@@ -40,10 +41,16 @@ interface GalleryToolbarProps {
   showColumnsMenu: boolean;
   galleryViewMode: ContentViewMode;
   gridColumns: number;
+  effectiveColumns?: number;
+  isMobile?: boolean;
+  mobileDensity?: "single" | "double";
+  onMobileDensityChange?: (preset: "single" | "double") => void;
   dualFolderMode: boolean;
   variantMode?: boolean;
   selectionMode: boolean;
   writableSources: GallerySource[];
+  sources: GallerySource[];
+  importSubfolder: string;
   activeImportSourceId: string;
   categories: string[];
   selectedCategory: string;
@@ -94,10 +101,16 @@ export const GalleryToolbar = ({
   showColumnsMenu,
   galleryViewMode,
   gridColumns,
+  effectiveColumns,
+  isMobile = false,
+  mobileDensity = "single",
+  onMobileDensityChange,
   dualFolderMode,
   variantMode = false,
   selectionMode,
   writableSources,
+  sources,
+  importSubfolder,
   activeImportSourceId,
   categories,
   selectedCategory,
@@ -135,10 +148,20 @@ export const GalleryToolbar = ({
 }: GalleryToolbarProps) => {
   const { t } = useI18n();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const composingRef = useRef(false);
+  const [searchDraft, setSearchDraft] = useState(searchValue);
+  useEffect(() => {
+    if (!composingRef.current) setSearchDraft(searchValue);
+  }, [searchValue]);
   const resultCount = isTrashView ? trashCount : total;
+  const { sourceId, relativePath } = parseFolderRef(selectedSubfolder);
+  const sourceLabel = sources.find((source) => source.id === sourceId)?.name ||
+    (sourceId === DEFAULT_OUTPUT_SOURCE_ID ? t("galleryOutputFolder") : sourceId);
+  const folderLabel = relativePath ? `${sourceLabel} / ${relativePath}` : sourceLabel;
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
+      if (document.querySelector('[aria-modal="true"]')) return;
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         searchInputRef.current?.focus();
@@ -202,7 +225,7 @@ export const GalleryToolbar = ({
     <div className={`ue-filter-bar ue-filter-bar--gallery ${dualFolderMode ? "is-organizer" : variantMode ? "is-variants" : ""}`} data-tour-id="gallery-toolbar">
       <div className="ue-filter-copy">
         <p className="ue-filter-kicker">
-          {isTrashView ? t("trashTitle") : dualFolderMode ? t("dual_title") : selectedBoard ? selectedBoard.name : selectedSubfolder.split("::").pop() || t("galleryOutputFolder")}
+          {isTrashView ? t("trashTitle") : dualFolderMode ? t("dual_title") : selectedBoard ? selectedBoard.name : favoritesOnly ? t("galleryPinnedOnly") : folderLabel}
         </p>
         <div className="ue-filter-summary">
           <strong>{resultCount}</strong>
@@ -232,15 +255,24 @@ export const GalleryToolbar = ({
               <input
                 ref={searchInputRef}
                 className="ue-gallery-search-input"
-                value={searchValue}
-                onChange={(event) => onSearchChange(event.target.value)}
+                value={searchDraft}
+                onCompositionStart={() => { composingRef.current = true; }}
+                onCompositionEnd={(event) => {
+                  composingRef.current = false;
+                  setSearchDraft(event.currentTarget.value);
+                  onSearchChange(event.currentTarget.value);
+                }}
+                onChange={(event) => {
+                  setSearchDraft(event.target.value);
+                  if (!composingRef.current && !(event.nativeEvent as InputEvent).isComposing) onSearchChange(event.target.value);
+                }}
                 placeholder={t("navSearchGalleryPlaceholder")}
                 aria-label={t("navSearchGalleryPlaceholder")}
               />
               {searchValue ? (
                 <button
                   className="ue-gallery-search-clear"
-                  onClick={() => onSearchChange("")}
+                  onClick={() => { setSearchDraft(""); onSearchChange(""); }}
                   type="button"
                   aria-label={t("sidebarClearFolderSearch")}
                 >
@@ -299,7 +331,9 @@ export const GalleryToolbar = ({
               </div>
 
               {viewModeToggle}
-              {galleryViewMode === "grid" ? <GalleryDensityControl value={gridColumns} open={showColumnsMenu}
+              {galleryViewMode === "grid" ? <GalleryDensityControl value={gridColumns} effectiveColumns={effectiveColumns}
+                isMobile={isMobile} mobilePreset={mobileDensity} onMobilePresetChange={onMobileDensityChange}
+                onListView={() => { onGalleryViewModeChange("list"); onCloseColumnsMenu(); }} open={showColumnsMenu}
                 onToggle={onToggleColumnsMenu} onClose={onCloseColumnsMenu} onChange={onGridColumnsChange} /> : null}
             </div>
 
@@ -379,7 +413,7 @@ export const GalleryToolbar = ({
                   >
                     {writableSources.map((source) => (
                       <option key={source.id} value={source.id}>
-                        {source.name}
+                        {source.name} / {importSubfolder}/
                       </option>
                     ))}
                   </select>

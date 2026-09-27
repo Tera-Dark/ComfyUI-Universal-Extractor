@@ -4574,6 +4574,7 @@ def move_images(relative_paths: list[str], target_subfolder: str, target_source_
     moved: list[str] = []
     missing: list[str] = []
     blocked: list[str] = []
+    unchanged: list[str] = []
     path_mapping: dict[str, str] = {}
     full_moves: list[tuple[str, str]] = []
     reserved: set[str] = set()
@@ -4592,6 +4593,7 @@ def move_images(relative_paths: list[str], target_subfolder: str, target_source_
 
         destination_file = ensure_unique_path(target_full_path, os.path.basename(source_relative_path))
         if os.path.dirname(source_full_path) == os.path.abspath(target_full_path):
+            unchanged.append(normalized_source)
             continue  # Moving into the same folder is a no-op, not a rename.
         stem, ext = os.path.splitext(os.path.basename(source_relative_path))
         counter = 1
@@ -4609,8 +4611,10 @@ def move_images(relative_paths: list[str], target_subfolder: str, target_source_
     return {
         "ok": True,
         "moved": moved,
+        "moved_sources": list(path_mapping),
         "missing": missing,
         "blocked": blocked,
+        "unchanged": unchanged,
         "categories": categories,
         "subfolders": get_image_index(force_refresh=True)["subfolders"],
         "target_source_id": target_source["id"],

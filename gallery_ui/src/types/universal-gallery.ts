@@ -2,7 +2,6 @@ export type WorkspaceTab = "gallery" | "library" | "workbench" | "settings";
 
 export interface UiPreferences {
   defaultSelectionMode: boolean;
-  confirmWorkflowSend: boolean;
   collapseSidebarOnLaunch: boolean;
   enableImagePrefetch: boolean;
   enableLiveGalleryRefresh: boolean;
@@ -371,8 +370,10 @@ export interface DeleteImagesResult {
 export interface MoveImagesResult {
   ok: boolean;
   moved: string[];
+  moved_sources?: string[];
   missing: string[];
   blocked?: string[];
+  unchanged?: string[];
   categories: string[];
   subfolders: string[];
   target_source_id?: string;

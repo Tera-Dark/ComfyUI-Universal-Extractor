@@ -16,6 +16,33 @@ except ImportError:  # pragma: no cover
     Image = None
 
 
+def test_move_images_reports_only_committed_sources_and_skipped_paths(isolated_gallery_env):
+    env = isolated_gallery_env
+    target = env.output_dir / "target"
+    target.mkdir()
+    (env.output_dir / "moving.png").write_bytes(b"new")
+    (target / "moving.png").write_bytes(b"old")
+    (target / "same.png").write_bytes(b"unchanged")
+    (env.input_dir / "read-only.png").write_bytes(b"blocked")
+    env.service.persist_image_state("moving.png", {"title": "Move me"})
+
+    result = env.service.move_images(
+        ["moving.png", "moving.png", "missing.png", "default_input::read-only.png", "target/same.png"],
+        "target",
+    )
+
+    assert result["moved"] == ["target/moving_1.png"]
+    assert result["moved_sources"] == ["moving.png"]
+    assert result["missing"] == ["missing.png"]
+    assert result["blocked"] == ["default_input::read-only.png"]
+    assert result["unchanged"] == ["target/same.png"]
+    assert not (env.output_dir / "moving.png").exists()
+    assert (target / "moving_1.png").read_bytes() == b"new"
+    assert (target / "moving.png").read_bytes() == b"old"
+    assert (target / "same.png").read_bytes() == b"unchanged"
+    assert env.service.get_image_state("target/moving_1.png")["title"] == "Move me"
+
+
 def test_gallery_paths_stay_within_registered_sources(isolated_gallery_env):
     service = isolated_gallery_env.service
     image_path = isolated_gallery_env.output_dir / "safe.png"

@@ -16,6 +16,8 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & $PythonExe -m compileall py\gallery
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    node --test tests/comfy_lora_stack_bridge.test.mjs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 finally {
     Pop-Location
@@ -26,6 +28,8 @@ try {
     cmd /c npm run typecheck
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cmd /c npm run lint
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    cmd /c npm run audit:i18n
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     cmd /c npm run test:run
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

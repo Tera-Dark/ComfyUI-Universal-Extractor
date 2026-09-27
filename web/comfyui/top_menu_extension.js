@@ -278,131 +278,159 @@ const getAllGraphNodes = () => {
     return [];
 };
 
-const formatLoraNumber = (value, fallback = 1) => {
-    if (value === null || value === undefined || value === "") {
-        return fallback;
-    }
-    const numeric = Number(value);
-    return Number.isFinite(numeric) ? numeric : value;
-};
+// LoRA Manager keeps the list in a `loras` widget and may mirror it to a
+// `text` widget. The list is authoritative, but the text must be kept in sync
+// without deleting non-LoRA content typed into the same field.
+const LORA_SYNTAX_PATTERN = /<lora:([^:>]+):([^:>]+)(?::([^:>]+))?>/gi;
+const loraItemName = (item) => String(item?.name ?? item?.lora_name ?? item?.lora ?? "").trim();
+const isLoraEntryEnabled = (item) => !!item && item.enabled !== false && item.active !== false;
 
-const isLoraEntryEnabled = (item) => item?.enabled !== false && item?.active !== false;
-
-const makeLoraSyntax = (loraManager) => {
-    const activeLoras = (loraManager?.loras || [])
-        .filter((item) => isLoraEntryEnabled(item) && item?.name)
-        .map((item) => {
-            const model = formatLoraNumber(item.strength_model, 1);
-            const clip = item.strength_clip === null || item.strength_clip === undefined ? model : formatLoraNumber(item.strength_clip, model);
-            return String(clip) === String(model)
-                ? `<lora:${item.name}:${model}>`
-                : `<lora:${item.name}:${model}:${clip}>`;
-        });
-    if (activeLoras.length) {
-        return activeLoras.join(" ");
-    }
-    if (typeof loraManager?.raw_stack === "string" && loraManager.raw_stack.trim()) {
-        return loraManager.raw_stack.trim();
-    }
-    return "";
-};
-
-const makeLorasWidgetValue = (loraManager) => (loraManager?.loras || [])
-    .filter((item) => isLoraEntryEnabled(item) && item?.name)
-    .map((item) => {
-        const model = formatLoraNumber(item.strength_model, 1);
-        return {
-            name: item.name,
-            strength: model,
-            clipStrength: item.strength_clip === null || item.strength_clip === undefined
-                ? model
-                : formatLoraNumber(item.strength_clip, model),
-            active: true,
-            expanded: String(item.strength_clip ?? model) !== String(model),
-        };
-    });
-
-const cloneLoraValue = (value) => value.map((item) => ({ ...item }));
-
-const loraItemName = (item) => String(item?.name || item?.lora_name || item?.lora || "").trim();
-
-const dedupeLorasByLastName = (loras) => loras.reduce((acc, lora) => {
-    const loraName = loraItemName(lora);
-    const filtered = acc.filter((item) => loraItemName(item) !== loraName);
-    return [...filtered, lora];
+const dedupeLorasByLastName = (loras) => loras.reduce((acc, item) => {
+    const name = loraItemName(item);
+    // Append must not discard an existing, perhaps temporarily incomplete,
+    // entry merely because it does not yet have a LoRA name.
+    if (!name) return [...acc, item];
+    return [...acc.filter((previous) => loraItemName(previous) !== name), { ...item, name }];
 }, []);
 
-const deactivateLoraItem = (item) => ({
-    ...item,
-    active: false,
-    enabled: false,
-});
-
-const activateLoraItem = (item) => ({
-    ...item,
-    active: true,
-    enabled: true,
-});
-
-const applyExclusiveLorasWidgetValue = (currentValue, incomingValue) => {
-    const current = Array.isArray(currentValue) ? cloneLoraValue(currentValue) : [];
-    const incomingNames = new Set(incomingValue.map(loraItemName).filter(Boolean));
-    const merged = current
-        .filter((item) => {
-            const name = loraItemName(item);
-            return name && !incomingNames.has(name);
-        })
-        .map(deactivateLoraItem);
-
-    for (const incoming of incomingValue) {
-        const existing = current.find((item) => loraItemName(item) === loraItemName(incoming));
-        merged.push(activateLoraItem({ ...(existing || {}), ...incoming }));
+const parseIncomingStrength = (value, fallback, name) => {
+    if (value === null || value === undefined || value === "") return fallback;
+    if (typeof value !== "number" && typeof value !== "string") {
+        throw new Error(`Invalid LoRA strength for ${name}.`);
     }
-    return dedupeLorasByLastName(merged);
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric)) throw new Error(`Invalid LoRA strength for ${name}.`);
+    return numeric;
 };
 
-const loraWidgetItemToSyntax = (item) => {
-    if (!loraItemName(item)) {
-        return "";
+const makeLorasWidgetValue = (loraManager) => dedupeLorasByLastName(
+    loraManager.loras.filter(isLoraEntryEnabled).map((item) => {
+        const name = loraItemName(item);
+        if (!name || /[<>:\x00-\x1f]/.test(name)) {
+            throw new Error("Invalid LoRA name in image metadata.");
+        }
+        const strength = parseIncomingStrength(item.strength_model, 1, name);
+        return {
+            name,
+            strength,
+            clipStrength: parseIncomingStrength(item.strength_clip, strength, name),
+            active: true,
+            enabled: true,
+            // Upstream respects an explicit `expanded` flag even for differing
+            // strengths. Keep the independent CLIP value, but start folded.
+            expanded: false,
+        };
+    }),
+);
+
+const getLorasValue = (value) => {
+    if (value == null || value === "") return [];
+    const entries = Array.isArray(value) ? value : value?.__value__;
+    if (Array.isArray(entries) && entries.every((item) => item && typeof item === "object" && !Array.isArray(item))) {
+        return entries;
     }
-    const model = formatLoraNumber(item?.strength, 1);
-    const clip = item?.clipStrength === null || item?.clipStrength === undefined
-        ? model
-        : formatLoraNumber(item.clipStrength, model);
-    return String(clip) === String(model)
-        ? `<lora:${item.name}:${model}>`
-        : `<lora:${item.name}:${model}:${clip}>`;
+    throw new Error("Unsupported LoRA Manager widget value; no stack was changed.");
 };
 
-const replaceLoraSyntaxText = (_currentValue, incomingValue, fallbackRawStack) => {
-    const text = incomingValue.map(loraWidgetItemToSyntax).filter(Boolean).join(" ").trim();
-    return text || fallbackRawStack || "";
+const parseTextLoras = (text) => {
+    const parsed = [];
+    for (const match of String(text || "").matchAll(LORA_SYNTAX_PATTERN)) {
+        const strength = Number(match[2]);
+        const clipStrength = match[3] === undefined ? strength : Number(match[3]);
+        if (!Number.isFinite(strength) || !Number.isFinite(clipStrength)) continue;
+        parsed.push({
+            name: match[1].trim(), strength, clipStrength,
+            active: true, enabled: true, expanded: false,
+        });
+    }
+    return dedupeLorasByLastName(parsed);
+};
+
+const mergeLoraEntries = (existing, incoming, mode) => {
+    const current = dedupeLorasByLastName(existing);
+    const oldNames = new Set(current.map(loraItemName));
+    const newNames = new Set(incoming.map(loraItemName));
+    const summary = {
+        applied: incoming.length,
+        added: incoming.filter((item) => !oldNames.has(item.name)).length,
+        updated: incoming.filter((item) => oldNames.has(item.name)).length,
+        removed: mode === "replace" ? current.filter((item) => !newNames.has(item.name)).length : 0,
+    };
+    if (mode === "replace") return { value: incoming.map((item) => ({ ...item })), summary };
+
+    const value = current.map((item) => {
+        const matched = incoming.find((entry) => entry.name === item.name);
+        return matched ? { ...item, ...matched } : { ...item };
+    });
+    value.push(...incoming.filter((item) => !oldNames.has(item.name)).map((item) => ({ ...item })));
+    return { value, summary };
+};
+
+const loraItemToSyntax = (item) => {
+    const name = loraItemName(item);
+    if (!name) return "";
+    const strength = item.strength ?? item.strength_model ?? 1;
+    const clip = item.clipStrength ?? item.strength_clip ?? strength;
+    return Number(strength) === Number(clip)
+        ? `<lora:${name}:${strength}>`
+        : `<lora:${name}:${strength}:${clip}>`;
+};
+
+const updateLoraSyntaxText = (currentValue, loras, mode) => {
+    const byName = new Map(loras.map((item) => [loraItemName(item), item]));
+    const seen = new Set();
+    const retained = String(currentValue ?? "").replace(LORA_SYNTAX_PATTERN, (match, rawName) => {
+        if (mode === "replace") return "";
+        const name = rawName.trim();
+        if (seen.has(name)) return "";
+        seen.add(name);
+        return byName.has(name) ? loraItemToSyntax(byName.get(name)) : match;
+    }).trim();
+    const missing = loras
+        .filter((item) => !seen.has(loraItemName(item)))
+        .map(loraItemToSyntax)
+        .filter(Boolean)
+        .join(" ");
+    return [retained, missing].filter(Boolean).join(" ");
+};
+
+const numberMatches = (left, right) => {
+    if (left == null || right == null) return left === right;
+    const a = Number(left), b = Number(right);
+    return Number.isFinite(a) && Number.isFinite(b) ? a === b : String(left) === String(right);
 };
 
 const loraValuesMatch = (left, right) => {
-    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) {
-        return false;
-    }
+    if (!Array.isArray(left) || !Array.isArray(right) || left.length !== right.length) return false;
     return left.every((item, index) => {
         const other = right[index];
         return loraItemName(item) === loraItemName(other) &&
-            String(item?.strength) === String(other?.strength) &&
-            String(item?.clipStrength) === String(other?.clipStrength) &&
+            numberMatches(item?.strength, other?.strength) &&
+            numberMatches(item?.clipStrength, other?.clipStrength) &&
             Boolean(item?.active) === Boolean(other?.active) &&
-            Boolean(item?.enabled) === Boolean(other?.enabled);
+            Boolean(item?.enabled) === Boolean(other?.enabled) &&
+            Boolean(item?.expanded) === Boolean(other?.expanded) &&
+            Boolean(item?.locked) === Boolean(other?.locked) &&
+            Boolean(item?.selected) === Boolean(other?.selected);
     });
 };
 
-const setWidgetValue = (node, widget, value, options = {}) => {
+const cloneLoraValue = (value) => value.map((item) => {
+    const strength = item.strength ?? item.strength_model ?? 1;
+    const clip = item.clipStrength ?? item.strength_clip ?? strength;
+    return {
+        ...item,
+        // Upstream's widget setter uses `clipStrength || strength`. A numeric
+        // zero with a nonzero model strength would be lost; "0" is truthy and
+        // is accepted by its number inputs and text syntax formatter.
+        clipStrength: Number(clip) === 0 && Number(strength) !== 0 ? "0" : clip,
+    };
+});
+const setWidgetValue = (node, widget, value) => {
     widget.value = value;
-    if (options.callback === false) {
-        return;
-    }
-    try {
-        widget.callback?.(value, app.canvas, node, undefined, undefined);
-    } catch (error) {
-        console.warn("Universal Extractor: LoRA widget callback failed:", error);
-    }
+    // LoRA Manager's text callback parses tags into the list; its list
+    // callback schedules the reverse sync. Do not silently swallow errors.
+    widget.callback?.(value, app.canvas, node, undefined, undefined);
 };
 
 const markNodeDirty = (node) => {
@@ -412,98 +440,143 @@ const markNodeDirty = (node) => {
     app.canvas?.draw?.(true, true);
 };
 
-const applyLoraStackToNode = (node, loraManager) => {
+const nodeLabel = (node) => String(node?.title || node?.comfyClass || node?.type || "LoRA Manager").trim().slice(0, 120);
+
+const applyLoraStackToNode = async (node, incoming, mode) => {
     const widgets = Array.isArray(node?.widgets) ? node.widgets : [];
-    if (!widgets.length) {
-        return false;
+    const loraWidgets = widgets.filter((widget) =>
+        ["loras", "lora_stack_data", "active_loras"].includes(normalizeNodeText(widget?.name)));
+    const textWidgets = widgets.filter((widget) =>
+        ["text", "lora_stack", "lora_syntax", "lora_text"].includes(normalizeNodeText(widget?.name)));
+    const properties = node?.properties && typeof node.properties === "object" ? node.properties : null;
+    if (!loraWidgets.length && !textWidgets.length &&
+        !(properties && ("loras" in properties || "lora_stack" in properties || "lora_syntax" in properties))) {
+        return null;
     }
 
-    const lorasValue = dedupeLorasByLastName(makeLorasWidgetValue(loraManager));
-    const rawStack = makeLoraSyntax(loraManager);
-    const loraWidgets = [];
-    const textWidgets = [];
-    const expectedWidgetValues = new Map();
-    let changed = false;
+    const sourceText = textWidgets[0]?.value ?? properties?.lora_stack ?? properties?.lora_syntax ?? "";
+    const current = loraWidgets.length
+        ? getLorasValue(loraWidgets[0].value)
+        : properties && "loras" in properties
+            ? getLorasValue(properties.loras)
+            : parseTextLoras(sourceText);
+    // An unsaved tag in the text input must not disappear during append even
+    // if LoRA Manager has not synchronized it to the structured list yet.
+    const names = new Set(current.map(loraItemName));
+    const combined = [...current, ...parseTextLoras(sourceText).filter((item) => !names.has(item.name))];
+    const { value, summary } = mergeLoraEntries(combined, incoming, mode);
+    const preparedValue = cloneLoraValue(value);
+    const active = value.filter(isLoraEntryEnabled);
+    const changes = new Set();
+    // The text callback can mutate the list before we get to its own write.
+    // Snapshot every involved widget *before* calling any callback.
+    const originalWidgets = new Map([...new Set([...textWidgets, ...loraWidgets])].map((widget) => [
+        widget,
+        Array.isArray(widget.value) ? widget.value.map((item) => ({ ...item })) : widget.value,
+    ]));
+    const originalProperties = properties ? { ...properties } : null;
 
-    for (const widget of widgets) {
-        const name = normalizeNodeText(widget?.name);
-        if (name === "loras" || name === "lora_stack_data" || name === "active_loras") {
-            loraWidgets.push(widget);
-            continue;
-        }
-        if (name === "text" || name === "lora_stack" || name === "lora_syntax" || name === "lora_text") {
-            textWidgets.push(widget);
-        }
-    }
-
-    const hasStructuredLoras = loraWidgets.length > 0;
-    if (!hasStructuredLoras) {
+    try {
+        // Write text before the list. Its callback may temporarily rebuild
+        // LoRA Manager's list; the final structured write restores the exact
+        // active/expanded state without disabling unrelated entries.
         for (const widget of textWidgets) {
-            setWidgetValue(node, widget, replaceLoraSyntaxText(widget.value, lorasValue, rawStack));
-            changed = true;
+            const next = updateLoraSyntaxText(widget.value, mode === "replace" ? incoming : active, mode);
+            if (widget.value !== next) {
+                changes.add(widget);
+                setWidgetValue(node, widget, next);
+            }
         }
-    } else {
-        const activeText = replaceLoraSyntaxText("", lorasValue, rawStack);
-        for (const widget of textWidgets) {
-            setWidgetValue(node, widget, activeText);
-            changed = true;
+        for (const widget of loraWidgets) {
+            if (!loraValuesMatch(widget.value, preparedValue)) {
+                changes.add(widget);
+                setWidgetValue(node, widget, cloneLoraValue(preparedValue));
+            }
         }
-    }
-    for (const widget of loraWidgets) {
-        const mergedValue = applyExclusiveLorasWidgetValue(widget.value, lorasValue);
-        expectedWidgetValues.set(widget, mergedValue);
-        setWidgetValue(node, widget, cloneLoraValue(mergedValue));
-        changed = true;
-    }
-    if (!changed && node.properties && typeof node.properties === "object") {
-        if ("loras" in node.properties) {
-            node.properties.loras = applyExclusiveLorasWidgetValue(node.properties.loras, lorasValue);
-            changed = true;
+        if (!loraWidgets.length && properties && "loras" in properties) {
+            properties.loras = cloneLoraValue(value);
         }
-        if (!("loras" in node.properties) && ("lora_stack" in node.properties || "lora_syntax" in node.properties)) {
-            node.properties.lora_stack = replaceLoraSyntaxText(node.properties.lora_stack, lorasValue, rawStack);
-            changed = true;
+        if (!textWidgets.length && properties && ("lora_stack" in properties || "lora_syntax" in properties)) {
+            const key = "lora_stack" in properties ? "lora_stack" : "lora_syntax";
+            properties[key] = updateLoraSyntaxText(properties[key], mode === "replace" ? incoming : active, mode);
         }
-    }
 
-    if (changed) {
-        markNodeDirty(node);
-        if (hasStructuredLoras) {
-            window.setTimeout(() => {
-                let repaired = false;
-                for (const widget of loraWidgets) {
-                    const expectedValue = expectedWidgetValues.get(widget) || lorasValue;
-                    if (!loraValuesMatch(widget.value, expectedValue)) {
-                        setWidgetValue(node, widget, cloneLoraValue(expectedValue));
-                        repaired = true;
-                    }
-                }
-                if (repaired) {
+        if (changes.size || properties && Object.keys(originalProperties).some((key) => properties[key] !== originalProperties[key])) {
+            markNodeDirty(node);
+        }
+
+        if (loraWidgets.length || textWidgets.length) {
+            // LoRA Manager syncs list -> text asynchronously. Only report
+            // success after its callback has run, and repair a late overwrite.
+            await new Promise((resolve) => window.setTimeout(resolve, 120));
+            for (const widget of loraWidgets) {
+                if (!loraValuesMatch(widget.value, preparedValue)) {
+                    setWidgetValue(node, widget, cloneLoraValue(preparedValue));
                     markNodeDirty(node);
                 }
-            }, 120);
+                if (!loraValuesMatch(widget.value, preparedValue)) {
+                    throw new Error("LoRA Manager rejected the stack or independent CLIP strength.");
+                }
+            }
+            for (const widget of textWidgets) {
+                const textEntries = parseTextLoras(widget.value);
+                const byName = new Map(textEntries.map((item) => [item.name, item]));
+                if (incoming.some((item) => !byName.has(item.name)) ||
+                    mode === "replace" && byName.size !== incoming.length ||
+                    !loraWidgets.length && incoming.some((item) =>
+                        !numberMatches(byName.get(item.name)?.strength, item.strength) ||
+                        !numberMatches(byName.get(item.name)?.clipStrength, item.clipStrength))) {
+                    throw new Error("LoRA Manager did not retain the requested LoRA text or CLIP strengths.");
+                }
+            }
         }
+        return { ...summary, target: nodeLabel(node) };
+    } catch (error) {
+        // A third-party widget callback can throw after a partial write.
+        // Best-effort rollback is safer than acknowledging a broken stack.
+        for (const [widget, previous] of originalWidgets) {
+            try { widget.value = previous; } catch { /* Best effort */ }
+        }
+        if (properties && originalProperties) {
+            for (const key of Object.keys(properties)) {
+                if (!(key in originalProperties)) delete properties[key];
+            }
+            Object.assign(properties, originalProperties);
+        }
+        markNodeDirty(node);
+        throw error;
     }
-    return changed;
 };
 
-const applyLoraStackPayload = (payload) => {
-    const loraManager = payload?.loraManager;
-    if (!loraManager?.detected || !Array.isArray(loraManager.loras) || loraManager.loras.length === 0) {
-        return { ok: false, error: "No LoRA stack was provided." };
+const applyLoraStackPayload = async (payload) => {
+    if (payload?.mode !== "append" && payload?.mode !== "replace") {
+        return { ok: false, error: "Select Append or Replace from a refreshed gallery page." };
     }
+    const loraManager = payload?.loraManager;
+    if (!loraManager?.detected || !Array.isArray(loraManager.loras)) {
+        return { ok: false, error: "No LoRA Manager stack was provided." };
+    }
+
+    let incoming;
+    try {
+        incoming = makeLorasWidgetValue(loraManager);
+    } catch (error) {
+        return { ok: false, error: error?.message || "Invalid LoRA stack." };
+    }
+    if (!incoming.length) return { ok: false, error: "The source stack has no active LoRAs." };
 
     const candidates = [...getSelectedGraphNodes(), ...getAllGraphNodes()]
         .filter((node, index, list) => node && list.indexOf(node) === index)
         .filter(isLoraManagerNode);
-
     for (const node of candidates) {
-        if (applyLoraStackToNode(node, loraManager)) {
-            return { ok: true };
+        try {
+            const summary = await applyLoraStackToNode(node, incoming, payload.mode);
+            if (summary) return { ok: true, summary };
+        } catch (error) {
+            return { ok: false, error: error?.message || "Unable to apply the LoRA stack." };
         }
     }
-
-    return { ok: false };
+    return { ok: false, error: "No writable LoRA Manager node in the current graph." };
 };
 
 const createExtensionObject = (useActionBar) => {
@@ -512,8 +585,8 @@ const createExtensionObject = (useActionBar) => {
         async setup() {
             window.name = COMFY_WINDOW_NAME;
             let lastHandledWorkflowId = null;
-            let lastHandledLoraStackId = null;
-            let lastHandledLoraStackResult = { ok: true };
+            const recentLoraStackResults = new Map();
+            let loraStackQueue = Promise.resolve();
             let workflowChannel = null;
             const instanceId = window.sessionStorage.getItem("universal-extractor:comfy-instance-id") ||
                 `comfy-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
@@ -547,6 +620,7 @@ const createExtensionObject = (useActionBar) => {
                     payloadId: payload?.id || null,
                     ok: result.ok !== false,
                     error: result.error || null,
+                    summary: result.summary || null,
                     href: window.location.href,
                     ts: Date.now(),
                 });
@@ -592,25 +666,27 @@ const createExtensionObject = (useActionBar) => {
                 }
             };
 
-            const applyLoraStackPayloadOnce = (payload) => {
-                try {
-                    if (!payload) {
-                        return;
+            const applyLoraStackPayloadOnce = async (payload) => {
+                if (!payload) return;
+                const id = typeof payload.id === "string" && payload.id ? payload.id : null;
+                let pending = id ? recentLoraStackResults.get(id) : null;
+                if (!pending) {
+                    // Serialize graph mutations. All deliveries for the same
+                    // id await one result, including a retry after a later send.
+                    pending = loraStackQueue.then(() => applyLoraStackPayload(payload)).catch((error) => {
+                        console.warn("Universal Extractor: failed to apply LoRA stack:", error);
+                        return { ok: false, error: error?.message || "Unable to apply LoRA stack." };
+                    });
+                    loraStackQueue = pending.then(() => undefined);
+                    if (id) {
+                        recentLoraStackResults.set(id, pending);
+                        if (recentLoraStackResults.size > 32) {
+                            recentLoraStackResults.delete(recentLoraStackResults.keys().next().value);
+                        }
                     }
-
-                    if (payload.id && payload.id === lastHandledLoraStackId) {
-                        notifyLoraStackDelivered(payload, lastHandledLoraStackResult);
-                        return;
-                    }
-                    lastHandledLoraStackId = payload.id || null;
-                    const result = applyLoraStackPayload(payload);
-                    lastHandledLoraStackResult = result;
-                    notifyLoraStackDelivered(payload, result);
-                } catch (error) {
-                    console.warn("Universal Extractor: failed to apply LoRA stack:", error);
-                    lastHandledLoraStackResult = { ok: false, error: error?.message || "Unable to apply LoRA stack." };
-                    notifyLoraStackDelivered(payload, lastHandledLoraStackResult);
                 }
+                const result = await pending;
+                notifyLoraStackDelivered(payload, result);
             };
 
             const tryLoadPendingWorkflow = async () => {

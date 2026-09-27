@@ -2,6 +2,28 @@
 
 All notable changes to the ComfyUI Universal Extractor project will be documented in this file.
 
+## 1.4.0 - 2026-09-27
+
+Gallery workflow, safety and LoRA-stack usability update. This release includes the previously uncommitted P0/P1/P2 refinements and masonry-scroll fix since 1.3.0.
+
+### Added
+
+- Apply a detected ComfyUI-Lora-Manager stack from the gallery context menu or image detail with **Append / Replace / Cancel**. Append keeps other target-node entries and updates matching names; Replace removes only the target node's previous LoRAs. Incoming CLIP rows start collapsed even when weights differ; independent CLIP values (including zero) are retained. Confirmation warns that subsequent model-strength edits while collapsed will sync CLIP in upstream LoRA Manager.
+- Display target-node and added/updated/removed counts; wait for the addressed ComfyUI instance's asynchronous receipt, verify widget/text synchronization, and reject incomplete writes with best-effort rollback. Duplicate deliveries share one result; the bridge does not directly rewrite other graph nodes. Native LoRA Manager callbacks can still synchronize connected trigger-word nodes.
+- Provide persistent mobile single/double-column density presets, result-aware empty states, URL/history restoration for stable gallery/library scopes, and import destinations with a direct link to the returned folder.
+
+### Changed
+
+- Protect unsaved image edits (including filenames) across closing, paging, filmstrip and workspace switches. Separate stale metadata from touched fields; block save until metadata is ready. Modal focus stays inside the dialog and returns to its trigger.
+- Keep image selection, Inspector and navigation scoped to the current source/page/variant/organizer pane. Invalidate stale image/library requests, debounce gallery and library search with IME support, and avoid stale thumbnails or headings while switching sources.
+- Report the actual outcome of batch moves/deletes and single-image failures; preserve unresolved selections and keep error details until dismissed. Refresh operations wait for the real requests; navigation resets the gallery scroll, and live updates do not yank the viewport.
+- Stabilize virtual masonry near the bottom: reserve fallback media aspect ratios before lazy image decode, use consistent height estimates, and invalidate measurements when widths change. Remove redundant offscreen content-visibility estimates that interfered with sizing.
+- Remove the ineffective optional workflow-confirmation preference; sending a workflow still always asks for confirmation. Keep clean content-hashed builds and the manifest as the single asset source of truth.
+
+### Verification
+
+- 189 frontend tests, 104 Python tests, 10 ComfyUI-bridge tests, TypeScript/ESLint/i18n checks, zero-vulnerability dependency audit, clean dist build and asset audit; isolated Chromium scenarios cover P0/P1/P2, the masonry tail and LoRA handoff UI. No claim of real ComfyUI/LoRA-Manager, GPU, production gallery or cross-browser/device validation.
+
 ## 1.3.0 - 2026-09-18
 
 Major visual, interaction, and stability update featuring minimal workspace architecture, precision selection, and backend safeguards.

@@ -1,4 +1,5 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { fireEvent, render, screen, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "../../i18n/I18nProvider";
@@ -86,6 +87,23 @@ const renderSidebar = (overrides: Partial<Parameters<typeof WorkspaceSidebar>[0]
 };
 
 describe("WorkspaceSidebar folder tree", () => {
+  it("provides keyboard-activatable library rows with an independent delete action", async () => {
+    const onLibrarySelect = vi.fn();
+    const onLibraryDelete = vi.fn();
+    renderSidebar({ activeTab: "library", libraries: [{ filename: "artists.json", count: 4, size: 200 }],
+      activeLibraryName: "artists.json", onLibrarySelect, onLibraryDelete });
+    const list = screen.getByRole("list", { name: "JSON 词库" });
+    const row = within(list).getByRole("listitem");
+    const main = within(row).getByRole("button", { name: /artists.json.*4 条记录/ });
+    expect(main).toHaveAttribute("aria-current", "page");
+    main.focus();
+    await userEvent.keyboard("{Enter}");
+    expect(onLibrarySelect).toHaveBeenCalledWith("artists.json");
+    await userEvent.click(within(row).getByRole("button", { name: /删除 artists.json/ }));
+    expect(onLibraryDelete).toHaveBeenCalledWith("artists.json");
+    expect(onLibrarySelect).toHaveBeenCalledTimes(1);
+  });
+
   it("groups input source folders under a source root instead of rendering source refs as names", () => {
     const tree = buildFolderTree(
       ["default_input::clips", "default_input::clips/poses", "output-set"],

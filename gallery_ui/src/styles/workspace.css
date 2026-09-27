@@ -2836,6 +2836,11 @@
   line-height: 1.6;
 }
 
+/* Show the CLIP-sync caution on its own line in apply-stack confirmations. */
+.ue-confirm-modal #ue-confirm-body {
+  white-space: pre-line;
+}
+
 .ue-modal-close {
   position: absolute;
   top: 16px;
@@ -3126,6 +3131,17 @@
   .ue-dialog-actions .ue-primary-btn,
   .ue-dialog-actions .ue-secondary-btn {
     flex: 1 1 0;
+  }
+
+  /* Three-action confirmations (e.g. append / replace / cancel) must keep
+     every choice fully visible at narrow widths without changing tab order. */
+  .ue-confirm-modal .ue-dialog-actions--choice {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .ue-confirm-modal .ue-dialog-actions--choice .ue-primary-btn {
+    grid-column: 1 / -1;
   }
 
   .ue-bulkbar {

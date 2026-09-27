@@ -16,7 +16,8 @@ import {
 import { useI18n } from "../../i18n/I18nProvider";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useOperationStatus } from "../shared/OperationStatusCenter";
-import type { BoardMutationResult, BoardSummary, MoveTargetOption } from "../../types/universal-gallery";
+import type { BoardMutationResult, BoardSummary, DeleteImagesResult, MoveImagesResult, MoveTargetOption } from "../../types/universal-gallery";
+import { describeFailedPaths, getDeleteOutcome, getMoveOutcome } from "../../utils/galleryOperationResults";
 import { BoardPickerModal } from "./BoardPickerModal";
 
 interface GalleryInspectorPanelProps {
@@ -30,7 +31,7 @@ interface GalleryInspectorPanelProps {
   onBatchUpdateImages: (relativePaths: string[], updates: Record<string, unknown>) => Promise<unknown>;
   onCreateBoard: (name: string, description?: string) => Promise<BoardMutationResult>;
   onUpdateBoardPins: (boardId: string, relativePaths: string[], pinned?: boolean) => Promise<unknown>;
-  onMoveImages: (relativePaths: string[], targetSubfolder: string, targetSourceId?: string) => Promise<unknown>;
+  onMoveImages: (relativePaths: string[], targetSubfolder: string, targetSourceId?: string) => Promise<MoveImagesResult>;
   onBatchRenameImages: (
     relativePaths: string[],
     template: string,
@@ -38,7 +39,7 @@ interface GalleryInspectorPanelProps {
     padding: number,
     currentPage: number,
   ) => Promise<unknown>;
-  onDeleteImages: (relativePaths: string[]) => Promise<unknown>;
+  onDeleteImages: (relativePaths: string[]) => Promise<DeleteImagesResult>;
 }
 
 export const GalleryInspectorPanel = ({
@@ -118,12 +119,24 @@ export const GalleryInspectorPanel = ({
       return;
     }
 
-    await runOperation(() => onDeleteImages(selectedPaths), {
-      pending: t("operationDeleteImages"),
-      success: t("imageDelete"),
-      error: (error) => (error instanceof Error ? error.message : t("imageDeleteError")),
-    });
-    onClose();
+    try {
+      const result = await runOperation(() => onDeleteImages(selectedPaths), {
+        pending: t("operationDeleteImages"),
+        success: (value) => t("operationDeleteImagesResult", {
+          count: value.deleted.length,
+          missing: getDeleteOutcome(selectedPaths, value).failedPaths.length,
+        }),
+        successTone: (value) => getDeleteOutcome(selectedPaths, value).complete ? "success" : "error",
+        successDetail: (value) => {
+          const { failedPaths } = getDeleteOutcome(selectedPaths, value);
+          return failedPaths.length ? t("operationUnprocessedPaths", { target: describeFailedPaths(failedPaths) }) : "";
+        },
+        error: (error) => (error instanceof Error ? error.message : t("imageDeleteError")),
+      });
+      if (getDeleteOutcome(selectedPaths, result).complete) onClose();
+    } catch {
+      // runOperation already displayed the error; keep the selection for retry.
+    }
   };
 
   const handleRemoveFromSelectedBoard = async () => {
@@ -171,12 +184,28 @@ export const GalleryInspectorPanel = ({
       return;
     }
 
-    await runOperation(() => onMoveImages(selectedPaths, bulkTargetSubfolder, target?.source_id), {
-      pending: t("operationMoveImages"),
-      success: t("operationMoveImagesSuccess"),
-      error: (error) => (error instanceof Error ? error.message : t("operationMoveImages")),
-    });
-    onClose();
+    try {
+      const result = await runOperation(() => onMoveImages(selectedPaths, bulkTargetSubfolder, target?.source_id), {
+        pending: t("operationMoveImages"),
+        success: (value) => {
+          const { unaccounted } = getMoveOutcome(selectedPaths, value);
+          return [
+            t("qolMoveResult", { moved: value.moved.length, missing: value.missing.length, blocked: value.blocked?.length ?? 0 }),
+            value.unchanged?.length ? t("operationMoveUnchanged", { count: value.unchanged.length }) : "",
+            unaccounted ? t("operationUnaccounted", { count: unaccounted }) : "",
+          ].filter(Boolean).join(" ");
+        },
+        successTone: (value) => getMoveOutcome(selectedPaths, value).complete ? "success" : "error",
+        successDetail: (value) => {
+          const { failedPaths } = getMoveOutcome(selectedPaths, value);
+          return failedPaths.length ? t("operationUnprocessedPaths", { target: describeFailedPaths(failedPaths) }) : "";
+        },
+        error: (error) => (error instanceof Error ? error.message : t("operationMoveImages")),
+      });
+      if (getMoveOutcome(selectedPaths, result).complete) onClose();
+    } catch {
+      // runOperation already displayed the error; keep the selection for retry.
+    }
   };
 
   const handleBatchRename = async () => {
@@ -198,14 +227,18 @@ export const GalleryInspectorPanel = ({
       return;
     }
 
-    await onBatchRenameImages(
-      selectedPaths,
-      bulkRenameTemplate.trim(),
-      bulkRenameStart,
-      bulkRenamePadding,
-      page,
-    ).catch(() => undefined);
-    onClose();
+    try {
+      await onBatchRenameImages(
+        selectedPaths,
+        bulkRenameTemplate.trim(),
+        bulkRenameStart,
+        bulkRenamePadding,
+        page,
+      );
+      onClose();
+    } catch {
+      // App reports the failure in the operation center; leave the selection intact.
+    }
   };
 
   const handleBatchPin = async (pinned: boolean) => {

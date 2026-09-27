@@ -16,6 +16,8 @@ interface OperationItem {
 export interface RunOperationOptions<T> {
   pending: string;
   success?: string | ((value: T) => string);
+  successTone?: (value: T) => Exclude<OperationTone, "pending">;
+  successDetail?: (value: T) => string;
   error?: string | ((error: unknown) => string);
 }
 
@@ -30,7 +32,6 @@ interface OperationStatusContextValue {
 const OperationStatusContext = createContext<OperationStatusContextValue | null>(null);
 const MAX_OPERATION_ITEMS = 5;
 const COMPLETE_DISMISS_MS = 3600;
-const ERROR_DISMISS_MS = 6200;
 
 const createOperationId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 
@@ -39,11 +40,10 @@ const getErrorMessage = (error: unknown, fallback: string) => (error instanceof 
 const trimOperationItems = (items: OperationItem[]) => {
   const next = [...items];
   while (next.length > MAX_OPERATION_ITEMS) {
-    const removableIndex = [...next].reverse().findIndex((item) => item.tone !== "pending");
-    if (removableIndex === -1) {
-      next.pop();
-      continue;
-    }
+    // Errors and in-flight file operations are durable; only transient cards
+    // can be evicted before the user explicitly dismisses a failure.
+    const removableIndex = [...next].reverse().findIndex((item) => item.tone === "success" || item.tone === "info");
+    if (removableIndex === -1) break;
     next.splice(next.length - 1 - removableIndex, 1);
   }
   return next;
@@ -69,10 +69,11 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
 
   const scheduleDismiss = useCallback((id: string, tone: OperationTone) => {
     clearDismissTimer(id);
-    if (tone === "pending") {
+    // A failed file operation needs to remain visible until the user dismisses it.
+    if (tone === "pending" || tone === "error") {
       return;
     }
-    const timer = window.setTimeout(() => dismissOperation(id), tone === "error" ? ERROR_DISMISS_MS : COMPLETE_DISMISS_MS);
+    const timer = window.setTimeout(() => dismissOperation(id), COMPLETE_DISMISS_MS);
     dismissTimersRef.current.set(id, timer);
   }, [clearDismissTimer, dismissOperation]);
 
@@ -105,7 +106,12 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
     try {
       const value = await operation();
       if (options.success) {
-        updateOperation(id, typeof options.success === "function" ? options.success(value) : options.success, "success");
+        updateOperation(
+          id,
+          typeof options.success === "function" ? options.success(value) : options.success,
+          options.successTone?.(value) ?? "success",
+          options.successDetail?.(value) ?? "",
+        );
       } else {
         dismissOperation(id);
       }
@@ -154,7 +160,12 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
             </div>
             <div className="ue-operation-copy">
               <strong>{item.message}</strong>
-              {item.detail ? <span>{item.detail}</span> : null}
+              {item.detail && item.tone === "error" ? (
+                <details className="ue-operation-details">
+                  <summary>{t("operationViewDetails")}</summary>
+                  <span>{item.detail}</span>
+                </details>
+              ) : item.detail ? <span>{item.detail}</span> : null}
             </div>
             <button className="ue-operation-dismiss" onClick={() => dismissOperation(item.id)} aria-label={t("notificationDismiss")}>
               <X size={14} />

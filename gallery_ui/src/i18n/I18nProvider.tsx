@@ -14,6 +14,9 @@ interface TranslateOptions {
   page?: number;
   totalPages?: number;
   count?: number;
+  added?: number;
+  updated?: number;
+  removed?: number;
   name?: string;
   target?: string;
   tab?: WorkspaceTab;

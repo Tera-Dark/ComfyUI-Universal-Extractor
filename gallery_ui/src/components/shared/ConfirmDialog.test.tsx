@@ -7,7 +7,7 @@ import { I18nProvider } from "../../i18n/I18nProvider";
 import { ConfirmProvider, useConfirm } from "./ConfirmDialog";
 
 const ConfirmHarness = () => {
-  const { confirm } = useConfirm();
+  const { confirm, choose } = useConfirm();
   const [result, setResult] = useState("pending");
   return (
     <div>
@@ -25,6 +25,21 @@ const ConfirmHarness = () => {
       >
         Ask
       </button>
+      <button onClick={async () => setResult(await choose({
+        title: "Unsaved edits",
+        message: "What would you like to do?",
+        confirmLabel: "Save and continue",
+        alternativeLabel: "Discard changes",
+        cancelLabel: "Keep editing",
+        tone: "warning",
+      }))}>Choose</button>
+      <button onClick={async () => setResult(await choose({
+        title: "Loading edits",
+        message: "Wait before saving.",
+        confirmLabel: "Save and continue",
+        confirmDisabled: true,
+        alternativeLabel: "Discard changes",
+      }))}>Choose while loading</button>
       <span data-testid="result">{result}</span>
     </div>
   );
@@ -77,4 +92,25 @@ describe("ConfirmProvider", () => {
     expect(ask).toHaveFocus();
   });
 
+  it.each([
+    ["Keep editing", "cancel"],
+    ["Discard changes", "alternative"],
+    ["Save and continue", "confirm"],
+  ])("returns %s from the three-choice unsaved-edit dialog", async (button, expected) => {
+    const user = userEvent.setup();
+    render(<I18nProvider><ConfirmProvider><ConfirmHarness /></ConfirmProvider></I18nProvider>);
+    await user.click(screen.getByRole("button", { name: "Choose" }));
+    expect(screen.getByRole("button", { name: "Keep editing" })).toHaveFocus();
+    await user.click(screen.getByRole("button", { name: button }));
+    expect(screen.getByTestId("result")).toHaveTextContent(expected);
+  });
+
+  it("prevents saving before metadata is ready but still permits cancellation or discard", async () => {
+    const user = userEvent.setup();
+    render(<I18nProvider><ConfirmProvider><ConfirmHarness /></ConfirmProvider></I18nProvider>);
+    await user.click(screen.getByRole("button", { name: "Choose while loading" }));
+    expect(screen.getByRole("button", { name: "Save and continue" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Discard changes" }));
+    expect(screen.getByTestId("result")).toHaveTextContent("alternative");
+  });
 });

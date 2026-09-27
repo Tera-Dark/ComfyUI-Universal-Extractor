@@ -36,9 +36,16 @@ jobs:
           cache: npm
           cache-dependency-path: gallery_ui/package-lock.json
 
+      - name: Test ComfyUI LoRA bridge
+        run: node --test tests/comfy_lora_stack_bridge.test.mjs
+
       - name: Install frontend dependencies
         working-directory: gallery_ui
         run: npm ci
+
+      - name: Audit frontend translations
+        working-directory: gallery_ui
+        run: npm run audit:i18n
 
       - name: Typecheck frontend
         working-directory: gallery_ui

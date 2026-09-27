@@ -142,7 +142,7 @@ const renderDual = (overrides: Partial<Parameters<typeof DualFolderWorkspace>[0]
     onOpenDetail: vi.fn(),
     onOpenWorkflow: vi.fn().mockResolvedValue(undefined),
     onMoveImages: vi.fn().mockResolvedValue({ ok: true, moved: [], missing: [], categories: [], subfolders: [] }),
-    onDeleteImages: vi.fn().mockResolvedValue(undefined),
+    onDeleteImages: vi.fn().mockResolvedValue({ ok: true, deleted: [], missing: [], categories: [] }),
     onUpdateImageState: vi.fn().mockResolvedValue(undefined),
     onCreateBoard: vi.fn().mockResolvedValue({ ok: true, boards: [] }),
     onUpdateBoardPins: vi.fn().mockResolvedValue(undefined),
@@ -163,6 +163,24 @@ const renderDual = (overrides: Partial<Parameters<typeof DualFolderWorkspace>[0]
 };
 
 describe("DualFolderWorkspace", () => {
+  it("reports right-pane records and selection for detail navigation and the batch Inspector", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValueOnce(imagePage("left.png")).mockResolvedValueOnce(imagePage("right.png"));
+    const onOpenDetail = vi.fn();
+    const onSelectionChange = vi.fn();
+    const onVisibleImagesChange = vi.fn();
+    const { container } = renderDual({ onOpenDetail, onSelectionChange, onVisibleImagesChange });
+    await screen.findByText("right.png");
+    const rightCard = container.querySelectorAll(".ue-dual-card")[1];
+    fireEvent.doubleClick(rightCard);
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "right.png" }),
+      [expect.objectContaining({ filename: "right.png" })]);
+    fireEvent.click(rightCard);
+    await waitFor(() => expect(onSelectionChange).toHaveBeenLastCalledWith(["right.png"]));
+    expect(onVisibleImagesChange).toHaveBeenLastCalledWith([
+      expect.objectContaining({ filename: "left.png" }), expect.objectContaining({ filename: "right.png" }),
+    ]);
+  });
+
   it("searches and selects a nested folder with the custom combobox", async () => {
     vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("folder.png"));
 
@@ -324,7 +342,7 @@ describe("DualFolderWorkspace", () => {
     fireEvent.contextMenu(leftCards[1]);
 
     fireEvent.click(screen.getByText("打开详情"));
-    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "b.png" }));
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "b.png" }), expect.arrayContaining([expect.objectContaining({ filename: "b.png" })]));
 
     fireEvent.contextMenu(leftCards[1]);
     fireEvent.click(screen.getByText("置顶"));
@@ -411,7 +429,7 @@ describe("DualFolderWorkspace", () => {
     expect(container.querySelectorAll(".ue-dual-pane")[0]).toHaveTextContent("已选 2 张");
 
     fireEvent.keyDown(window, { key: "Enter" });
-    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "a.png" }));
+    expect(onOpenDetail).toHaveBeenCalledWith(expect.objectContaining({ filename: "a.png" }), expect.arrayContaining([expect.objectContaining({ filename: "a.png" })]));
 
     fireEvent.keyDown(window, { key: "m", ctrlKey: true });
     await screen.findByText("移动选中图片");
@@ -424,7 +442,7 @@ describe("DualFolderWorkspace", () => {
   });
 
   it("deletes selected images through the Delete shortcut after confirmation", async () => {
-    const onDeleteImages = vi.fn().mockResolvedValue(undefined);
+    const onDeleteImages = vi.fn().mockResolvedValue({ ok: true, deleted: ["a.png"], missing: [], categories: [] });
     vi.mocked(galleryApi.listImages).mockResolvedValue(imagePageMany(["a.png", "b.png"]));
 
     const { container } = renderDual({ onDeleteImages });
@@ -514,6 +532,54 @@ describe("DualFolderWorkspace", () => {
     await act(async()=>finish(imagePage("stale.png")));
     expect(screen.queryByText("stale.png")).not.toBeInTheDocument();
     expect(screen.getByText("new.png")).toBeInTheDocument();
+  });
+
+  it("reports partial moves with target paths and retains only unmoved source selections", async () => {
+    const onMoveImages = vi.fn().mockResolvedValue({
+      ok: true, moved: ["right/a.png"], moved_sources: ["a.png"], missing: ["b.png"],
+      blocked: [], unchanged: [], categories: [], subfolders: [],
+    });
+    vi.mocked(galleryApi.listImages).mockReset().mockImplementation(async (_page, _limit, _search, _category, folder) =>
+      folder === "default_output::left" ? imagePageMany(["a.png", "b.png"]) : imagePageMany([]));
+    const { container } = renderDual({ onMoveImages });
+    await screen.findByText("a.png");
+    const triggers = container.querySelectorAll(".ue-folder-combobox-trigger");
+    fireEvent.click(triggers[1]);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "right" } });
+    fireEvent.click(screen.getByRole("option", { name: /right/i }));
+    const left = container.querySelectorAll(".ue-dual-pane")[0];
+    const cards = left.querySelectorAll(".ue-dual-card");
+    fireEvent.click(cards[0]);
+    fireEvent.click(cards[1], { ctrlKey: true });
+    fireEvent.keyDown(window, { key: "m", ctrlKey: true });
+    fireEvent.click((await screen.findByRole("alertdialog")).querySelector(".ue-primary-btn")!);
+    await waitFor(() => expect(left).toHaveTextContent("已选 1 张"));
+    expect(onMoveImages).toHaveBeenCalledWith(["a.png", "b.png"], "right", "default_output");
+    expect(left.querySelectorAll(".ue-dual-card")[1]).toHaveClass("is-selected");
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("已移动 1 张");
+    fireEvent.click(alert.querySelector("summary")!);
+    expect(alert).toHaveTextContent("b.png");
+  });
+
+  it("reports partial deletes and preserves the undeleted selection in the same pane", async () => {
+    const onDeleteImages = vi.fn().mockResolvedValue({
+      ok: true, deleted: ["a.png"], missing: ["b.png"], categories: [],
+    });
+    vi.mocked(galleryApi.listImages).mockReset().mockImplementation(async (_page, _limit, _search, _category, folder) =>
+      folder === "default_output::left" ? imagePageMany(["a.png", "b.png"]) : imagePageMany([]));
+    const { container } = renderDual({ onDeleteImages });
+    await screen.findByText("a.png");
+    const left = container.querySelectorAll(".ue-dual-pane")[0];
+    const cards = left.querySelectorAll(".ue-dual-card");
+    fireEvent.click(cards[0]);
+    fireEvent.click(cards[1], { ctrlKey: true });
+    fireEvent.keyDown(window, { key: "Delete" });
+    fireEvent.click((await screen.findByRole("alertdialog")).querySelector(".ue-primary-btn")!);
+    await waitFor(() => expect(left).toHaveTextContent("已选 1 张"));
+    expect(onDeleteImages).toHaveBeenCalledWith(["a.png", "b.png"]);
+    expect(left.querySelectorAll(".ue-dual-card")[1]).toHaveClass("is-selected");
+    expect(screen.getByRole("alert")).toHaveTextContent("未处理 1 张");
   });
 
   it("blocks repeated moves while pending, reports partial outcomes and retains blocked selection", async () => {

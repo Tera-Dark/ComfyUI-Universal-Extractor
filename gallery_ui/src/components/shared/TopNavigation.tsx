@@ -50,6 +50,7 @@ export const TopNavigation = ({
   const [updatesOpen, setUpdatesOpen] = useState(false);
   const [updatesPosition, setUpdatesPosition] = useState<FloatingMenuPosition>({ x: 12, y: 56 });
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const composingRef = useRef(false);
   const updatesButtonRef = useRef<HTMLButtonElement | null>(null);
   const searchEnabled = activeTab === "library";
   const searchOpen = searchEnabled && (searchExpanded || Boolean(searchValue.trim()));
@@ -197,15 +198,16 @@ export const TopNavigation = ({
                 id="ue-topbar-search"
                 value={inputValue}
                 placeholder={t("navSearchLibraryPlaceholder")}
-                onCompositionStart={() => setIsComposing(true)}
+                onCompositionStart={() => { composingRef.current = true; setIsComposing(true); }}
                 onCompositionEnd={(event) => {
+                  composingRef.current = false;
                   setIsComposing(false);
                   setInputValue(event.currentTarget.value);
                   onSearchChange(event.currentTarget.value);
                 }}
                 onChange={(event) => {
                   setInputValue(event.target.value);
-                  if (!isComposing) {
+                  if (!composingRef.current && !(event.nativeEvent as InputEvent).isComposing) {
                     onSearchChange(event.target.value);
                   }
                 }}

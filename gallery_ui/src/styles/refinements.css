@@ -41,3 +41,12 @@
  .ue-filter-controls--gallery > .ue-toolbar-group--browse { flex:1 0 100%; flex-wrap:wrap; justify-content:space-between; gap:6px; }
  .ue-filter-controls--gallery [data-tour-id="gallery-selection"] span { display:inline; }
 }
+/* Mobile density is an explicit grid preference, not the desktop 3–8-column slider. */
+.ue-density-presets--mobile > button { min-height:72px; }
+.ue-density-preview--list { grid-template-columns:1fr; }
+.ue-density-panel .ue-density-note strong { color:#333; font-weight:600; }
+@media (max-width:560px) {
+ .ue-density-trigger, .ue-density-panel header > button, .ue-density-presets--mobile > button { min-height:44px; }
+ .ue-density-panel header > button { min-width:44px; }
+ .ue-gallery-search-clear, .ue-pagination-actions > button, .ue-pagination-actions form button { min-width:44px; min-height:44px; }
+}
