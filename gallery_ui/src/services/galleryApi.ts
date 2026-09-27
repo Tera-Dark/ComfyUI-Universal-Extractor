@@ -42,15 +42,18 @@ export class ApiRequestError extends Error {
 const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> => {
   const response = await fetch(input, init);
   if (!response.ok) {
+    // Read the body once: response.json() consumes it even when parsing fails.
+    // A plain-text proxy/ComfyUI error should still be useful to the user.
     let details: unknown = null;
     try {
-      details = await response.json();
-    } catch {
+      const body = await response.text();
       try {
-        details = await response.text();
+        details = JSON.parse(body) as unknown;
       } catch {
-        details = null;
+        details = body.slice(0, 1000);
       }
+    } catch {
+      // A disconnected response may not have a readable body.
     }
 
     const message =
@@ -59,7 +62,9 @@ const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Pro
       "error" in details &&
       typeof (details as { error?: unknown }).error === "string"
         ? (details as { error: string }).error
-        : `Request failed: ${response.status}`;
+        : typeof details === "string" && details.trim() && !details.trim().startsWith("<")
+          ? details.trim().slice(0, 200)
+          : `Request failed: ${response.status}`;
 
     throw new ApiRequestError(message, response.status, details);
   }
@@ -67,13 +72,13 @@ const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Pro
 };
 
 export const galleryApi = {
-  async getContext(forceRefresh = false) {
+  async getContext(forceRefresh = false, signal?: AbortSignal) {
     const params = new URLSearchParams();
     if (forceRefresh) {
       params.set("force_refresh", "true");
     }
     const query = params.size ? `?${params}` : "";
-    return requestJson<GalleryContext>(`/universal_gallery/api/context${query}`);
+    return requestJson<GalleryContext>(`/universal_gallery/api/context${query}`, signal ? { signal } : undefined);
   },
 
   async getUpdateStatus(force = false) {
@@ -95,6 +100,7 @@ export const galleryApi = {
     sortBy = "created_at",
     sortOrder = "desc",
     forceRefresh = false,
+    signal?: AbortSignal,
   ) {
     const params = new URLSearchParams({
       page: String(page),
@@ -130,10 +136,10 @@ export const galleryApi = {
       params.set("force_refresh", "true");
     }
 
-    return requestJson<ImageListResponse>(`/universal_gallery/api/images?${params}`);
+    return requestJson<ImageListResponse>(`/universal_gallery/api/images?${params}`, signal ? { signal } : undefined);
   },
 
-  async getImageFreshness(subfolder = "", known = "") {
+  async getImageFreshness(subfolder = "", known = "", signal?: AbortSignal) {
     const params = new URLSearchParams();
     if (subfolder.trim()) {
       params.set("subfolder", subfolder.trim());
@@ -142,7 +148,7 @@ export const galleryApi = {
       params.set("known", known.trim());
     }
     const query = params.size ? `?${params}` : "";
-    return requestJson<ImageFreshness>(`/universal_gallery/api/images/freshness${query}`);
+    return requestJson<ImageFreshness>(`/universal_gallery/api/images/freshness${query}`, signal ? { signal } : undefined);
   },
 
   async listVariantGroups(options: {
@@ -603,8 +609,10 @@ export const galleryApi = {
     });
   },
 
-  async listTrash() {
-    const response = await requestJson<{ items?: TrashItem[] }>("/universal_gallery/api/trash");
+  async listTrash(signal?: AbortSignal) {
+    const response = await requestJson<{ items?: TrashItem[] }>(
+      "/universal_gallery/api/trash", signal ? { signal } : undefined,
+    );
     return response.items ?? [];
   },
 

@@ -71,6 +71,28 @@ describe("galleryApi", () => {
     expect(fetchMock).toHaveBeenCalledWith("/universal_gallery/api/images/freshness?subfolder=current&known=known", undefined);
   });
 
+  it("shows bounded plain-text errors without consuming a response twice", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response("Gallery is busy. Retry shortly.", { status: 503 })));
+    await expect(galleryApi.getContext()).rejects.toMatchObject({
+      message: "Gallery is busy. Retry shortly.",
+      details: "Gallery is busy. Retry shortly.",
+    });
+  });
+
+  it("passes abort signals to read requests without affecting unsignaled callers", async () => {
+    const fetchMock = vi.fn<typeof fetch>(async () => new Response("{}"));
+    vi.stubGlobal("fetch", fetchMock);
+    const controller = new AbortController();
+    await galleryApi.getContext(false, controller.signal);
+    await galleryApi.listImages(1, 60, "", "", "", "", "", "", false, "", "created_at", "desc", false, controller.signal);
+    await galleryApi.getImageFreshness("", "", controller.signal);
+    await galleryApi.listTrash(controller.signal);
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    for (const [, init] of fetchMock.mock.calls) {
+      expect(init).toEqual({ signal: controller.signal });
+    }
+  });
+
   it("keeps ApiRequestError available for callers that need status checks", () => {
     const error = new ApiRequestError("failed", 500, { error: "failed" });
     expect(error.status).toBe(500);

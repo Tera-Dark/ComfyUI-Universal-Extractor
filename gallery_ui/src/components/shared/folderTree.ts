@@ -1,4 +1,5 @@
 import type { GallerySource } from "../../types/universal-gallery";
+import { readStorageItem } from "../../utils/safeStorage";
 
 export interface TreeNode {
   path: string;
@@ -20,7 +21,7 @@ export const FOLDER_SORT_STORAGE_KEY = "universal-extractor:folder-sort";
 
 export const getStoredPinnedFolders = () => {
   try {
-    const parsed = JSON.parse(window.localStorage.getItem(PINNED_FOLDERS_STORAGE_KEY) || "[]");
+    const parsed = JSON.parse(readStorageItem(PINNED_FOLDERS_STORAGE_KEY) || "[]");
     return new Set(Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === "string") : []);
   } catch {
     return new Set<string>();
@@ -28,7 +29,7 @@ export const getStoredPinnedFolders = () => {
 };
 
 export const getStoredFolderSort = (): FolderSortMode =>
-  window.localStorage.getItem(FOLDER_SORT_STORAGE_KEY) === "name" ? "name" : "modified";
+  readStorageItem(FOLDER_SORT_STORAGE_KEY) === "name" ? "name" : "modified";
 
 export const parseFolderRef = (folderRef: string) => {
   const value = folderRef.trim().replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");

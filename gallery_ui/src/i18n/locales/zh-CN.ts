@@ -47,6 +47,7 @@ const zhCN = {
   densityLarger: "放大缩略图",
   densitySmaller: "缩小缩略图",
   densityResponsiveNote: "设置的是每行上限；窗口较窄时会自动减少列数。",
+  densityResetDefault: "恢复默认（每行 6 张）",
   tourClose: "关闭引导",
   tourDensityTitle: "选择舒服的浏览密度",
   tourDensityBody: "点击“密度”，选择宽松、适中或紧凑，也可以用滑块微调。设置即时生效；窄屏会自动适配。",

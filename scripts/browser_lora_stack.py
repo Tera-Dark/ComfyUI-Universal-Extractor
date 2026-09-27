@@ -25,9 +25,9 @@ RECEIVER = r"""
   channel.addEventListener('message', ({data}) => {
     if (data.type === 'universal-extractor:workflow-probe') {
       channel.postMessage({type: 'universal-extractor:workflow-ack',
-        instanceId:'background',probeId:data.probeId,focused:false,visibilityState:'hidden'});
+        instanceId:'background',probeId:data.probeId,focused:false,visibilityState:'hidden',loraStackProtocol:2});
       channel.postMessage({type: 'universal-extractor:workflow-ack',
-        instanceId:'active',probeId:data.probeId,focused:true,visibilityState:'visible'});
+        instanceId:'active',probeId:data.probeId,focused:true,visibilityState:'visible',loraStackProtocol:2});
     }
     if (data.type === 'universal-extractor:lora-stack-message') {
       info.received.push(data);
@@ -36,13 +36,13 @@ RECEIVER = r"""
       // finish the gallery operation that is addressed to the active tab.
       setTimeout(() => {
         channel.postMessage({type:'universal-extractor:lora-stack-delivered',
-          instanceId:'background',payloadId:id,ok:true,summary:{target:'WRONG',applied:50,added:50,updated:0,removed:0}});
+          instanceId:'background',payloadId:id,ok:true,loraStackProtocol:2,summary:{target:'WRONG',applied:50,added:50,updated:0,removed:0}});
         info.wrongSent = true;
       }, 40);
       setTimeout(() => {
         const replace = data.payload.mode === 'replace';
         channel.postMessage({type:'universal-extractor:lora-stack-delivered',
-          instanceId:'active',payloadId:id,ok:!info.replyError,
+          instanceId:'active',payloadId:id,ok:!info.replyError,loraStackProtocol:2,
           error:info.replyError || null,
           summary:{target:'LoRA target',applied:2,added:replace?2:1,updated:replace?0:1,removed:replace?3:0}});
       }, 800);

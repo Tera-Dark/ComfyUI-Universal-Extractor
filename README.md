@@ -1,8 +1,14 @@
 # ComfyUI Universal Extractor
 
-## 1.4.0 · 图库体验与 LoRA 堆应用更新
+## 1.5.0 · 图库加载与操作优化
 
-在 1.3.0 的极简工作台基础上，改进了未保存草稿保护、批量操作结果反馈、图源与搜索切换、移动端密度、瀑布流尾部滚动，以及图片 LoRA 堆到现有 ComfyUI 工作流的定向应用。**仅提交源码和构建产物不会自动创建 GitHub Release 或发布 ComfyUI Registry 版本。**
+在 1.4.0 基础上整合 LoRA 追加/覆盖与中部滚动修复，并优化大图库的状态索引、实时刷新和首屏加载。**仅提交源码和构建产物不会自动创建 GitHub Release 或发布 ComfyUI Registry 版本。**
+
+- **更快的图库状态更新**：收藏/图版/笔记改变时仅重新写入真正发生变化的 SQLite 和 FTS 行；图版统计不再为全部状态路径拼接超长查询；多图片路径查询分批，兼容较低的 SQLite 变量数限制。手动刷新上下文不再为图版重复扫描图源。
+- **更省资源的实时刷新**：指纹按稳定目录顺序流式计算，不再累积所有文件记录再排序；仅缓存最近 32 个浏览范围。
+- **首屏与操作体验**：双栏整理、变体、图版分享和元数据弹窗按需加载；切换图库范围时取消旧请求，不进入图库时不请求图片列表。关闭图片预加载偏好时也停止缩略图预热；密度面板提供“一键恢复每行 6 张”操作。浏览器禁用本地存储时，图廊、词库和侧边栏仍可使用会话内偏好。
+
+更新后请重启 ComfyUI 并分别强制刷新主页面和图库，避免旧桥接与新版图库混用。之前被旧版覆盖而丢失的 LoRA 仍需从工作流历史或备份恢复；独立 CLIP 数值可保留，但折叠后在上游插件调整主强度可能同步 CLIP。桌面 6 列是无已存偏好时的上限，窄屏会自动减列，旧的自选密度仍保留。
 
 **更新内容：** [CHANGELOG.md](CHANGELOG.md) · **架构和联动细节：** [docs/architecture.md](docs/architecture.md)。
 
@@ -64,7 +70,7 @@ ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台�
 - **右侧 Inspector**：普通图库页选中图片后，桌面端以贴屏覆盖层显示并为它预留宽度，瀑布流随可用空间重新排布；移动端以下方抽屉展示。
 - **图片详情页与安全操作**：支持左右翻页、键盘导航、缩放与胶片条；标题、分类、备注、Pin、文件名的未保存草稿，在关闭、翻页或切换工作区前都会提示保存／放弃／取消。发送工作流前始终确认，进度和结果进入右下角状态中心；只向一个已刷新并可接收的现有 ComfyUI 页面发送，不会自动创建窗口。批量移动／删除按服务端实际结果反馈，失败时保留未完成的选择。
 - **Metadata 与提示词**：支持查看图片 Metadata，并可从右键菜单或详情入口一键复制正面提示词；`/api/metadata` 同时返回结构化 `recipe` 字段，归纳 prompt、checkpoint、LoRA、尺寸和采样参数。
-- **LoRA 堆应用**：图片包含 ComfyUI-Lora-Manager 配方时，右键菜单和详情页提供统一的 **追加到原堆／覆盖旧堆／取消**。只操作选中的一个兼容节点（没有选中时操作第一个）；追加保留已有条目并更新同名，覆盖只清除目标节点旧 LoRA。新发送条目的 CLIP 子行默认折叠，保留独立 CLIP 权重（包括 0）；若在折叠后手动改主权重，LoRA Manager 原生行为会同步覆盖 CLIP，请先展开再单独编辑。桥接不会主动改写其他节点，但原插件自身可能联动连接的触发词节点。
+- **LoRA 堆应用**：图片包含 ComfyUI-Lora-Manager 配方时，右键菜单和详情页提供统一的 **追加到原堆／覆盖旧堆／取消**。只操作选中的一个兼容节点（没有选中时操作第一个）；追加保留已有条目并更新同名，覆盖只清除目标节点旧 LoRA。发送后目标节点全部 CLIP 子行默认折叠；只有确认上游仍保留独立 CLIP 权重（包括 0）时才报告成功，若上游版本会吞掉 0 则报错而非误报成功。折叠后手动改主权重，LoRA Manager 原生行为可能同步覆盖 CLIP，请先展开再单独编辑。桥接不会主动改写其他节点，但原插件自身可能联动连接的触发词节点。
 - **更新检查**：主页右上角铃铛会检查 GitHub Releases，有新版本时显示红点；弹窗中可查看当前/最新版本、更新日志，并手动重新检查。
 - **文件管理**：移动、重命名、批量重命名、创建目录、删除到垃圾箱、恢复和彻底删除。
 - **图版与分类**：支持 Pin 图、加入图版、分类管理和批量分类。
@@ -271,7 +277,7 @@ npm run audit:security
 npm run build
 ```
 
-从仓库根目录运行 `node --test tests/comfy_lora_stack_bridge.test.mjs` 检查桥接边界条件；真实上游行为另用 `LORA_MANAGER_SOURCE=/path/to/ComfyUI-Lora-Manager node --test tests/comfy_lora_manager_upstream.test.mjs` 测试（CI 自动拉取并固定上游提交 `0a262cbe`，不将其源码拷入本仓库）。可选浏览器回归只应针对 `scripts/preview.py` 建立的**隔离图库**运行，不要将模拟失败／移动／导入脚本指向真实 ComfyUI：例如 `python scripts/browser_lora_stack_channel.py http://127.0.0.1:8189`、`python scripts/browser_masonry_mid.py http://127.0.0.1:8189`、`python scripts/browser_masonry.py http://127.0.0.1:8189`。
+从仓库根目录运行 `node --test tests/comfy_lora_stack_bridge.test.mjs` 检查桥接边界条件；真实上游行为另用 `LORA_MANAGER_SOURCE=/path/to/ComfyUI-Lora-Manager node --test tests/comfy_lora_manager_upstream.test.mjs` 测试（CI 自动拉取并固定上游提交 `0a262cbe`，不将其源码拷入本仓库）。可选浏览器回归只应针对 `scripts/preview.py` 建立的**隔离图库**运行，不要将模拟失败／移动／导入脚本指向真实 ComfyUI：例如 `python scripts/browser_optimization_smoke.py http://127.0.0.1:8189`（按需加载、偏好与禁用存储）、`python scripts/browser_lora_stack_channel.py http://127.0.0.1:8189`、`python scripts/browser_lora_stack.py http://127.0.0.1:8189`、`python scripts/browser_masonry_mid.py http://127.0.0.1:8189`、`python scripts/browser_masonry.py http://127.0.0.1:8189`。
 
 CI 在 Windows 执行 Python、前端、i18n 和桥接测试，Linux/macOS 运行后端测试，另有 Linux 任务固定上游源码运行 LoRA Manager 回调集成测试；并用 `npm run audit:security` 阻止 moderate 及以上级别的前端依赖漏洞回归。`npm run build` 生成新的内容哈希资源与 manifest，**不会**改写旧哈希文件；CI 只验证构建，不会自动提交 `gallery_ui/dist/`。发布前需显式提交干净构建产物；真实 ComfyUI/LoRA Manager 和生产图库仍建议在工作流副本上实测。
 

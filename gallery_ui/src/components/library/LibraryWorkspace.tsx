@@ -36,6 +36,7 @@ import { LibraryImportModal } from "./LibraryImportModal";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
 import { FloatingLayerPortal, placeMenuForEvent, useDismissableLayer } from "../../utils/interaction";
+import { readStorageItem, writeStorageItem } from "../../utils/safeStorage";
 
 interface LibraryWorkspaceProps {
   libraries: LibraryInfo[];
@@ -88,7 +89,7 @@ interface LibraryContextMenuState {
 const LIBRARY_VIEW_MODE_STORAGE_KEY = "universal-extractor:library-view-mode";
 
 const getStoredViewMode = (key: string, fallback: ContentViewMode): ContentViewMode => {
-  const stored = window.localStorage.getItem(key);
+  const stored = readStorageItem(key);
   return stored === "grid" || stored === "list" ? stored : fallback;
 };
 
@@ -158,7 +159,7 @@ export const LibraryWorkspace = ({
   }, [editorValue]);
 
   useEffect(() => {
-    window.localStorage.setItem(LIBRARY_VIEW_MODE_STORAGE_KEY, libraryViewMode);
+    writeStorageItem(LIBRARY_VIEW_MODE_STORAGE_KEY, libraryViewMode);
   }, [libraryViewMode]);
 
   const closeContextMenu = useCallback(() => setContextMenu(null), []);

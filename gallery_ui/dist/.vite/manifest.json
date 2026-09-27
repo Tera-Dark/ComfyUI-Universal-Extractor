@@ -1,92 +1,165 @@
 {
-  "_OperationStatusCenter-Bt4LOML2.js": {
-    "file": "assets/OperationStatusCenter-Bt4LOML2.js",
-    "name": "OperationStatusCenter"
+  "_I18nProvider-Dzpd_8iC.js": {
+    "file": "assets/I18nProvider-Dzpd_8iC.js",
+    "name": "I18nProvider"
   },
-  "_boxes-jMgvT5e6.js": {
-    "file": "assets/boxes-jMgvT5e6.js",
+  "_boxes-DnD5S7Ni.js": {
+    "file": "assets/boxes-DnD5S7Ni.js",
     "name": "boxes",
     "imports": [
-      "_OperationStatusCenter-Bt4LOML2.js"
+      "_I18nProvider-Dzpd_8iC.js"
     ]
   },
-  "_save-DSAszqLx.js": {
-    "file": "assets/save-DSAszqLx.js",
+  "_copy-Bf9FtTKJ.js": {
+    "file": "assets/copy-Bf9FtTKJ.js",
+    "name": "copy",
+    "imports": [
+      "_I18nProvider-Dzpd_8iC.js"
+    ]
+  },
+  "_download-ilh4wJKC.js": {
+    "file": "assets/download-ilh4wJKC.js",
+    "name": "download",
+    "imports": [
+      "_I18nProvider-Dzpd_8iC.js"
+    ]
+  },
+  "_refresh-ccw-Dq8zANZP.js": {
+    "file": "assets/refresh-ccw-Dq8zANZP.js",
+    "name": "refresh-ccw",
+    "imports": [
+      "_I18nProvider-Dzpd_8iC.js"
+    ]
+  },
+  "_save-s8qaIAEz.js": {
+    "file": "assets/save-s8qaIAEz.js",
     "name": "save",
     "imports": [
-      "_OperationStatusCenter-Bt4LOML2.js"
+      "_I18nProvider-Dzpd_8iC.js"
     ]
   },
-  "_sparkles-4wciztfM.js": {
-    "file": "assets/sparkles-4wciztfM.js",
+  "_sparkles-CqxydaFc.js": {
+    "file": "assets/sparkles-CqxydaFc.js",
     "name": "sparkles",
     "imports": [
-      "_OperationStatusCenter-Bt4LOML2.js"
+      "_I18nProvider-Dzpd_8iC.js"
     ]
   },
-  "_wand-sparkles-D2VcR0TL.js": {
-    "file": "assets/wand-sparkles-D2VcR0TL.js",
+  "_wand-sparkles-glSxwW-g.js": {
+    "file": "assets/wand-sparkles-glSxwW-g.js",
     "name": "wand-sparkles",
     "imports": [
-      "_OperationStatusCenter-Bt4LOML2.js"
+      "_I18nProvider-Dzpd_8iC.js"
     ]
   },
   "index.html": {
-    "file": "assets/index-DJ8NMuvk.js",
+    "file": "assets/index-Buc2vIcv.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_OperationStatusCenter-Bt4LOML2.js"
+      "_I18nProvider-Dzpd_8iC.js"
     ],
     "dynamicImports": [
+      "src/components/gallery/DualFolderWorkspace.tsx",
+      "src/components/gallery/VariantGroupsView.tsx",
+      "src/components/gallery/BoardShareModal.tsx",
+      "src/components/gallery/MetadataViewerModal.tsx",
       "src/components/gallery/ImageDetailModal.tsx",
       "src/components/library/LibraryWorkspace.tsx",
       "src/components/settings/SettingsWorkspace.tsx",
       "src/components/workbench/WorkbenchWorkspace.tsx"
     ],
     "css": [
-      "assets/index-DNU-Tj6w.css"
+      "assets/index-Prn47bjN.css"
+    ]
+  },
+  "src/components/gallery/BoardShareModal.tsx": {
+    "file": "assets/BoardShareModal-U2EBSAe9.js",
+    "name": "BoardShareModal",
+    "src": "src/components/gallery/BoardShareModal.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_I18nProvider-Dzpd_8iC.js",
+      "_copy-Bf9FtTKJ.js",
+      "_download-ilh4wJKC.js",
+      "index.html"
+    ]
+  },
+  "src/components/gallery/DualFolderWorkspace.tsx": {
+    "file": "assets/DualFolderWorkspace-MU-02x-z.js",
+    "name": "DualFolderWorkspace",
+    "src": "src/components/gallery/DualFolderWorkspace.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_I18nProvider-Dzpd_8iC.js",
+      "_refresh-ccw-Dq8zANZP.js",
+      "index.html",
+      "src/components/gallery/MetadataViewerModal.tsx"
     ]
   },
   "src/components/gallery/ImageDetailModal.tsx": {
-    "file": "assets/ImageDetailModal-QuSpjjD7.js",
+    "file": "assets/ImageDetailModal-DXHs8H5n.js",
     "name": "ImageDetailModal",
     "src": "src/components/gallery/ImageDetailModal.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_OperationStatusCenter-Bt4LOML2.js",
-      "_sparkles-4wciztfM.js",
-      "_boxes-jMgvT5e6.js",
-      "_save-DSAszqLx.js",
+      "_I18nProvider-Dzpd_8iC.js",
+      "_sparkles-CqxydaFc.js",
+      "_boxes-DnD5S7Ni.js",
+      "_copy-Bf9FtTKJ.js",
+      "_save-s8qaIAEz.js",
       "index.html"
     ],
     "css": [
       "assets/ImageDetailModal-B1vU-WEK.css"
     ]
   },
+  "src/components/gallery/MetadataViewerModal.tsx": {
+    "file": "assets/MetadataViewerModal-CI7bS78c.js",
+    "name": "MetadataViewerModal",
+    "src": "src/components/gallery/MetadataViewerModal.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_I18nProvider-Dzpd_8iC.js",
+      "index.html"
+    ]
+  },
+  "src/components/gallery/VariantGroupsView.tsx": {
+    "file": "assets/VariantGroupsView-CKJ85gNg.js",
+    "name": "VariantGroupsView",
+    "src": "src/components/gallery/VariantGroupsView.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_I18nProvider-Dzpd_8iC.js",
+      "index.html"
+    ]
+  },
   "src/components/library/LibraryWorkspace.tsx": {
-    "file": "assets/LibraryWorkspace-RKUPMvhY.js",
+    "file": "assets/LibraryWorkspace-D8pBrr43.js",
     "name": "LibraryWorkspace",
     "src": "src/components/library/LibraryWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_OperationStatusCenter-Bt4LOML2.js",
-      "_sparkles-4wciztfM.js",
-      "_wand-sparkles-D2VcR0TL.js",
-      "_boxes-jMgvT5e6.js",
-      "_save-DSAszqLx.js",
+      "_I18nProvider-Dzpd_8iC.js",
+      "_sparkles-CqxydaFc.js",
+      "_wand-sparkles-glSxwW-g.js",
+      "_boxes-DnD5S7Ni.js",
+      "_copy-Bf9FtTKJ.js",
+      "_download-ilh4wJKC.js",
+      "_refresh-ccw-Dq8zANZP.js",
+      "_save-s8qaIAEz.js",
       "index.html"
     ]
   },
   "src/components/settings/SettingsWorkspace.tsx": {
-    "file": "assets/SettingsWorkspace-Dv0vBWV2.js",
+    "file": "assets/SettingsWorkspace-CNEcZpvM.js",
     "name": "SettingsWorkspace",
     "src": "src/components/settings/SettingsWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_OperationStatusCenter-Bt4LOML2.js",
-      "_save-DSAszqLx.js",
+      "_I18nProvider-Dzpd_8iC.js",
+      "_save-s8qaIAEz.js",
       "index.html"
     ],
     "css": [
@@ -94,14 +167,15 @@
     ]
   },
   "src/components/workbench/WorkbenchWorkspace.tsx": {
-    "file": "assets/WorkbenchWorkspace-BhzXumT2.js",
+    "file": "assets/WorkbenchWorkspace-gEo0Texp.js",
     "name": "WorkbenchWorkspace",
     "src": "src/components/workbench/WorkbenchWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_OperationStatusCenter-Bt4LOML2.js",
-      "_sparkles-4wciztfM.js",
-      "_wand-sparkles-D2VcR0TL.js",
+      "_I18nProvider-Dzpd_8iC.js",
+      "_sparkles-CqxydaFc.js",
+      "_wand-sparkles-glSxwW-g.js",
+      "_copy-Bf9FtTKJ.js",
       "index.html"
     ],
     "css": [

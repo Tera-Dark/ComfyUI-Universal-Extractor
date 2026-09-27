@@ -5,6 +5,7 @@ import { galleryApi } from "../services/galleryApi";
 import type { BoardSummary, ColorIndexStatus, DetailNavigationState, GalleryContext, ImageRecord, MoveTargetOption, TrashItem } from "../types/universal-gallery";
 import { PAGE_SIZE } from "../utils/formatters";
 import { getDeleteOutcome, getMoveOutcome } from "../utils/galleryOperationResults";
+import { readStorageItem, writeStorageItem } from "../utils/safeStorage";
 import type { GalleryUrlScope } from "../utils/workspaceLocation";
 
 const TRASH_SUBFOLDER_KEY = "__trash__";
@@ -29,6 +30,7 @@ const normalizeUpdatedPaths = (value: unknown, fallback: string[]) => {
 interface UseGalleryDataOptions {
   isActive?: boolean;
   liveRefreshEnabled?: boolean;
+  thumbnailPrewarmEnabled?: boolean;
   initialScope?: GalleryUrlScope;
 }
 
@@ -49,6 +51,7 @@ const getSourceRootRef = (folderRef: string) => {
 export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const isActive = options.isActive ?? true;
   const liveRefreshEnabled = options.liveRefreshEnabled ?? true;
+  const thumbnailPrewarmEnabled = options.thumbnailPrewarmEnabled ?? true;
   const { t } = useI18n();
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [context, setContext] = useState<GalleryContext | null>(null);
@@ -66,7 +69,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [sortBy, setSortBy] = useState(() => options.initialScope?.sort ?? "created_at");
   const [sortOrder, setSortOrder] = useState(() => options.initialScope?.order ?? "desc");
   const [gridColumns, setGridColumns] = useState(() => {
-    const stored = window.localStorage.getItem("universal-extractor:grid-columns");
+    const stored = readStorageItem("universal-extractor:grid-columns");
     const parsed = Number(stored);
     // Only change the first-use desktop default. Respect a saved density;
     // the masonry hook and mobile preset still clamp columns to actual width.
@@ -150,6 +153,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   }, []);
 
   const scheduleThumbnailPrewarm = useCallback((nextImages: ImageRecord[]) => {
+    if (!thumbnailPrewarmEnabled) return;
     const relativePaths = nextImages.slice(0, INITIAL_THUMBNAIL_PREWARM_LIMIT).map((image) => image.relative_path);
     if (!relativePaths.length) {
       return;
@@ -169,16 +173,20 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       return;
     }
     thumbnailPrewarmTimerRef.current = window.setTimeout(task, 250);
-  }, [clearScheduledThumbnailPrewarm]);
+  }, [clearScheduledThumbnailPrewarm, thumbnailPrewarmEnabled]);
 
+  useEffect(() => {
+    if (!thumbnailPrewarmEnabled) clearScheduledThumbnailPrewarm();
+  }, [clearScheduledThumbnailPrewarm, thumbnailPrewarmEnabled]);
   useEffect(() => () => clearScheduledThumbnailPrewarm(), [clearScheduledThumbnailPrewarm]);
 
   useEffect(() => {
-    window.localStorage.setItem("universal-extractor:grid-columns", String(gridColumns));
+    writeStorageItem("universal-extractor:grid-columns", String(gridColumns));
   }, [gridColumns]);
 
   useEffect(() => {
     let isCancelled = false;
+    const controller = new AbortController();
     const shouldForceRefresh = refreshKey > 0 && consumedContextRefreshKeyRef.current !== refreshKey;
     if (shouldForceRefresh) {
       consumedContextRefreshKeyRef.current = refreshKey;
@@ -187,7 +195,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     const loadContext = async () => {
       let requestError: Error | undefined;
       try {
-        const contextResponse = await galleryApi.getContext(shouldForceRefresh);
+        const contextResponse = await galleryApi.getContext(shouldForceRefresh, controller.signal);
         if (isCancelled) {
           return;
         }
@@ -211,13 +219,19 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
 
     return () => {
       isCancelled = true;
+      controller.abort();
       if (shouldForceRefresh) completeRefreshPart(refreshKey, "context", new Error(t("galleryRefreshInterrupted")));
     };
   }, [completeRefreshPart, refreshKey, t]);
 
   useEffect(() => {
     let isCancelled = false;
+    const controller = new AbortController();
     const shouldForceRefresh = refreshKey > 0 && consumedImagesRefreshKeyRef.current !== refreshKey;
+    // Library/workbench entry only needs context for the sidebar. Do not load
+    // the image page until Gallery is opened; Settings manual refresh still
+    // deliberately loads it and can await both requests.
+    if (!isActive && !shouldForceRefresh) return;
     if (shouldForceRefresh) {
       consumedImagesRefreshKeyRef.current = refreshKey;
     }
@@ -236,7 +250,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       let loadedCurrentImages = false;
       try {
         if (isTrashView) {
-          const items = await galleryApi.listTrash();
+          const items = await galleryApi.listTrash(controller.signal);
           if (isCancelled) {
             return;
           }
@@ -259,6 +273,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
           sortBy,
           sortOrder,
           shouldForceRefresh,
+          controller.signal,
         );
 
         if (isCancelled) {
@@ -275,7 +290,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
           requestError = new Error(imageResponse.index_error);
         }
         if (shouldForceRefresh) {
-          const contextResponse = await galleryApi.getContext(false);
+          const contextResponse = await galleryApi.getContext(false, controller.signal);
           if (!isCancelled) {
             setContext(contextResponse);
             setColorIndexStatus(contextResponse.color_index_status ?? imageResponse.color_index_status ?? null);
@@ -285,7 +300,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
             }
           }
         }
-        scheduleThumbnailPrewarm(imageResponse.images ?? []);
+        if (!isCancelled) scheduleThumbnailPrewarm(imageResponse.images ?? []);
       } catch (fetchError) {
         if (!isCancelled) {
           if (!hasLoadedCurrentView && !loadedCurrentImages) {
@@ -316,9 +331,10 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
 
     return () => {
       isCancelled = true;
+      controller.abort();
       if (shouldForceRefresh) completeRefreshPart(refreshKey, "images", new Error(t("galleryRefreshInterrupted")));
     };
-  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, t, isTrashView, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart]);
+  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, t, isTrashView, isActive, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart]);
 
   useEffect(() => {
     if (!liveRefreshEnabled || !isActive || isTrashView) {
@@ -326,6 +342,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     }
 
     let cancelled = false;
+    const controller = new AbortController();
     const refreshSilently = async (reason: "interval" | "focus") => {
       if (liveRefreshRunningRef.current || document.visibilityState === "hidden") {
         return;
@@ -340,7 +357,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       lastLiveRefreshAtRef.current = now;
       try {
         const knownFingerprint = liveRefreshFingerprintsRef.current.get(liveRefreshViewKey) ?? "";
-        const freshness = await galleryApi.getImageFreshness(selectedSubfolder, knownFingerprint);
+        const freshness = await galleryApi.getImageFreshness(selectedSubfolder, knownFingerprint, controller.signal);
         if (cancelled) return;
         liveRefreshFingerprintsRef.current.set(liveRefreshViewKey, freshness.fingerprint);
         if (!freshness.changed) {
@@ -368,6 +385,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
           sortBy,
           sortOrder,
           true,
+          controller.signal,
         );
         if (cancelled) return;
         if ((document.querySelector<HTMLElement>(".ue-main-shell")?.scrollTop ?? 0) > 80) {
@@ -382,7 +400,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
         setImages(nextImages);
         scheduleThumbnailPrewarm(nextImages);
 
-        const contextResponse = await galleryApi.getContext(false);
+        const contextResponse = await galleryApi.getContext(false, controller.signal);
         if (cancelled) return;
         setContext(contextResponse);
         setColorIndexStatus(contextResponse.color_index_status ?? imageResponse.color_index_status ?? null);
@@ -407,6 +425,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
 
     return () => {
       cancelled = true;
+      controller.abort();
       window.clearInterval(interval);
       window.removeEventListener("focus", handleVisibleRefresh);
       document.removeEventListener("visibilitychange", handleVisibleRefresh);
@@ -435,7 +454,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   }, [liveRefreshViewKey]);
 
   useEffect(() => {
-    if (!colorIndexStatus || colorIndexStatus.complete || isTrashView) {
+    if (!isActive || !colorIndexStatus || colorIndexStatus.complete || isTrashView) {
       return;
     }
 
@@ -446,7 +465,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
         .catch(() => undefined);
     }, 5000);
     return () => window.clearInterval(interval);
-  }, [colorIndexStatus, isTrashView]);
+  }, [colorIndexStatus, isTrashView, isActive]);
 
   const triggerRefresh = useCallback(() => {
     const key = ++refreshSequenceRef.current;

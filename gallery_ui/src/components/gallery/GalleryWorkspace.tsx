@@ -1,5 +1,6 @@
 import { preferredScrollBehavior } from "../../utils/imageLoading";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { readStorageItem, writeStorageItem } from "../../utils/safeStorage";
+import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   ChevronUp,
   CheckSquare,
@@ -41,19 +42,22 @@ import { describeFailedPaths, getDeleteOutcome } from "../../utils/galleryOperat
 import { getPositivePromptText } from "../../utils/metadata";
 import { galleryApi } from "../../services/galleryApi";
 import { BoardPickerModal } from "./BoardPickerModal";
-import { BoardShareModal } from "./BoardShareModal";
 import { CategoryPickerModal } from "./CategoryPickerModal";
-import { DualFolderWorkspace } from "./DualFolderWorkspace";
 import { GalleryMainContent } from "./GalleryMainContent";
 import { GalleryToolbar } from "./GalleryToolbar";
-import { VariantGroupsView } from "./VariantGroupsView";
-import { MetadataViewerModal } from "./MetadataViewerModal";
 import { prefetchGalleryImage } from "./galleryImagePrefetch";
 import { dedupeVisibleSelection, getIntersectingSelectionKeys, selectPathRange, togglePathSelection, type RectLike, type SelectionBoxState } from "./gallerySelectionModel";
 import { getActiveFilterControlCount, getStoredViewMode, type ContentViewMode } from "./galleryWorkspaceModel";
 import { TrashWorkspaceView } from "./TrashWorkspaceView";
 import { estimateMasonryCardHeight, useVirtualMasonry } from "./useVirtualMasonry";
 import { FloatingLayerPortal, isEditableTarget, placeMenuForEvent, useDismissableLayer } from "../../utils/interaction";
+// Keep the first Gallery screen immediate; organizer, variants, sharing and
+// metadata are downloaded only when someone opens those optional surfaces.
+const DualFolderWorkspace = lazy(() => import("./DualFolderWorkspace").then((m) => ({ default: m.DualFolderWorkspace })));
+const VariantGroupsView = lazy(() => import("./VariantGroupsView").then((m) => ({ default: m.VariantGroupsView })));
+const BoardShareModal = lazy(() => import("./BoardShareModal").then((m) => ({ default: m.BoardShareModal })));
+const MetadataViewerModal = lazy(() => import("./MetadataViewerModal").then((m) => ({ default: m.MetadataViewerModal })));
+
 const MASONRY_GAP = 14;
 const SELECTION_AUTO_SCROLL_EDGE_PX = 72;
 const SELECTION_AUTO_SCROLL_MAX_STEP_PX = 30;
@@ -222,7 +226,7 @@ export const GalleryWorkspace = ({
     getStoredViewMode(GALLERY_VIEW_MODE_STORAGE_KEY, "grid"),
   );
   const [mobileDensity, setMobileDensity] = useState<"single" | "double">(() =>
-    window.localStorage.getItem(MOBILE_DENSITY_STORAGE_KEY) === "double" ? "double" : "single",
+    readStorageItem(MOBILE_DENSITY_STORAGE_KEY) === "double" ? "double" : "single",
   );
   const [dualFolderMode, setDualFolderMode] = useState(false);
   const [variantMode, setVariantMode] = useState(false);
@@ -327,10 +331,10 @@ export const GalleryWorkspace = ({
   }, []);
 
   useEffect(() => {
-    window.localStorage.setItem(GALLERY_VIEW_MODE_STORAGE_KEY, galleryViewMode);
+    writeStorageItem(GALLERY_VIEW_MODE_STORAGE_KEY, galleryViewMode);
   }, [galleryViewMode]);
   useEffect(() => {
-    window.localStorage.setItem(MOBILE_DENSITY_STORAGE_KEY, mobileDensity);
+    writeStorageItem(MOBILE_DENSITY_STORAGE_KEY, mobileDensity);
   }, [mobileDensity]);
 
   const closeContextMenus = useCallback(() => {
@@ -1359,6 +1363,7 @@ export const GalleryWorkspace = ({
         ) : null}
         {error && (images.length > 0 || isTrashView || dualFolderMode || variantMode) ? <div className="ue-inline-error">{error}</div> : null}
 
+        <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
         {dualFolderMode && !isTrashView ? (
           <DualFolderWorkspace
             onExit={()=>{setDualFolderMode(false);clearSelection();}}
@@ -1517,6 +1522,7 @@ export const GalleryWorkspace = ({
             onPageJump={handlePageJump}
           />
         )}
+        </Suspense>
 
       </section>
 
@@ -1549,11 +1555,9 @@ export const GalleryWorkspace = ({
         onAddToBoard={handleAddToBoard}
       />
 
-      <BoardShareModal
-        open={Boolean(shareBoard)}
-        board={shareBoard}
-        onClose={() => setShareBoardId("")}
-      />
+      {shareBoard ? <Suspense fallback={null}>
+        <BoardShareModal open board={shareBoard} onClose={() => setShareBoardId("")} />
+      </Suspense> : null}
 
       {contextMenu ? (
         <FloatingLayerPortal>
@@ -1716,7 +1720,9 @@ export const GalleryWorkspace = ({
       ) : null}
 
       {metadataViewerImage ? (
-        <MetadataViewerModal image={metadataViewerImage} onClose={() => setMetadataViewerImage(null)} />
+        <Suspense fallback={null}>
+          <MetadataViewerModal image={metadataViewerImage} onClose={() => setMetadataViewerImage(null)} />
+        </Suspense>
       ) : null}
 
       {trashContextMenu ? (

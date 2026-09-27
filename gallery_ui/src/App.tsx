@@ -9,6 +9,7 @@ import { OnboardingTour } from "./components/shared/OnboardingTour";
 import { useGalleryData } from "./hooks/useGalleryData";
 import { useI18n } from "./i18n/I18nProvider";
 import { useLibraryData } from "./hooks/useLibraryData";
+import { useUiPreferences } from "./hooks/useUiPreferences";
 import { galleryApi } from "./services/galleryApi";
 import { useConfirm, type ConfirmOptions } from "./components/shared/ConfirmDialog";
 import { useToast } from "./components/shared/ToastViewport";
@@ -34,17 +35,8 @@ const WorkbenchWorkspace = lazy(() =>
 );
 
 const PENDING_WORKFLOW_KEY = "universal-extractor:pending-workflow";
-const UI_PREFERENCES_KEY = "universal-extractor:ui-preferences";
 const DEFAULT_OUTPUT_SOURCE_ROOT = "default_output::";
 const FOLDER_REF_SEPARATOR = "::";
-
-const DEFAULT_UI_PREFERENCES: UiPreferences = {
-  defaultSelectionMode: false,
-  collapseSidebarOnLaunch: false,
-  enableImagePrefetch: true,
-  enableLiveGalleryRefresh: true,
-  defaultFolderTreeView: true,
-};
 
 const isSourceRootRef = (value: string) => value.includes(FOLDER_REF_SEPARATOR) && value.split(FOLDER_REF_SEPARATOR, 2)[1] === "";
 
@@ -83,20 +75,6 @@ const storeUndeliveredWorkflowPayload = (payload: WorkflowPayload) => {
   }
 };
 
-const getStoredUiPreferences = (): UiPreferences => {
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem(UI_PREFERENCES_KEY) || "{}") as Partial<UiPreferences>;
-    return {
-      defaultSelectionMode: typeof parsed.defaultSelectionMode === "boolean" ? parsed.defaultSelectionMode : DEFAULT_UI_PREFERENCES.defaultSelectionMode,
-      collapseSidebarOnLaunch: typeof parsed.collapseSidebarOnLaunch === "boolean" ? parsed.collapseSidebarOnLaunch : DEFAULT_UI_PREFERENCES.collapseSidebarOnLaunch,
-      enableImagePrefetch: typeof parsed.enableImagePrefetch === "boolean" ? parsed.enableImagePrefetch : DEFAULT_UI_PREFERENCES.enableImagePrefetch,
-      enableLiveGalleryRefresh: typeof parsed.enableLiveGalleryRefresh === "boolean" ? parsed.enableLiveGalleryRefresh : DEFAULT_UI_PREFERENCES.enableLiveGalleryRefresh,
-      defaultFolderTreeView: typeof parsed.defaultFolderTreeView === "boolean" ? parsed.defaultFolderTreeView : DEFAULT_UI_PREFERENCES.defaultFolderTreeView,
-    };
-  } catch {
-    return DEFAULT_UI_PREFERENCES;
-  }
-};
 
 function App() {
   const { t } = useI18n();
@@ -108,12 +86,13 @@ function App() {
   const [settingsDirty,setSettingsDirty] = useState(false);
   const [activeTab, setActiveTab] = useState<WorkspaceTab>(initialLocation.tab);
   const [librarySearchTerm, setLibrarySearchTerm] = useState("");
-  const [uiPreferences, setUiPreferences] = useState<UiPreferences>(() => getStoredUiPreferences());
-  const [folderViewMode, setFolderViewMode] = useState<"tree" | "list">(() => getStoredUiPreferences().defaultFolderTreeView ? "tree" : "list");
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    const preferences = getStoredUiPreferences();
-    return typeof window !== "undefined" ? window.innerWidth <= 960 || preferences.collapseSidebarOnLaunch : preferences.collapseSidebarOnLaunch;
-  });
+  const { preferences: uiPreferences, update: saveUiPreferences } = useUiPreferences();
+  const [folderViewMode, setFolderViewMode] = useState<"tree" | "list">(
+    () => uiPreferences.defaultFolderTreeView ? "tree" : "list",
+  );
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(
+    () => window.innerWidth <= 960 || uiPreferences.collapseSidebarOnLaunch,
+  );
   const [galleryDragging,setGalleryDragging] = useState(false);
   const [gallerySelectionModeActive, setGallerySelectionModeActive] = useState(false);
   const [visibleWorkspaceImages, setVisibleWorkspaceImages] = useState<ImageRecord[]>([]);
@@ -129,6 +108,7 @@ function App() {
   const gallery = useGalleryData({
     isActive: activeTab === "gallery",
     liveRefreshEnabled: uiPreferences.enableLiveGalleryRefresh,
+    thumbnailPrewarmEnabled: uiPreferences.enableImagePrefetch,
     initialScope: initialLocation.gallery,
   });
   const libraryDataEnabled = activeTab === "library" || activeTab === "workbench";
@@ -149,17 +129,13 @@ function App() {
   const canUseRawLibraryEditor = library.entryTotal <= 5000;
 
   const updateUiPreferences = (updates: Partial<UiPreferences>) => {
-    setUiPreferences((current) => {
-      const next = { ...current, ...updates };
-      window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(next));
-      if (updates.defaultFolderTreeView !== undefined) {
-        setFolderViewMode(updates.defaultFolderTreeView ? "tree" : "list");
-      }
-      if (updates.collapseSidebarOnLaunch !== undefined && window.innerWidth > 960) {
-        setSidebarCollapsed(updates.collapseSidebarOnLaunch);
-      }
-      return next;
-    });
+    saveUiPreferences(updates);
+    if (updates.defaultFolderTreeView !== undefined) {
+      setFolderViewMode(updates.defaultFolderTreeView ? "tree" : "list");
+    }
+    if (updates.collapseSidebarOnLaunch !== undefined && window.innerWidth > 960) {
+      setSidebarCollapsed(updates.collapseSidebarOnLaunch);
+    }
   };
 
   const confirmDiscardLibraryEdits = useCallback(async () => {

@@ -96,6 +96,9 @@ export function GalleryDensityControl({
           <button type="button" disabled={value >= 8} onClick={() => onChange(value + 1)} aria-label={t("densitySmaller")}><Plus size={16} /></button>
           <output aria-live="polite">{value}</output>
         </div>
+        <button className="ue-density-reset" type="button" disabled={value === 6} onClick={() => onChange(6)}>
+          {t("densityResetDefault")}
+        </button>
       </>}
       <p className="ue-density-note" role="status">
         {effectiveColumns === undefined ? null : <><strong>{t("densityEffectiveColumns", { count: effectiveColumns })}</strong> · </>}

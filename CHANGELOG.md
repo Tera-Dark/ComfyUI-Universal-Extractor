@@ -4,10 +4,27 @@ All notable changes to the ComfyUI Universal Extractor project will be documente
 
 ## Unreleased
 
-- Prevent an updated gallery from sending LoRA stacks to a still-open v1.3 ComfyUI tab: its old bridge ignored Append/Replace and deleted old entries. Probe the chosen tab's LoRA protocol before any write; request a restart and hard refresh if outdated. Check both old and new entries and CLIP values after the upstream asynchronous sync before acknowledging success.
-- Fold **all** CLIP child rows on the target node after Append or Replace, keeping independent CLIP strengths including zero. Preserve unrelated workflow nodes and non-LoRA text.
-- Fix middle-gallery scroll jitter: remove photo hover translation, keep card metadata in one measured row, and default to six desktop columns where space allows. Preserve saved densities and responsive mobile limits.
-- Add a pinned-source LoRA Manager integration CI job (upstream callbacks and widget setter), version-handshake tests, and bidirectional mid-scroll Chromium regression alongside the tail/resize tests. Local tests do not substitute for a user's installed ComfyUI/device validation.
+## 1.5.0 - 2026-09-27
+
+Performance and quality-of-life update. This release also incorporates the previously unpushed LoRA/mid-scroll fixes from the local post-1.4.0 commit.
+
+### Performance and architecture
+
+- Reconcile saved image state against indexed fields; update and rebuild FTS/color helper rows **only for changed images**, not every existing pin/board/note on a single edit. Batch image-path lookups within SQLite's portable parameter limit, including variant fingerprint lookups and prewarming; board counts query only actual board members. A forced Gallery context refresh no longer scans again inside board summaries.
+- Stream live-freshness hashes in a deterministic directory traversal instead of collecting and sorting all image records in memory every polling interval; bound the per-scope freshness cache to the 32 most recently used scopes. Existing gallery views retain their changed-file detection.
+- Lazy-load dual-folder organization, variant grouping, board sharing and metadata viewer; retain the ordinary gallery grid on the direct first-render path. Under the locked local build, entry JS fell from 430.72 to 396.41 kB (121.32 to 112.82 kB reported gzip); optional screens load their own chunks on demand.
+- Extract safe browser preference storage and typed UI-preference handling from the main App; persist after React state updates rather than inside a state updater. No source, workflow or library data migration is performed.
+
+### Quality of life and safety
+
+- Abort obsolete read requests when switching gallery scope or leaving the gallery; defer the image list when starting in another workspace. Honor the existing image-prefetch preference for thumbnail prewarming as well as in-browser prefetch. Surface short plain-text backend errors even if the response is not JSON.
+- Add an explicit desktop density reset to six images per row. Saved custom densities remain unchanged until the user chooses reset; narrower windows still clamp columns. Handle disabled browser localStorage gracefully for gallery, library, folder navigation and preferences.
+- Block updated galleries from sending LoRA stacks to old ComfyUI tabs; verify append/replace and all preserved CLIP strengths against the upstream LoRA Manager callbacks. Fold every CLIP child row on the target without directly modifying other workflow nodes. Previously overwritten entries still require workflow history or backups.
+- Keep middle-gallery bidirectional scrolling stable with non-translating cards and single-line measured metadata, while defaulting new desktop users to six columns where width permits.
+
+### Verification
+
+- Local verification: 108 Python and 204 frontend tests, 17 bridge/pinned-upstream LoRA tests, plus typecheck, lint, i18n, security, release-metadata and rebuilt-dist audits. Isolated Chromium checks passed for desktop/mobile browsing, lazy screens and workspace-scoped loading, blocked storage, middle/bottom/resize scrolling, and LoRA actions/channel compatibility. Fixtures and pinned upstream source are not an installed ComfyUI/LoRA Manager or a user-device acceptance test.
 
 ## 1.4.0 - 2026-09-27
 

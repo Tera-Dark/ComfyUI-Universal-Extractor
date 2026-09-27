@@ -1,3 +1,5 @@
+import { readStorageItem } from "../../utils/safeStorage";
+
 export type ContentViewMode = "grid" | "list";
 
 export const COLOR_FILTERS = [
@@ -30,7 +32,7 @@ export const SORT_ORDER_OPTIONS = [
 ] as const;
 
 export const getStoredViewMode = (key: string, fallback: ContentViewMode): ContentViewMode => {
-  const stored = window.localStorage.getItem(key);
+  const stored = readStorageItem(key);
   return stored === "grid" || stored === "list" ? stored : fallback;
 };
 

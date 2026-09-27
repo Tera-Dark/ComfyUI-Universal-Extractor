@@ -168,6 +168,20 @@ describe("GalleryWorkspace smoke", () => {
     expect(container.querySelector(".ue-live-refresh-pill")).toBeInTheDocument();
   });
 
+  it("still renders the gallery grid when browser preference storage is unavailable", () => {
+    const get = vi.spyOn(Storage.prototype, "getItem").mockImplementation(() => { throw new Error("blocked"); });
+    const set = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => { throw new Error("blocked"); });
+    try {
+      const { container } = renderWorkspace({
+        isTrashView: false, selectedSubfolder: "default_output::", total: 1, images: [galleryImage],
+      });
+      expect(container.querySelector(".ue-gallery-grid--virtual")).toBeInTheDocument();
+    } finally {
+      get.mockRestore();
+      set.mockRestore();
+    }
+  });
+
   it("opens the image context menu without selecting the image outside selection mode", () => {
     const onSelectionChange = vi.fn();
     const onOpenDetail = vi.fn();
@@ -524,7 +538,7 @@ describe("GalleryWorkspace smoke", () => {
       ).length;
 
       fireEvent.click(screen.getByRole("button", { name: "开启双栏目录整理" }));
-      expect(container.querySelector(".ue-dual-workspace")).toBeInTheDocument();
+      await waitFor(() => expect(container.querySelector(".ue-dual-workspace")).toBeInTheDocument());
 
       fireEvent.click(screen.getByRole("button", { name: "关闭双栏目录整理" }));
       await waitFor(() => expect(container.querySelector(".ue-gallery-grid--virtual")).toBeInTheDocument());

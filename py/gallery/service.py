@@ -39,6 +39,7 @@ from ..paths import (
     to_posix,
 )
 from .similarity import near_hash_pairs
+from .sqlite_batch import iter_sqlite_batches
 from .metadata import read_image_metadata
 from .file_transactions import FILE_OPERATION_LOCK, execute_moves
 from . import state_store as _state_store
@@ -117,6 +118,7 @@ NEAR_DUPLICATE_HASH_DISTANCE = 5
 VARIANT_GROUP_SCAN_LIMIT = 2000
 FINGERPRINT_SYNC_LIMIT = 360
 IMAGE_FRESHNESS_CACHE_TTL_SECONDS = 3.0
+IMAGE_FRESHNESS_CACHE_MAX_SCOPES = 32
 GALLERY_INDEX_BUSY_TIMEOUT_MS = _env_positive_int("UNIVERSAL_EXTRACTOR_SQLITE_BUSY_TIMEOUT_MS", 5000)
 GALLERY_INDEX_CORRUPTION_MARKERS = (
     "database disk image is malformed",
@@ -1835,50 +1837,64 @@ def _sync_image_state_to_index_db(connection: sqlite3.Connection, state_map: dic
 
     state_map = state_map if state_map is not None else get_image_state_map()
     previous_paths = _current_state_paths_from_db(connection)
-    current_paths = {normalize_relative_path(path) for path in state_map if normalize_relative_path(path)}
-    cleared_paths = sorted(previous_paths - current_paths)
-    rows = [
-        (
+    desired = {
+        normalize_relative_path(relative_path): (
             str(image_state.get("title", "")),
             str(image_state.get("category", "")),
             str(image_state.get("notes", "")),
             1 if image_state.get("pinned", image_state.get("favorite", False)) else 0,
             _boards_to_search_text(image_state.get("boards", [])),
-            relative_path,
         )
         for relative_path, image_state in state_map.items()
-    ]
-    if rows:
+        if normalize_relative_path(relative_path)
+    }
+    current_paths = set(desired)
+    # The state file can change externally, or contain thousands of already
+    # indexed pins. Compare the existing index before writing: only a changed
+    # row needs an UPDATE and an expensive FTS rebuild. Clearing a removed
+    # state must still reset its old indexed fields.
+    updates: list[tuple[Any, ...]] = []
+    changed_paths: list[str] = []
+    for batch in iter_sqlite_batches(sorted(current_paths | previous_paths)):
+        placeholders = ",".join("?" for _ in batch)
+        indexed_rows = connection.execute(
+            f"""
+            SELECT relative_path, title, category, notes, pinned, boards_text
+            FROM gallery_images WHERE relative_path IN ({placeholders})
+            """,
+            batch,
+        )
+        for row in indexed_rows:
+            relative_path = str(row["relative_path"])
+            expected = desired.get(relative_path, ("", "", "", 0, ""))
+            existing = (
+                str(row["title"]), str(row["category"]), str(row["notes"]),
+                int(row["pinned"]), str(row["boards_text"]),
+            )
+            if existing != expected:
+                updates.append((*expected, relative_path))
+                changed_paths.append(relative_path)
+
+    if updates:
         connection.executemany(
             """
             UPDATE gallery_images
             SET title = ?, category = ?, notes = ?, pinned = ?, boards_text = ?
             WHERE relative_path = ?
             """,
-            rows,
+            updates,
         )
-    if cleared_paths:
-        connection.executemany(
-            """
-            UPDATE gallery_images
-            SET title = '', category = '', notes = '', pinned = 0, boards_text = ''
-            WHERE relative_path = ?
-            """,
-            [(path,) for path in cleared_paths],
-        )
-    affected_paths = sorted(current_paths | set(cleared_paths))
-    if affected_paths:
-        placeholders = ",".join("?" for _ in affected_paths)
-        affected_rows = connection.execute(
-            f"""
-            SELECT relative_path, filename, title, category, notes, color_family, color_families_text,
-                   color_family_scores_json, created_at
-            FROM gallery_images
-            WHERE relative_path IN ({placeholders})
-            """,
-            affected_paths,
-        ).fetchall()
-        _sync_auxiliary_rows(connection, affected_rows)
+        for batch in iter_sqlite_batches(changed_paths):
+            placeholders = ",".join("?" for _ in batch)
+            affected_rows = connection.execute(
+                f"""
+                SELECT relative_path, filename, title, category, notes, color_family, color_families_text,
+                       color_family_scores_json, created_at
+                FROM gallery_images WHERE relative_path IN ({placeholders})
+                """,
+                batch,
+            ).fetchall()
+            _sync_auxiliary_rows(connection, affected_rows)
     _index_meta_set(connection, "gallery_state_mtime", state_mtime)
     _index_meta_set(connection, "gallery_state_digest", state_digest)
     _index_meta_set(connection, "gallery_state_paths_json", json.dumps(sorted(current_paths), ensure_ascii=False))
@@ -2668,12 +2684,18 @@ def _freshness_sources_for_subfolder(
 
 def _scan_image_freshness(sources: list[dict[str, Any]], subfolder: str) -> dict[str, Any]:
     scoped_sources, normalized_subfolder = _freshness_sources_for_subfolder(sources, subfolder)
-    records: list[str] = []
+    digest = hashlib.sha256()
+    digest.update(_source_signature(sources).encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(normalized_subfolder.encode("utf-8"))
     image_count = 0
     latest_created_ns = -1
     latest_created_at = 0
     latest_relative_path = ""
 
+    # A stable traversal order makes the fingerprint independent of filesystem
+    # enumeration order. Hash records as they arrive instead of retaining and
+    # sorting every image in memory on each six-second live refresh.
     for source, relative_scope in scoped_sources:
         if not source.get("enabled", True) or not source.get("exists"):
             continue
@@ -2696,10 +2718,13 @@ def _scan_image_freshness(sources: list[dict[str, Any]], subfolder: str) -> dict
             current_dir = stack.pop()
             try:
                 with os.scandir(current_dir) as iterator:
-                    entries = list(iterator)
+                    entries = sorted(iterator, key=lambda entry: entry.name)
             except (FileNotFoundError, PermissionError, OSError):
                 continue
 
+            relative_dir = os.path.relpath(current_dir, source_root)
+            if relative_dir == ".":
+                relative_dir = ""
             for entry in entries:
                 try:
                     if entry.is_dir(follow_symlinks=False):
@@ -2712,7 +2737,7 @@ def _scan_image_freshness(sources: list[dict[str, Any]], subfolder: str) -> dict
                 except (FileNotFoundError, PermissionError, OSError):
                     continue
 
-                relative_path = normalize_relative_path(os.path.relpath(entry.path, source_root))
+                relative_path = normalize_relative_path(os.path.join(relative_dir, entry.name))
                 image_ref = make_image_ref(source["id"], relative_path)
                 image_count += 1
                 created_ns = getattr(stat, "st_ctime_ns", int(stat.st_ctime * 1_000_000_000))
@@ -2721,15 +2746,8 @@ def _scan_image_freshness(sources: list[dict[str, Any]], subfolder: str) -> dict
                     latest_created_at = int(stat.st_ctime)
                     latest_relative_path = image_ref
                 modified_ns = getattr(stat, "st_mtime_ns", int(stat.st_mtime * 1_000_000_000))
-                records.append(f"{image_ref}\0{stat.st_size}\0{modified_ns}")
-
-    digest = hashlib.sha256()
-    digest.update(_source_signature(sources).encode("utf-8"))
-    digest.update(b"\0")
-    digest.update(normalized_subfolder.encode("utf-8"))
-    for record in sorted(records):
-        digest.update(b"\0")
-        digest.update(record.encode("utf-8", errors="surrogateescape"))
+                digest.update(b"\0")
+                digest.update(f"{image_ref}\0{stat.st_size}\0{modified_ns}".encode("utf-8", errors="surrogateescape"))
 
     return {
         "fingerprint": digest.hexdigest(),
@@ -2753,7 +2771,12 @@ def get_image_freshness(subfolder: str = "", known: str = "") -> dict[str, Any]:
             payload = dict(cached)
         else:
             payload = _scan_image_freshness(sources, subfolder)
-            IMAGE_FRESHNESS_CACHE[cache_key] = dict(payload)
+        # Keep a small LRU of recently visited scopes; navigation through many
+        # source folders should not grow the process cache without bound.
+        IMAGE_FRESHNESS_CACHE.pop(cache_key, None)
+        IMAGE_FRESHNESS_CACHE[cache_key] = dict(payload)
+        while len(IMAGE_FRESHNESS_CACHE) > IMAGE_FRESHNESS_CACHE_MAX_SCOPES:
+            IMAGE_FRESHNESS_CACHE.pop(next(iter(IMAGE_FRESHNESS_CACHE)))
 
     fingerprint = str(payload.get("fingerprint") or "")
     known_fingerprint = str(known or "").strip()
@@ -3088,6 +3111,20 @@ def _fingerprint_row_current(row: sqlite3.Row, fingerprint: sqlite3.Row | None) 
     )
 
 
+def _lookup_fingerprint_rows(connection: sqlite3.Connection, paths: list[str]) -> dict[str, sqlite3.Row]:
+    fingerprints: dict[str, sqlite3.Row] = {}
+    for batch in iter_sqlite_batches(paths):
+        placeholders = ",".join("?" for _ in batch)
+        fingerprints.update({
+            str(row["relative_path"]): row
+            for row in connection.execute(
+                f"SELECT * FROM gallery_image_fingerprints WHERE relative_path IN ({placeholders})",
+                batch,
+            )
+        })
+    return fingerprints
+
+
 def _sync_fingerprints_for_rows(
     connection: sqlite3.Connection,
     rows: list[sqlite3.Row],
@@ -3099,14 +3136,7 @@ def _sync_fingerprints_for_rows(
         return {"queued": 0, "completed": 0, "failed": 0, "last_error": ""}
 
     paths = [str(row["relative_path"]) for row in rows]
-    placeholders = ",".join("?" for _ in paths)
-    existing = {
-        str(row["relative_path"]): row
-        for row in connection.execute(
-            f"SELECT * FROM gallery_image_fingerprints WHERE relative_path IN ({placeholders})",
-            paths,
-        ).fetchall()
-    }
+    existing = _lookup_fingerprint_rows(connection, paths)
     stale_rows = [row for row in rows if not _fingerprint_row_current(row, existing.get(str(row["relative_path"])))]
     queued = len(stale_rows)
     completed = 0
@@ -3180,14 +3210,7 @@ def _rows_with_fingerprints(connection: sqlite3.Connection, rows: list[sqlite3.R
         return []
     by_path = {str(row["relative_path"]): row for row in rows}
     paths = list(by_path)
-    placeholders = ",".join("?" for _ in paths)
-    fingerprints = {
-        str(row["relative_path"]): row
-        for row in connection.execute(
-            f"SELECT * FROM gallery_image_fingerprints WHERE relative_path IN ({placeholders})",
-            paths,
-        ).fetchall()
-    }
+    fingerprints = _lookup_fingerprint_rows(connection, paths)
     return [
         {
             "row": row,
@@ -3466,20 +3489,21 @@ def prewarm_image_fingerprints(
     source_by_id = {source["id"]: source for source in sources}
     with _connect_gallery_index_db() as connection:
         if relative_paths:
-            normalized_paths = [normalize_relative_path(path) for path in relative_paths if normalize_relative_path(path)]
-            if normalized_paths:
-                placeholders = ",".join("?" for _ in normalized_paths)
-                rows = connection.execute(
+            normalized_paths = list(dict.fromkeys(
+                normalize_relative_path(path) for path in relative_paths if normalize_relative_path(path)
+            ))
+            rows = []
+            for batch in iter_sqlite_batches(normalized_paths):
+                placeholders = ",".join("?" for _ in batch)
+                rows.extend(connection.execute(
                     f"""
                     SELECT {_image_row_select_sql()}
                     FROM gallery_images
                     WHERE relative_path IN ({placeholders})
-                    ORDER BY created_at DESC
                     """,
-                    normalized_paths,
-                ).fetchall()
-            else:
-                rows = []
+                    batch,
+                ).fetchall())
+            rows.sort(key=lambda row: int(row["created_at"]), reverse=True)
         else:
             rows = _query_filtered_image_rows(
                 connection,
@@ -3567,31 +3591,35 @@ def list_boards(force_refresh: bool = False) -> list[dict[str, Any]]:
     image_states = get_image_state_map()
     board_counts: dict[str, int] = {board_id: 0 for board_id in boards}
     first_cover_by_board: dict[str, str] = {}
-    state_paths = sorted(image_states)
-    existing_paths: list[str] = []
-    if state_paths and os.path.exists(GALLERY_INDEX_DB_FILE):
+    # Only stored board members need an existence check. Chunk the indexed
+    # lookups so a gallery with many boards works on SQLite's 999-bind builds.
+    # Do not scan every gallery_images row when boards are sparse.
+    board_paths = [
+        path for path, state in image_states.items()
+        if any(board_id in boards for board_id in state.get("boards", []))
+    ]
+    if boards and os.path.exists(GALLERY_INDEX_DB_FILE):
+        rows: list[sqlite3.Row] = []
         with _connect_gallery_index_db() as connection:
             _sync_image_state_to_index_db(connection, image_states)
-            placeholders = ",".join("?" for _ in state_paths)
-            rows = connection.execute(
-                f"""
-                SELECT relative_path
-                FROM gallery_images
-                WHERE relative_path IN ({placeholders})
-                ORDER BY created_at DESC
-                """,
-                state_paths,
-            ).fetchall()
+            for batch in iter_sqlite_batches(board_paths):
+                placeholders = ",".join("?" for _ in batch)
+                rows.extend(connection.execute(
+                    f"SELECT relative_path, created_at FROM gallery_images WHERE relative_path IN ({placeholders})",
+                    batch,
+                ).fetchall())
             connection.commit()
-        existing_paths = [str(row["relative_path"]) for row in rows]
-
-    for relative_path in existing_paths:
-        image_state = image_states.get(relative_path, default_image_state())
-        for board_id in image_state.get("boards", []):
-            if board_id not in boards:
+        rows.sort(key=lambda row: int(row["created_at"]), reverse=True)
+        for row in rows:
+            relative_path = str(row["relative_path"])
+            image_state = image_states.get(relative_path)
+            if not image_state:
                 continue
-            board_counts[board_id] = board_counts.get(board_id, 0) + 1
-            first_cover_by_board.setdefault(board_id, relative_path)
+            for board_id in image_state.get("boards", []):
+                if board_id not in boards:
+                    continue
+                board_counts[board_id] += 1
+                first_cover_by_board.setdefault(board_id, relative_path)
 
     summaries = []
     for board_id, board in boards.items():
@@ -3676,7 +3704,7 @@ def get_gallery_context(force_refresh: bool = False) -> dict:
         "active_source_count": sum(1 for source in indexed_sources if source.get("enabled") and source.get("exists")),
         "pinned_count": pinned_count,
         "color_index_status": get_color_index_status(),
-        "boards": list_boards(force_refresh=force_refresh),
+        "boards": list_boards(force_refresh=False),
     }
 
 

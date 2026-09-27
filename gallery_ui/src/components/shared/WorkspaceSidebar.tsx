@@ -26,6 +26,7 @@ import {
 import { useI18n } from "../../i18n/I18nProvider";
 import type { BoardSummary, GalleryContext, GallerySource, LibraryInfo, WorkspaceTab } from "../../types/universal-gallery";
 import { FloatingLayerPortal, placeMenuForEvent, useDismissableLayer } from "../../utils/interaction";
+import { writeStorageItem } from "../../utils/safeStorage";
 import {
   buildFolderTree,
   collectFolderSearchPaths,
@@ -298,11 +299,11 @@ export const WorkspaceSidebar = ({
   const folderSearchActive = folderSearchQuery.trim().length > 0;
 
   useEffect(() => {
-    window.localStorage.setItem(PINNED_FOLDERS_STORAGE_KEY, JSON.stringify([...pinnedFolderPaths]));
+    writeStorageItem(PINNED_FOLDERS_STORAGE_KEY, JSON.stringify([...pinnedFolderPaths]));
   }, [pinnedFolderPaths]);
 
   useEffect(() => {
-    window.localStorage.setItem(FOLDER_SORT_STORAGE_KEY, folderSortMode);
+    writeStorageItem(FOLDER_SORT_STORAGE_KEY, folderSortMode);
   }, [folderSortMode]);
 
   const closeFolderContextMenu = useCallback(() => setFolderContextMenu(null), []);

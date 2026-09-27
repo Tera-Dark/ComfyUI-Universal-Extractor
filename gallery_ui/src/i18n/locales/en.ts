@@ -47,6 +47,7 @@ const en = {
   densityLarger: "Larger thumbnails",
   densitySmaller: "Smaller thumbnails",
   densityResponsiveNote: "This is the maximum per row. Narrow windows automatically use fewer columns.",
+  densityResetDefault: "Reset to default (6 per row)",
   tourClose: "Close tour",
   tourDensityTitle: "Choose a comfortable grid",
   tourDensityBody: "Open Density for Spacious, Balanced or Compact cards, or fine-tune with the slider. Changes apply instantly; smaller screens adapt automatically.",

@@ -40,6 +40,9 @@ describe("gallery density control",()=>{
     await user.click(screen.getByRole("button",{name:/宽松/}));
     expect(screen.getByRole("slider")).toHaveValue("3");
     expect(screen.getByRole("button",{name:"放大缩略图"})).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "恢复默认（每行 6 张）" }));
+    expect(screen.getByRole("slider")).toHaveValue("6");
+    expect(screen.getByRole("button", { name: "恢复默认（每行 6 张）" })).toBeDisabled();
   });
   it("dismisses with Escape and restores the trigger focus",async()=>{
     const user=userEvent.setup();render(<Harness/>);

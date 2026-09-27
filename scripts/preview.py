@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import random
+import re
 import sys
 import tempfile
 import time
@@ -79,7 +80,8 @@ for index in range(18):
 ], ensure_ascii=False))
 
 async def preview_updates(force=False):
-    return {"current_version": "1.4.0", "latest_version": "1.4.0", "update_available": False,
+    version = re.search(r'^version\s*=\s*"([^"]+)"', (root / "pyproject.toml").read_text(), re.M)[1]
+    return {"current_version": version, "latest_version": version, "update_available": False,
             "published_at": None, "release_notes": "", "has_remote_check": False,
             "checked_at": int(time.time()), "error": None, "repository_url": "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor", "release_url": ""}
 routes.check_update_status = preview_updates

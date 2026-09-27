@@ -138,6 +138,43 @@ describe("useGalleryData live refresh", () => {
     saved.unmount();
   });
 
+  it("defers image loading on another workspace and honors disabled thumbnail prewarming", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
+    const { rerender } = renderHook(
+      ({ active }) => useGalleryData({ isActive: active, liveRefreshEnabled: false, thumbnailPrewarmEnabled: false }),
+      { initialProps: { active: false }, wrapper },
+    );
+    await flushAsyncEffects();
+    expect(galleryApi.getContext).toHaveBeenCalled();
+    expect(galleryApi.listImages).not.toHaveBeenCalled();
+    rerender({ active: true });
+    await flushAsyncEffects();
+    expect(galleryApi.listImages).toHaveBeenCalledTimes(1);
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(galleryApi.prewarmThumbnails).not.toHaveBeenCalled();
+  });
+
+  it("aborts obsolete browse-scope requests while keeping the newer result", async () => {
+    const stale = deferred<ImageListResponse>();
+    vi.mocked(galleryApi.listImages).mockImplementationOnce(() => stale.promise)
+      .mockResolvedValue(imagePage("new", 1));
+    const { result, unmount } = renderHook(
+      () => useGalleryData({ isActive: true, liveRefreshEnabled: false }), { wrapper },
+    );
+    await flushAsyncEffects();
+    const firstSignal = vi.mocked(galleryApi.listImages).mock.calls[0][13] as AbortSignal;
+    expect(firstSignal.aborted).toBe(false);
+    act(() => result.current.setSelectedSubfolder("default_input::"));
+    await flushAsyncEffects();
+    expect(firstSignal.aborted).toBe(true);
+    const nextSignal = vi.mocked(galleryApi.listImages).mock.calls.at(-1)?.[13] as AbortSignal;
+    expect(nextSignal.aborted).toBe(false);
+    await act(async () => { stale.resolve(imagePage("stale", 1)); });
+    expect(result.current.images[0]?.filename).toBe("image-new.png");
+    unmount();
+    expect(nextSignal.aborted).toBe(true);
+  });
+
   it("normalizes the default output API import path for a stable folder URL", async () => {
     vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
     vi.mocked(galleryApi.importFiles).mockResolvedValue({
@@ -230,11 +267,11 @@ describe("useGalleryData live refresh", () => {
     });
     await flushAsyncEffects();
 
-    expect(galleryApi.getImageFreshness).toHaveBeenCalledWith("default_output::", "");
+    expect(galleryApi.getImageFreshness).toHaveBeenCalledWith("default_output::", "", expect.any(AbortSignal));
     expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforeInterval + 1);
     expect(result.current.images[0]?.filename).toBe("image-refresh.png");
     expect(result.current.total).toBe(2);
-    expect(vi.mocked(galleryApi.listImages).mock.calls.at(-1)?.at(-1)).toBe(true);
+    expect(vi.mocked(galleryApi.listImages).mock.calls.at(-1)?.[12]).toBe(true);
   });
 
   it("defers new-first-page images while the user is scrolled down", async () => {
@@ -342,7 +379,7 @@ describe("useGalleryData live refresh", () => {
       await vi.advanceTimersByTimeAsync(6_000);
     });
     await flushAsyncEffects();
-    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "");
+    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "", expect.any(AbortSignal));
 
     await act(async () => {
       result.current.setPage(2);
@@ -352,7 +389,7 @@ describe("useGalleryData live refresh", () => {
       await vi.advanceTimersByTimeAsync(6_000);
     });
     await flushAsyncEffects();
-    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "");
+    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "", expect.any(AbortSignal));
 
     await act(async () => {
       result.current.setPage(1);
@@ -362,7 +399,7 @@ describe("useGalleryData live refresh", () => {
       await vi.advanceTimersByTimeAsync(6_000);
     });
     await flushAsyncEffects();
-    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "page-1");
+    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "page-1", expect.any(AbortSignal));
   });
 
   it("does not schedule live refresh when the preference is disabled", async () => {
