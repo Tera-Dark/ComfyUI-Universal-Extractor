@@ -1,4 +1,5 @@
 import { useVariantRequests } from "../../hooks/useVariantRequests";
+import { useGallerySelection } from "./useGallerySelection";
 import { preferredScrollBehavior } from "../../utils/imageLoading";
 import { readStorageItem, writeStorageItem } from "../../utils/safeStorage";
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -47,7 +48,7 @@ import { CategoryPickerModal } from "./CategoryPickerModal";
 import { GalleryMainContent } from "./GalleryMainContent";
 import { GalleryToolbar } from "./GalleryToolbar";
 import { prefetchGalleryImage } from "./galleryImagePrefetch";
-import { dedupeVisibleSelection, getIntersectingSelectionKeys, selectPathRange, togglePathSelection, type RectLike, type SelectionBoxState } from "./gallerySelectionModel";
+import { dedupeVisibleSelection, getIntersectingSelectionKeys, type RectLike, type SelectionBoxState } from "./gallerySelectionModel";
 import { getActiveFilterControlCount, getStoredViewMode, type ContentViewMode } from "./galleryWorkspaceModel";
 import { TrashWorkspaceView } from "./TrashWorkspaceView";
 import { estimateMasonryCardHeight, useVirtualMasonry } from "./useVirtualMasonry";
@@ -257,7 +258,6 @@ export const GalleryWorkspace = ({
   const selectionBoxCardRectsRef = useRef<Record<string, RectLike>>({});
   const selectionBoxStartScrollTopRef = useRef(0);
   const selectionBoxAppendRef = useRef(false);
-  const lastSelectedPathRef = useRef<string>("");
   const scrollContainerRef = useRef<HTMLElement | null>(null);
 
   const activeImages = variantMode && selectedVariantGroup ? variantImages : images;
@@ -558,55 +558,9 @@ export const GalleryWorkspace = ({
     }
   };
 
-  const setSelection = useCallback((relativePaths: string[]) => {
-    const dedupedPaths = dedupeVisibleSelection(relativePaths, visibleSelectionPaths);
-    onSelectionChange(dedupedPaths);
-  }, [onSelectionChange, visibleSelectionPaths]);
-
-  const toggleSelection = (relativePath: string, preserveAnchor = false) => {
-    setSelection(togglePathSelection(pageSelectedPaths, relativePath));
-    if (!preserveAnchor) {
-      lastSelectedPathRef.current = relativePath;
-    }
-  };
-
-  const selectRangeTo = (relativePath: string) => {
-    const anchorPath = lastSelectedPathRef.current || pageSelectedPaths[pageSelectedPaths.length - 1] || relativePath;
-    setSelection(selectPathRange({
-      anchorPath,
-      targetPath: relativePath,
-      selectedPaths: pageSelectedPaths,
-      visibleSelectionPaths,
-    }));
-    lastSelectedPathRef.current = anchorPath;
-  };
-
-  const handleImageSelectionClick = (
-    relativePath: string,
-    event?: Pick<React.MouseEvent, "shiftKey" | "ctrlKey" | "metaKey">,
-  ) => {
-    if (event?.shiftKey) {
-      selectRangeTo(relativePath);
-      return;
-    }
-
-    if (event?.ctrlKey || event?.metaKey) {
-      toggleSelection(relativePath);
-      return;
-    }
-
-    toggleSelection(relativePath);
-  };
-
-  const selectAllVisible = useCallback(() => {
-    setSelection(visibleSelectionPaths);
-    lastSelectedPathRef.current = visibleSelectionPaths[0] || "";
-  }, [setSelection, visibleSelectionPaths]);
-
-  const clearSelection = useCallback(() => {
-    onSelectionChange([]);
-    lastSelectedPathRef.current = "";
-  }, [onSelectionChange]);
+  const { setSelection, handleImageSelectionClick, selectAllVisible, clearSelection, lastSelectedPathRef } = useGallerySelection({
+    visibleSelectionPaths, pageSelectedPaths, onSelectionChange,
+  });
 
   const variantQuery = useMemo(
     () => ({
@@ -729,7 +683,7 @@ export const GalleryWorkspace = ({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [activeImages, clearSelection, isTrashView, openActiveDetail, selectedImagePaths, selectAllVisible, selectionMode]);
+  }, [activeImages, clearSelection, isTrashView, openActiveDetail, selectedImagePaths, selectAllVisible, selectionMode, lastSelectedPathRef]);
 
   const handleBatchDelete = async () => {
     if (!hasSelection) {

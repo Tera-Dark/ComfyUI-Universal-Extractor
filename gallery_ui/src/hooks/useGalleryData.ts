@@ -1,12 +1,12 @@
 import { useGalleryRefresh } from "./useGalleryRefresh";
-import { applyBatchImageState } from "./galleryBatchState";
+import { useGalleryQueries } from "./useGalleryQueries";
+import { useGalleryBatchOperations } from "./useGalleryBatchOperations";
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "../i18n/I18nProvider";
 import { galleryApi } from "../services/galleryApi";
-import type { BoardSummary, ColorIndexStatus, DetailNavigationState, GalleryContext, ImageRecord, MoveTargetOption, TrashItem } from "../types/universal-gallery";
+import type { BoardSummary, DetailNavigationState, GalleryContext, ImageRecord, MoveTargetOption, TrashItem } from "../types/universal-gallery";
 import { PAGE_SIZE } from "../utils/formatters";
-import { getDeleteOutcome, getMoveOutcome } from "../utils/galleryOperationResults";
 import { readStorageItem, writeStorageItem } from "../utils/safeStorage";
 import type { GalleryUrlScope } from "../utils/workspaceLocation";
 
@@ -18,16 +18,6 @@ const LIVE_GALLERY_REFRESH_FOCUS_DEBOUNCE_MS = 4_000;
 const INITIAL_THUMBNAIL_PREWARM_LIMIT = 24;
 const EMPTY_IMAGES: ImageRecord[] = [];
 const EMPTY_TRASH: TrashItem[] = [];
-
-const normalizeUpdatedPaths = (value: unknown, fallback: string[]) => {
-  if (Array.isArray(value)) {
-    return value.filter((path): path is string => typeof path === "string");
-  }
-  if (typeof value === "string") {
-    return [value];
-  }
-  return fallback;
-};
 
 interface UseGalleryDataOptions {
   isActive?: boolean;
@@ -49,10 +39,6 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const liveRefreshEnabled = options.liveRefreshEnabled ?? true;
   const thumbnailPrewarmEnabled = options.thumbnailPrewarmEnabled ?? true;
   const { t } = useI18n();
-  const [images, setImages] = useState<ImageRecord[]>([]);
-  const [context, setContext] = useState<GalleryContext | null>(null);
-  const [colorIndexStatus, setColorIndexStatus] = useState<ColorIndexStatus | null>(null);
-  const [total, setTotal] = useState(0);
   const [page, setPage] = useState(() => options.initialScope?.page ?? 1);
   const [searchTerm, setSearchTerm] = useState(() => options.initialScope?.query ?? "");
   const [selectedCategory, setSelectedCategory] = useState(() => options.initialScope?.category ?? "");
@@ -71,23 +57,15 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     // the masonry hook and mobile preset still clamp columns to actual width.
     return Number.isFinite(parsed) && parsed >= 3 && parsed <= 8 ? parsed : 6;
   });
-  const [isLoading, setIsLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [hasPendingLiveRefresh, setHasPendingLiveRefresh] = useState(false);
   const [selectedImage, setSelectedImage] = useState<ImageRecord | null>(null);
   const [detailNavigation, setDetailNavigation] = useState<DetailNavigationState | null>(null);
   const [selectedImagePaths, setSelectedImagePaths] = useState<string[]>([]);
-  const [trashItems, setTrashItems] = useState<TrashItem[]>([]);
   const [importMessage, setImportMessage] = useState("");
   const [importFolderRef, setImportFolderRef] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const refreshSequenceRef = useRef(0);
   const { completeRefreshPart, waitForRefresh } = useGalleryRefresh(t("galleryRefreshInterrupted"));
-  const hasLoadedImagesRef = useRef(false);
-  const hasLoadedTrashRef = useRef(false);
-  const consumedContextRefreshKeyRef = useRef(0);
-  const consumedImagesRefreshKeyRef = useRef(0);
   const liveRefreshRunningRef = useRef(false);
   const lastLiveRefreshAtRef = useRef(0);
   const liveRefreshFingerprintsRef = useRef<Map<string, string>>(new Map());
@@ -103,8 +81,6 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const isTrashView = selectedSubfolder === TRASH_SUBFOLDER_KEY;
   // A response belongs to one exact browse scope. Never expose the previous
   // source/page's actionable cards under a newly selected scope.
-  const [loadedViewKey, setLoadedViewKey] = useState<string | null>(null);
-  const loadedViewKeyRef = useRef<string | null>(null);
   const liveRefreshViewKey = useMemo(
     () =>
       JSON.stringify({
@@ -169,158 +145,9 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     writeStorageItem("universal-extractor:grid-columns", String(gridColumns));
   }, [gridColumns]);
 
-  useEffect(() => {
-    let isCancelled = false;
-    const controller = new AbortController();
-    const shouldForceRefresh = refreshKey > 0 && consumedContextRefreshKeyRef.current !== refreshKey;
-    if (shouldForceRefresh) {
-      consumedContextRefreshKeyRef.current = refreshKey;
-    }
-
-    const loadContext = async () => {
-      let requestError: Error | undefined;
-      try {
-        const contextResponse = await galleryApi.getContext(shouldForceRefresh, controller.signal);
-        if (isCancelled) {
-          return;
-        }
-        setContext(contextResponse);
-        setColorIndexStatus(contextResponse.color_index_status ?? null);
-        if (contextResponse.index_error || contextResponse.catalog_error) {
-          const message = contextResponse.index_error || contextResponse.catalog_error || t("galleryLoading");
-          setError(message);
-          requestError = new Error(message);
-        }
-      } catch (fetchError) {
-        if (!isCancelled) {
-          requestError = fetchError instanceof Error ? fetchError : new Error(t("galleryLoading"));
-          setError(requestError.message);
-        }
-      } finally {
-        if (!isCancelled) completeRefreshPart(refreshKey, "context", requestError);
-      }
-    };
-
-    void loadContext();
-
-    return () => {
-      isCancelled = true;
-      controller.abort();
-      if (shouldForceRefresh) completeRefreshPart(refreshKey, "context", new Error(t("galleryRefreshInterrupted")));
-    };
-  }, [completeRefreshPart, refreshKey, t]);
-
-  useEffect(() => {
-    let isCancelled = false;
-    const controller = new AbortController();
-    const shouldForceRefresh = refreshKey > 0 && consumedImagesRefreshKeyRef.current !== refreshKey;
-    // Library/workbench entry only needs context for the sidebar. Do not load
-    // the image page until Gallery is opened; Settings manual refresh still
-    // deliberately loads it and can await both requests.
-    if (!isActive && !shouldForceRefresh) return;
-    if (shouldForceRefresh) {
-      consumedImagesRefreshKeyRef.current = refreshKey;
-    }
-
-    const hasLoadedCurrentView = loadedViewKeyRef.current === liveRefreshViewKey;
-    if (hasLoadedCurrentView) {
-      setIsRefreshing(true);
-    } else {
-      setIsLoading(true);
-      setIsRefreshing(false);
-    }
-    setError(null);
-
-    const loadImages = async () => {
-      let requestError: Error | undefined;
-      let loadedCurrentImages = false;
-      try {
-        if (isTrashView) {
-          const items = await galleryApi.listTrash(controller.signal);
-          if (isCancelled) {
-            return;
-          }
-          setTrashItems(items);
-          setTotal(items.length);
-          return;
-        }
-
-        const imageResponse = await galleryApi.listImages(
-          page,
-          PAGE_SIZE,
-          deferredSearchTerm,
-          selectedCategory,
-          selectedSubfolder,
-          selectedBoardId,
-          dateFrom,
-          dateTo,
-          favoritesOnly,
-          selectedColorFamily,
-          sortBy,
-          sortOrder,
-          shouldForceRefresh,
-          controller.signal,
-        );
-
-        if (isCancelled) {
-          return;
-        }
-
-        setImages(imageResponse.images ?? []);
-        loadedCurrentImages = true;
-        setTrashItems([]);
-        setTotal(imageResponse.total ?? 0);
-        setColorIndexStatus(imageResponse.color_index_status ?? null);
-        if (imageResponse.index_error) {
-          setError(imageResponse.index_error);
-          requestError = new Error(imageResponse.index_error);
-        }
-        if (shouldForceRefresh) {
-          const contextResponse = await galleryApi.getContext(false, controller.signal);
-          if (!isCancelled) {
-            setContext(contextResponse);
-            setColorIndexStatus(contextResponse.color_index_status ?? imageResponse.color_index_status ?? null);
-            if (contextResponse.index_error) {
-              setError(contextResponse.index_error);
-              requestError = new Error(contextResponse.index_error);
-            }
-          }
-        }
-        if (!isCancelled) scheduleThumbnailPrewarm(imageResponse.images ?? []);
-      } catch (fetchError) {
-        if (!isCancelled) {
-          if (!hasLoadedCurrentView && !loadedCurrentImages) {
-            setImages([]);
-            setTrashItems([]);
-            setTotal(0);
-          }
-          requestError = fetchError instanceof Error ? fetchError : new Error(t("galleryLoading"));
-          setError(requestError.message);
-        }
-      } finally {
-        if (!isCancelled) {
-          completeRefreshPart(refreshKey, "images", requestError);
-          loadedViewKeyRef.current = liveRefreshViewKey;
-          setLoadedViewKey(liveRefreshViewKey);
-          if (isTrashView) {
-            hasLoadedTrashRef.current = true;
-          } else {
-            hasLoadedImagesRef.current = true;
-          }
-          setIsLoading(false);
-          setIsRefreshing(false);
-        }
-      }
-    };
-
-    void loadImages();
-
-    return () => {
-      isCancelled = true;
-      controller.abort();
-      if (shouldForceRefresh) completeRefreshPart(refreshKey, "images", new Error(t("galleryRefreshInterrupted")));
-    };
-  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, t, isTrashView, isActive, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart]);
+  const { images, setImages, context, setContext, colorIndexStatus, setColorIndexStatus, total, setTotal, isLoading, isRefreshing, error, trashItems, hasLoadedImagesRef, loadedViewKey } = useGalleryQueries({
+    page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, isTrashView, isActive, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart
+  });
 
   useEffect(() => {
     if (!liveRefreshEnabled || !isActive || isTrashView) {
@@ -433,6 +260,10 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     sortOrder,
     liveRefreshViewKey,
     scheduleThumbnailPrewarm,
+    setColorIndexStatus,
+    setContext,
+    setImages,
+    setTotal,
   ]);
 
   useEffect(() => {
@@ -451,7 +282,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
         .catch(() => undefined);
     }, 5000);
     return () => window.clearInterval(interval);
-  }, [colorIndexStatus, isTrashView, isActive]);
+  }, [colorIndexStatus, isTrashView, isActive, setColorIndexStatus]);
 
   const triggerRefresh = useCallback(() => {
     const key = ++refreshSequenceRef.current;
@@ -463,7 +294,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   useEffect(() => {
     if (!liveRefreshEnabled || !isActive || isTrashView || !hasLoadedImagesRef.current) return;
     triggerRefresh();
-  }, [liveRefreshEnabled, isActive, isTrashView, triggerRefresh]);
+  }, [liveRefreshEnabled, isActive, isTrashView, triggerRefresh, hasLoadedImagesRef]);
 
   const applyUrlScope = (next: GalleryUrlScope) => {
     setPage(next.page);
@@ -559,113 +390,10 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     }
   };
 
-  const batchUpdateImages = async (relativePaths: string[], updates: Record<string, unknown>) => {
-    const shouldOptimisticallyPatchPin = "pinned" in updates || "favorite" in updates;
-    const relativePathSet = new Set(relativePaths);
-    const previousImages = new Map<string, ImageRecord>();
-    const previousSelectedImage = selectedImage;
-    if (shouldOptimisticallyPatchPin) {
-      const nextPinned = Boolean(updates.pinned ?? updates.favorite);
-      setImages((current) =>
-        current.map((image) => {
-          if (!relativePathSet.has(image.relative_path)) {
-            return image;
-          }
-          previousImages.set(image.relative_path, image);
-          return { ...image, favorite: nextPinned, pinned: nextPinned };
-        }),
-      );
-      setSelectedImage((current) =>
-        current && relativePathSet.has(current.relative_path)
-          ? { ...current, favorite: nextPinned, pinned: nextPinned }
-          : current,
-      );
-    }
-
-    let response: Awaited<ReturnType<typeof galleryApi.batchUpdateImages>>;
-    try {
-      response = await galleryApi.batchUpdateImages(relativePaths, updates);
-    } catch (error) {
-      if (previousImages.size > 0) {
-        setImages((current) =>
-          current.map((image) => previousImages.get(image.relative_path) ?? image),
-        );
-      }
-      setSelectedImage(previousSelectedImage);
-      throw error;
-    }
-    const normalizedUpdatedPaths = normalizeUpdatedPaths(response.updated, relativePaths);
-    applyContextPatch((current) => ({
-      ...current,
-      categories: response.categories ?? current.categories,
-      boards: response.boards ?? current.boards,
-      pinned_count: shouldOptimisticallyPatchPin
-        ? Math.max(
-            0,
-            current.pinned_count +
-              normalizedUpdatedPaths.reduce((delta, path) => {
-                const previous = previousImages.get(path);
-                if (!previous || !response.last_state || typeof response.last_state.pinned !== "boolean") {
-                  return delta;
-                }
-                return delta + (response.last_state.pinned ? 1 : 0) - (previous.pinned ? 1 : 0);
-              }, 0),
-          )
-        : current.pinned_count,
-    }));
-    const updatedPaths = new Set(normalizedUpdatedPaths);
-    setImages((current) => current.map((image) => updatedPaths.has(image.relative_path)
-      ? applyBatchImageState(image, response, updates) : previousImages.get(image.relative_path) ?? image));
-    setSelectedImage((current) => current && updatedPaths.has(current.relative_path)
-        ? applyBatchImageState(current, response, updates)
-        : current && previousSelectedImage?.relative_path === current.relative_path && relativePathSet.has(current.relative_path)
-          ? previousSelectedImage : current);
-    setSelectedImagePaths((current) => current.filter((path) => !updatedPaths.has(path)));
-    if (deferredSearchTerm.trim() || selectedCategory || selectedBoardId || favoritesOnly) {
-      refresh();
-    }
-    return response;
-  };
-
-  const moveImages = async (relativePaths: string[], targetSubfolder: string, targetSourceId = "") => {
-    const response = await galleryApi.moveImages(relativePaths, targetSubfolder, targetSourceId);
-    if (!response.ok) throw new Error(t("dual_moveError"));
-    applyContextPatch((current) => ({
-      ...current,
-      categories: response.categories ?? current.categories,
-      subfolders: response.subfolders ?? current.subfolders,
-    }));
-    const { movedSources } = getMoveOutcome(relativePaths, response);
-    setSelectedImagePaths((current) => current.filter((path) => !movedSources.has(path)));
-    refresh();
-    return response;
-  };
-
-  const batchRenameImages = async (
-    relativePaths: string[],
-    template: string,
-    startNumber: number,
-    padding: number,
-    currentPage: number,
-  ) => {
-    const response = await galleryApi.batchRenameImages(relativePaths, template, startNumber, padding, currentPage);
-    setSelectedImagePaths([]);
-    refresh();
-    return response;
-  };
-
-  const deleteImages = async (relativePaths: string[]) => {
-    const response = await galleryApi.deleteImages(relativePaths);
-    if (!response.ok) throw new Error(t("dual_deleteError"));
-    applyContextPatch((current) => ({
-      ...current,
-      categories: response.categories ?? current.categories,
-    }));
-    const { deletedPaths } = getDeleteOutcome(relativePaths, response);
-    setSelectedImagePaths((current) => current.filter((path) => !deletedPaths.has(path)));
-    refresh();
-    return response;
-  };
+  const { batchUpdateImages, moveImages, batchRenameImages, deleteImages } = useGalleryBatchOperations({
+    selectedImage, setImages, setSelectedImage, setSelectedImagePaths, applyContextPatch, refresh,
+    stateFiltersActive: Boolean(deferredSearchTerm.trim() || selectedCategory || selectedBoardId || favoritesOnly),
+  });
 
   const renameImage = async (relativePath: string, newFilename: string) => {
     const response = await galleryApi.renameImage(relativePath, newFilename);
