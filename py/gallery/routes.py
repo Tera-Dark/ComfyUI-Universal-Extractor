@@ -103,6 +103,8 @@ async def run_gallery_task(function, *args, **kwargs):
     result = await execute(runtime, function, *args, lane=lane, **kwargs)
     if lane == "write" and runtime.env.IMAGE_INDEX_CACHE.get("dirty"):
         await runtime.prepare_index()
+        if isinstance(result, dict) and "subfolders" in result:
+            result["subfolders"] = await execute(runtime, gallery_service.collect_subfolders, gallery_service.get_output_dir())
     return result
 
 

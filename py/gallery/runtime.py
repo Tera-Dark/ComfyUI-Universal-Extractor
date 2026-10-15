@@ -61,6 +61,13 @@ class GalleryRuntime:
         context.scan_generation = self.require_catalog().generation()
         context.checkpoint(0, 1)
         self.env.ensure_image_index_db_current(force_refresh=payload.get("force", True), scope=payload.get("subfolder", ""))
+        with self.env._connect_gallery_index_db() as db:
+            folders_ready = self.env._index_meta_get(db, "folder_snapshot_version") == "1"
+        if not folders_ready:
+            # Upgrade can serve existing image rows first; discover empty
+            # directories in the scan lane without blocking the first response.
+            self.get_jobs().enqueue("refresh_index", {"force": True, "subfolder": "", "_folder_snapshot": True,
+                                                      "_generation": self.require_catalog().generation()})
         sources = self.env.list_gallery_sources()
         signature = self.env._source_signature(sources)
         self.env._schedule_dimension_backfill(sources, signature)

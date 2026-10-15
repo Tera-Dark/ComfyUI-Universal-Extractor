@@ -344,6 +344,22 @@ async def test_analysis_cannot_block_committed_list(isolated_gallery_env):
         await asyncio.wrap_future(jobs.future(job["id"]))
 
 
+@pytest.mark.anyio
+async def test_hot_context_uses_folder_snapshot_without_traversal(isolated_gallery_env, monkeypatch):
+    from py.gallery.execution import execute
+    env = isolated_gallery_env
+    (env.output_dir / "empty-folder").mkdir()
+    (env.output_dir / ".ue-uploads" / "session").mkdir(parents=True)
+    runtime = env.service.get_runtime()
+    await runtime.prepare_index()
+    def forbidden_scan(path):
+        raise AssertionError("hot context must not traverse directories")
+    monkeypatch.setattr(env.service.os, "scandir", forbidden_scan)
+    context = await execute(runtime, env.service.get_gallery_context)
+    assert "default_output::empty-folder" in context["subfolders"]
+    assert not any(".ue-uploads" in folder for folder in context["subfolders"])
+
+
 def test_persistent_jobs_recover_and_deduplicate(tmp_path):
     from concurrent.futures import ThreadPoolExecutor
     from py.gallery.catalog import Catalog

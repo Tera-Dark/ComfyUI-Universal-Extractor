@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
 from .environment import SOURCE_SNAPSHOT
+from .execution import QUERY_ONLY, DEFER_INDEX_REFRESH
 
 def _default_gallery_sources(env) -> list[dict[str, Any]]:
     output_dir = env.get_output_dir()
@@ -441,8 +442,26 @@ def _merge_subfolder_refs(env, *groups: set[str]) -> set[str]:
     return set(merged.values())
 
 
+class FolderSnapshot(dict):
+    def __init__(self):
+        super().__init__()
+        self.failed_sources = set()
+
+
 def _collect_directory_subfolder_details(env, sources: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
-    subfolders: dict[str, dict[str, Any]] = {}
+    subfolders = FolderSnapshot()
+    if QUERY_ONLY.get() or DEFER_INDEX_REFRESH.get():
+        if not os.path.exists(env.GALLERY_INDEX_DB_FILE):
+            return subfolders
+        source_by_id = {source["id"]: source for source in sources if source.get("enabled")}
+        with env._connect_gallery_index_db() as db:
+            for row in db.execute("SELECT * FROM gallery_folders"):
+                source = source_by_id.get(row["source_id"])
+                if source and source["path"] == row["source_path"]:
+                    folder_ref = env.make_folder_ref(row["source_id"], row["relative_path"])
+                    subfolders[folder_ref] = {"path": folder_ref, "source_id": row["source_id"],
+                                             "relative_path": row["relative_path"], "modified_at": row["modified_at"]}
+        return subfolders
     for source in sources:
         if not source.get("enabled", True) or not source.get("exists"):
             continue
@@ -458,10 +477,13 @@ def _collect_directory_subfolder_details(env, sources: list[dict[str, Any]]) -> 
                 with os.scandir(current_dir) as iterator:
                     entries = list(iterator)
             except (FileNotFoundError, PermissionError, OSError):
+                subfolders.failed_sources.add(source["id"])
                 continue
 
             for entry in entries:
                 if not entry.is_dir(follow_symlinks=False):
+                    continue
+                if entry.name == ".ue-uploads" or entry.name.startswith(".ue-move-"):
                     continue
 
                 relative_dir = env.normalize_relative_path(os.path.relpath(entry.path, source_root))

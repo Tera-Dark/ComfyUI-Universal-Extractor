@@ -104,6 +104,7 @@ def _initialize_gallery_index_db(env, connection: sqlite3.Connection):
     connection.execute(f"PRAGMA busy_timeout={env.GALLERY_INDEX_BUSY_TIMEOUT_MS}")
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA synchronous=NORMAL")
+    connection.execute("CREATE TABLE IF NOT EXISTS gallery_folders(source_id TEXT NOT NULL,relative_path TEXT NOT NULL,source_path TEXT NOT NULL,modified_at INTEGER NOT NULL,PRIMARY KEY(source_id,relative_path))")
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS gallery_images (
@@ -220,6 +221,10 @@ def _initialize_gallery_index_db(env, connection: sqlite3.Connection):
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_color_created ON gallery_images(color_family, created_at DESC)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_filename_nocase ON gallery_images(filename COLLATE NOCASE)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_size_desc ON gallery_images(size DESC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_stable_created ON gallery_images(created_at DESC,relative_path ASC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_source_stable_created ON gallery_images(source_id,created_at DESC,relative_path ASC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_source_stable_filename ON gallery_images(source_id,filename COLLATE NOCASE DESC,relative_path ASC)")
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_images_color_status ON gallery_images(dominant_color,color_family_scores_json)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_color_family_created ON gallery_image_color_family(family, created_at DESC)")
     fingerprint_columns = {row["name"] for row in connection.execute("PRAGMA table_info(gallery_image_fingerprints)").fetchall()}
     if "file_hash" not in fingerprint_columns:
@@ -670,6 +675,18 @@ def get_color_index_status(env) -> dict[str, Any]:
     }
 
 
+def _store_folder_snapshot(connection, sources, details):
+    failed = getattr(details, "failed_sources", set())
+    for source in sources:
+        if not source.get("enabled") or not source.get("exists") or source["id"] in failed:
+            continue
+        connection.execute("DELETE FROM gallery_folders WHERE source_id=?", (source["id"],))
+        connection.executemany("INSERT INTO gallery_folders(source_id,relative_path,source_path,modified_at) VALUES(?,?,?,?)",
+            [(source["id"], item["relative_path"], source["path"], item["modified_at"])
+             for item in details.values() if item["source_id"] == source["id"]])
+    connection.execute("INSERT OR REPLACE INTO gallery_index_meta(key,value) VALUES('folder_snapshot_version','1')")
+
+
 def _save_image_index_to_db(env, index: dict[str, Any]):
     image_states = env.get_image_state_map()
     with env.get_runtime().scan_commit(), env._connect_gallery_index_db() as connection:
@@ -746,6 +763,7 @@ def _save_image_index_to_db(env, index: dict[str, Any]):
         if runtime.catalog:
             runtime.sync_identities(connection, index.get("sources", []))
             env._index_meta_set(connection, "asset_identity_version", "1")
+        _store_folder_snapshot(connection, index.get("sources", []), index.get("folder_details", {}))
         connection.commit()
 
 
@@ -853,6 +871,7 @@ def _build_image_index(env, sources: list[dict[str, Any]], include_color_profile
         "sources": indexed_sources,
         "built_at": time.time(),
         "color_index_complete": include_color_profiles,
+        "folder_details": env._collect_directory_subfolder_details(sources),
     }
     env._save_image_index_to_db(index)
     if not include_color_profiles:
@@ -972,6 +991,7 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
         return env._build_image_index(sources)
 
     scanned_records = env._scan_index_records_for_scope(sources, scope)
+    folder_details = env._collect_directory_subfolder_details(sources)
     where_sql, params = env._scope_where_sql(sources, scope)
     scanned_at = time.time()
     state_map = env.get_image_state_map()
@@ -1105,6 +1125,7 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
         if runtime.catalog:
             runtime.sync_identities(connection, sources, dimensions_current={row["relative_path"] for row in upsert_payloads})
             env._index_meta_set(connection, "asset_identity_version", "1")
+        _store_folder_snapshot(connection, sources, folder_details)
         connection.commit()
 
     if priority_paths:
