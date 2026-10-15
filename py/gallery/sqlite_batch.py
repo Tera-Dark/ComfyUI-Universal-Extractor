@@ -19,3 +19,14 @@ def iter_sqlite_batches(values: Sequence[T], batch_size: int = SQLITE_BIND_BATCH
         raise ValueError(f"batch_size must be between 1 and {SQLITE_BIND_BATCH_SIZE}")
     for start in range(0, len(values), batch_size):
         yield values[start:start + batch_size]
+import sqlite3
+
+
+class ClosingConnection(sqlite3.Connection):
+    """sqlite3's default context commits but leaves the handle open on Windows."""
+    def __exit__(self, *args):
+        try:
+            return super().__exit__(*args)
+        finally:
+            self.close()
+
