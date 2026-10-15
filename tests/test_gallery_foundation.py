@@ -420,7 +420,10 @@ def test_job_queue_is_bounded_and_active_requests_coalesce(tmp_path):
     release, started = threading.Event(), threading.Event()
     def hold(context, payload):
         started.set()
-        release.wait(10)
+        # Queue construction can exceed 10s on hosted Windows disks. Hold
+        # until the finally block releases it, otherwise the worker consumes
+        # queued jobs and the test no longer measures the 256-waiter boundary.
+        release.wait()
         return {}
     with ThreadPoolExecutor(1) as scan, ThreadPoolExecutor(2) as analysis:
         scheduler = JobScheduler(Catalog(tmp_path), scan, analysis, {"refresh_index": ("scan", hold)})

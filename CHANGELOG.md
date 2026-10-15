@@ -4,6 +4,8 @@ All notable changes to the ComfyUI Universal Extractor project will be documente
 
 ## Unreleased
 
+- Stabilize the queue-capacity test on slow Windows CI disks by keeping its worker blocked until explicit cleanup. Runtime behavior and published 1.6.0 files are unchanged.
+
 ## 1.6.0 - 2026-10-15
 
 ### Find your original images
