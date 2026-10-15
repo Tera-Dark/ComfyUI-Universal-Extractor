@@ -1,16 +1,19 @@
 # ComfyUI Universal Extractor
 
-## 1.6.0 · 资源身份与后台任务基础
+## 1.6.0 · 以图搜图与资源管理基础升级
 
 保留现有图片管理和 JSON 词库，新增稳定资源 ID、可恢复后台任务及查询/分析分流。收藏、笔记和图版仍保存在原 JSON；新增 `catalog.sqlite3` 是权威数据，不能按图片索引的方式删除重建。
 
 - 上传先暂存后独占提交，中断时按会话证据清理；批量备注只保存一次。
+- 图库搜索框旁新增「以图搜图」：粘贴、拖入或选择社交平台旧图，查找相同文件及压缩/缩放后的近似图，复制完整路径或定位所在文件夹。首次搜索会后台建立全库索引；参考图不导入、不上传外网。
 - 图片改名、移动、入垃圾箱和恢复保留资源 ID；后台任务支持进度、取消、重试及重启恢复。
 - 图源、索引、文件操作、词库和媒体分析分层，旧 API 与节点保持兼容。视频音频、语义以图搜图尚未启用。
 
 升级前停止 ComfyUI 并备份 data 和原图源，完整替换 dist，重启并刷新 ComfyUI 与图库。**源码提交不会自动发布 GitHub Release 或 ComfyUI Registry。**
 
-[升级、API 与恢复手册](docs/foundation-1.6.0.zh-CN.md) · [架构](docs/architecture.md) · [变更日志](CHANGELOG.md)
+Registry 安装包包含运行代码、完整构建图库、内置词库和升级说明；`.comfyignore` 排除测试、开发脚本及前端源码工具。GitHub 保留完整项目源码与测试。
+
+[以图搜图使用与限制](docs/image-search.zh-CN.md) · [升级、API 与恢复手册](docs/foundation-1.6.0.zh-CN.md) · [架构](docs/architecture.md) · [变更日志](CHANGELOG.md)
 
 开发验证：`powershell -ExecutionPolicy Bypass -File scripts\verify.ps1`。隔离 UI 预览：`python scripts/preview.py`，访问 `http://127.0.0.1:8189/gallery/`，示例数据位于临时目录。
 

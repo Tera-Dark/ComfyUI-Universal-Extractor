@@ -4,9 +4,11 @@ All notable changes to the ComfyUI Universal Extractor project will be documente
 
 ## Unreleased
 
-- Add local reverse image search: paste, drop or choose a reference to locate originals across enabled gallery sources. Match exact files and compressed/resized copies, show full paths, copy paths and jump to the containing folder. Build full-library visual fingerprints in persistent background tasks; keep reference uploads in memory. See [usage and limits](docs/image-search.zh-CN.md).
-
 ## 1.6.0 - 2026-10-15
+
+### Find your original images
+
+- Add local reverse image search: paste, drop or choose a reference to locate originals across enabled gallery sources. Match exact files and compressed/resized copies, show full paths, copy paths and jump to the containing folder. Build full-library visual fingerprints in persistent background tasks; keep reference uploads in memory. See [usage and limits](docs/image-search.zh-CN.md).
 
 ### Gallery foundation
 
@@ -17,7 +19,7 @@ All notable changes to the ComfyUI Universal Extractor project will be documente
 - Serve committed directory snapshots and use stable pagination/covering indexes. Briefly cache validated read sources with immediate configuration invalidation, reuse a request-owned read-only SQLite handle, and close it after the worker finishes. Version fingerprints and previews against asset/content changes; reject stale analysis commits.
 - Update vulnerable indirect frontend dependencies without forcing major upgrades and classify Tailwind build packages as development dependencies.
 
-Upgrade and recovery: [foundation guide](docs/foundation-1.6.0.zh-CN.md). Existing source refs, JSON libraries, ComfyUI node widgets and LoRA bridge behavior remain compatible. Back up data and sources, restart ComfyUI and refresh both pages; this commit does not publish a GitHub Release or Registry version.
+Upgrade and recovery: [foundation guide](docs/foundation-1.6.0.zh-CN.md). Existing source refs, JSON libraries, ComfyUI node widgets and LoRA bridge behavior remain compatible. Back up data and sources, restart ComfyUI and refresh both pages. GitHub Releases and Registry publishing are explicit release steps, separate from an ordinary source push.
 
 ## 1.5.0 - 2026-09-27
 

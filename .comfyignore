@@ -1,0 +1,15 @@
+# Runtime Python, built gallery, bundled libraries and upgrade docs remain included.
+# Keep development tooling out of the Registry installation archive.
+.github/
+.tracking
+tests/
+scripts/
+gallery_ui/src/
+gallery_ui/public/
+gallery_ui/scripts/
+gallery_ui/node_modules/
+gallery_ui/*.json
+gallery_ui/*.js
+gallery_ui/*.ts
+gallery_ui/index.html
+gallery_ui/.gitignore

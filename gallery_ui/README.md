@@ -4,6 +4,7 @@
 
 - `useGalleryData` composes scoped queries (`useGalleryQueries`), batch outcomes (`useGalleryBatchOperations`), and refresh completion (`useGalleryRefresh`). `useGalleryJobs` restores persistent task feedback and polls only while visible with active work. `useGallerySelection` owns click/range/keyboard anchors while box geometry stays with the measured layout; `useVariantRequests` aborts replaced analysis requests. Optional asset IDs preserve compatibility with old servers.
 - Task protocol and recovery: [foundation guide](../docs/foundation-1.6.0.zh-CN.md).
+- Reverse image search is a lazy `ImageSearchModal` beside the text search. Gallery-level paste opens it outside editable fields/modal dialogs. Uploads are references only; preserve cancellation, persistent index progress, full-path copy, filter-clearing folder navigation and resize behavior. See [search contracts and limits](../docs/image-search.zh-CN.md).
 
 - `npm run audit:dist` validates the Vite manifest, imported chunks and index asset references without rewriting hashed files.
 - `npm run audit:security` runs `npm audit --audit-level=moderate` so frontend dependency vulnerabilities stay visible.

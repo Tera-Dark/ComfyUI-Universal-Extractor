@@ -1,12 +1,12 @@
 # 1.6.0 基础架构、接入与恢复手册
 
-本版保持图片管理功能和旧 API，新增持久资源身份与本机任务调度。视频、音频、图像向量搜索、提示词版本库和外部项目管理尚未交付。
+本版保持图片管理功能和旧 API，新增持久资源身份、本机任务调度及基于本地视觉指纹的以图搜图。视频、音频、图像向量搜索、提示词版本库和外部项目管理尚未交付。[以图搜图的操作、匹配范围与 API](image-search.zh-CN.md)。
 
 ## 数据与安装
 
 - `gallery_state.json` 仍是收藏、笔记、分类及图版的唯一权威来源，未迁入 SQLite。
 - `catalog.sqlite3` 是新增的权威目录，保存 `assets`、`jobs`、`catalog_meta`、`catalog_migrations`。**不能删除重建**。正在运行时可能有 `-wal` / `-shm` 文件。
-- `gallery_index.sqlite3` 仍为派生索引，schema 9 增加缓存的资源 ID、内容版本、指纹所属版本和 `gallery_folders` 目录快照；可从来源和权威数据重建。上下文请求不再遍历目录，旧版升级可先读现有图片，再异步补齐空目录快照。
+- `gallery_index.sqlite3` 仍为派生索引，schema 10 包含缓存的资源 ID、内容版本、指纹及检索描述、纳秒修改时间和 `gallery_folders` 目录快照；可从来源和权威数据重建。上下文请求不再遍历目录，旧版升级可先读现有图片，再异步补齐空目录快照。
 - 原图仍留在注册图源内；默认 input 只读，外部来源权限规则不变。`UNIVERSAL_EXTRACTOR_DATA_DIR` 继续可选，不自动搬迁旧数据。
 - 升级前停止 ComfyUI，备份整个 data 和实际来源；完整替换前端 dist，重启 ComfyUI 并刷新图库及已有 ComfyUI 页面。不要将新旧两份插件同时放进 custom_nodes。
 - 无新增模型、GPU、数据库服务或运行时 Python 依赖。普通用户无需 Node.js。
@@ -52,7 +52,7 @@ Content-Type: application/json
 {"kind":"refresh_index","payload":{"subfolder":"default_output::","force":true}}
 ```
 
-返回 202 和 `{"job": {...}}`。另一种公开类型为 `fingerprint_assets`，payload 支持 `relative_paths`（最多 2000）、`subfolder`、`limit`（1–2000）及已有搜索/分类/图版/日期/Pin/色系条件。默认指纹处理批次仍为 360；变体候选上限仍为 2000，不应将它称为全库以图搜图。
+返回 202 和 `{"job": {...}}`。另一种公开类型为 `fingerprint_assets`，payload 支持 `relative_paths`（最多 2000）、`subfolder`、`limit`（1–2000）及已有搜索/分类/图版/日期/Pin/色系条件。普通范围预热默认批次仍为 360，变体候选上限仍为 2000。独立的全库检索预热 payload 为 `{"whole_library":true}`，不允许与范围条件混用，分批遍历全库而不受最近条数上限限制。
 
 不接受任意任务类型、私有参数、命令或未注册路径。公开参数采用后端 snake_case。`colors`、`dimensions` 仅由内部调度。旧 force_refresh、指纹预热及变体接口仍等待任务结果并返回兼容结构。
 

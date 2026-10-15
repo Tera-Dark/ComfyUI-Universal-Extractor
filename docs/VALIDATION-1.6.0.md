@@ -1,8 +1,8 @@
-# 1.6.0 foundation candidate validation
+# 1.6.0 release validation
 
 Date: 2026-10-15. Branch: `codex/gallery-foundation`.
 
-This is a locally installable candidate, not a published release. No real user image directory was modified by verification. Registered production source configuration was unavailable in this checkout; the user's growing SSD library has not been benchmarked or deployed here.
+This record covers the integrated foundation upgrade and reverse image search prepared for release. No real user image directory was modified by verification. Registered production source configuration was unavailable in this checkout; the user's growing SSD library has not been benchmarked or deployed here. The performance section preserves the earlier foundation candidate measurements; it is not a benchmark of image-search recall or first full-library fingerprinting.
 
 ## Environment
 
@@ -14,7 +14,9 @@ This is a locally installable candidate, not a published release. No real user i
 
 ## Verification commands
 
-The final gate passed **144 Python tests, 209 frontend tests and 11 bridge tests**, plus compileall, TypeScript, lint, the 900-key i18n audit, npm audit (zero reported vulnerabilities), clean build, 23 dist asset references and consistent 1.6.0 metadata. The separate pinned-upstream suite passed **6/6** without skips. Python undefined-name inspection (`ruff --select F821`) also passed. A dedicated startup test verifies upload recovery completes before persisted jobs resume; recovered uploads invalidate derived snapshots. Reserved upload/move staging directories stay outside image/folder/freshness scans.
+The integrated local gate passed **151 Python tests, 214 frontend tests and 11 bridge tests**, plus compileall, TypeScript, lint, the 925-key i18n audit, npm audit (zero reported vulnerabilities), clean build, 26 dist asset references and consistent 1.6.0 metadata. The foundation-only gate previously passed 144/209/11; no old tests were removed. The separate pinned-upstream suite passed **6/6** without skips. Python undefined-name inspection (`ruff --select F821`) also passed. A dedicated startup test verifies upload recovery completes before persisted jobs resume; recovered uploads invalidate derived snapshots. Reserved upload/move staging directories stay outside image/folder/freshness scans.
+
+Reverse image search adds seven backend and five frontend checks: exact-copy identity separation, JPEG resize/compression, EXIF direction, small watermark, >360-image coverage, stale/subsecond edits, upload/origin/size boundaries, zero imports, bounded search concurrency, regular reads during two blocked rankings, request replacement/cancellation, retry and persistent-job completion. `scripts/browser_image_search.py` passes real clipboard paste, path copy, folder navigation and desktop/mobile layouts with zero page errors; the existing gallery browser smoke also passes. Large crops, collages and heavy occlusion remain limitations; no real-library recall rate is claimed.
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File scripts/verify.ps1
@@ -96,12 +98,12 @@ Raw reports: [baseline](benchmarks/foundation-1.6.0-baseline.json), [candidate](
 
 ## Deployment and remaining limits
 
-- No automatic publication, Git push, Registry action or production deployment was performed.
+- Source push, GitHub Release and Registry publication are explicit release steps after the verification gate. Validation does not deploy to a user's production ComfyUI or modify their data.
 - Real 10+ GB source scans, long-duration workloads, OS/filesystem combinations beyond this machine and a running ComfyUI/GPU session remain unmeasured. Browser protocol receivers are controlled same-origin fixtures; the pinned upstream integration is a separate real-code test.
 - Cold startup includes first catalog registration and is slower than the old small-sample startup; hot-query improvement is not a claim that every upgrade operation is faster.
 - Same-volume upload publication currently requires hard-link support. Unsupported target filesystems fail safely; they do not use an overwrite-prone rename fallback.
 - External changes are detected by size and nanosecond mtime, without a full-library hash on startup. A modification deliberately preserving both size and mtime cannot be distinguished by this observation policy.
 - JSON annotations/boards remain authoritative. The catalog is independently authoritative for identities/jobs; never delete it as an index repair. Preserve unresolved file/upload logs and consult the [recovery guide](foundation-1.6.0.zh-CN.md).
-- Video/audio, semantic image search, whole-library reverse-image search, prompt versioning and external project entry management remain follow-up work.
+- Whole-library reverse-image search is included using local fingerprints; video/audio, semantic image search, prompt versioning and external project entry management remain follow-up work.
 
 Current README, frontend README, AGENTS and architecture contracts were reconciled with the code. The architecture review, 1.3.x RC upgrade/validation documents and 1.2.10 maintenance notes remain explicitly historical. No global agent memory or unrelated project files were changed.
