@@ -617,7 +617,9 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     setImages((current) => current.map((image) => updatedPaths.has(image.relative_path)
       ? applyBatchImageState(image, response, updates) : previousImages.get(image.relative_path) ?? image));
     setSelectedImage((current) => current && updatedPaths.has(current.relative_path)
-      ? applyBatchImageState(current, response, updates) : current);
+        ? applyBatchImageState(current, response, updates)
+        : current && previousSelectedImage?.relative_path === current.relative_path && relativePathSet.has(current.relative_path)
+          ? previousSelectedImage : current);
     setSelectedImagePaths((current) => current.filter((path) => !updatedPaths.has(path)));
     if (deferredSearchTerm.trim() || selectedCategory || selectedBoardId || favoritesOnly) {
       refresh();

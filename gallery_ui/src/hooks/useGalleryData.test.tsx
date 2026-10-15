@@ -517,6 +517,25 @@ describe("useGalleryData live refresh", () => {
     expect(result.current.selectedImagePaths).toEqual(["image-second.png"]);
   });
 
+  it("restores the list and inspector for unfinished batch state updates", async () => {
+    vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
+    vi.mocked(galleryApi.batchUpdateImages).mockResolvedValue({
+      ok: true, updated: [], missing: ["image-initial.png"], categories: [], last_state: null,
+    });
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: false }), { wrapper });
+    await flushAsyncEffects();
+    await act(async () => {
+      result.current.setSelectedImage(result.current.images[0]);
+      result.current.setSelectedImagePaths(["image-initial.png"]);
+    });
+    await act(async () => {
+      await result.current.batchUpdateImages(["image-initial.png"], { pinned: true });
+    });
+    expect(result.current.images[0]?.pinned).toBe(false);
+    expect(result.current.selectedImage?.pinned).toBe(false);
+    expect(result.current.selectedImagePaths).toEqual(["image-initial.png"]);
+  });
+
   it("normalizes malformed batch update paths before patching pin counts", async () => {
     vi.mocked(galleryApi.getContext).mockResolvedValue({ ...contextResponse, pinned_count: 0 });
     vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));

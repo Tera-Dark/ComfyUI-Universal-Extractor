@@ -286,7 +286,15 @@ function App() {
     if (activeTab === "library" && !(await confirmDiscardLibraryEdits())) {
       return;
     }
-    if (activeTab === "gallery" || activeTab === "settings") {
+    if (activeTab === "gallery") {
+      // Persistent refresh progress is restored by useGalleryJobs. Avoid a
+      // second pending card for the same refresh in the operation center.
+      await gallery.refreshAndWait().catch((error: unknown) => {
+        pushToast(error instanceof Error ? error.message : t("galleryEmptyErrorTitle"), "error");
+      });
+      return;
+    }
+    if (activeTab === "settings") {
       await runOperation(() => gallery.refreshAndWait(), {
         pending: t("operationRefresh"),
         success: t("operationRefreshSuccess"),
