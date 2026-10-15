@@ -54,7 +54,7 @@ class JobScheduler:
     def enqueue(self, kind, payload=None, version="1"):
         if kind not in self.handlers:
             raise ValueError("unsupported job kind")
-        payload = payload or {}
+        payload = {**(payload or {}), "_processor_version": str(version)}
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
         key = hashlib.sha256(f"{kind}|{version}|{encoded}".encode()).hexdigest()
         now = time.time()
@@ -91,7 +91,7 @@ class JobScheduler:
         where = "WHERE state IN ('queued','running','cancelling')" if active_only else ""
         with self.catalog.connect() as db:
             total = db.execute(f"SELECT COUNT(*) FROM jobs {where}").fetchone()[0]
-            rows = db.execute(f"SELECT * FROM jobs {where} ORDER BY created_at DESC,id LIMIT ? OFFSET ?", (limit, (page-1)*limit)).fetchall()
+            rows = db.execute(f"SELECT * FROM jobs {where} ORDER BY CASE WHEN state IN ('queued','running','cancelling') THEN 0 ELSE 1 END,created_at DESC,id LIMIT ? OFFSET ?", (limit, (page-1)*limit)).fetchall()
         return {"jobs": [self._public(row) for row in rows], "total": total, "page": page, "limit": limit}
 
     def cancel(self, job_id):
@@ -109,16 +109,17 @@ class JobScheduler:
             return future
 
     def _resolve(self, job_id):
-        future = self.waiters.get(job_id)
-        if future is None or future.done():
-            return
-        job = self.get(job_id)
-        if job["state"] == "succeeded":
-            future.set_result(job["result"])
-            self.waiters.pop(job_id, None)
-        elif job["state"] in {"failed", "cancelled"}:
-            future.set_exception(RuntimeError(job["error"] or f"Task {job['state']}"))
-            self.waiters.pop(job_id, None)
+        with self.condition:
+            future = self.waiters.get(job_id)
+            if future is None or future.done():
+                return
+            job = self.get(job_id)
+            if job["state"] == "succeeded":
+                future.set_result(job["result"])
+                self.waiters.pop(job_id, None)
+            elif job["state"] in {"failed", "cancelled"}:
+                future.set_exception(RuntimeError(job["error"] or f"Task {job['state']}"))
+                self.waiters.pop(job_id, None)
 
     def _dispatch(self):
         while True:

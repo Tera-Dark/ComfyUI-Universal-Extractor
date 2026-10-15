@@ -19,6 +19,7 @@ class GalleryRuntime:
     def __init__(self, env):
         self.env = env
         self.closed = False
+        self.closing = False
         self.catalog_error = ""
         self.processor = ImageProcessor(lambda path: env.read_image_metadata(path), lambda path, filename: env.build_image_fingerprint(path, filename))
         self.analysis_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ue-analysis")
@@ -33,6 +34,9 @@ class GalleryRuntime:
         self.scan_sync_lock = RLock()
         self.read_slots = BoundedSemaphore(32)
         self.write_slots = BoundedSemaphore(16)
+        self.scan_slots = BoundedSemaphore(16)
+        self.analysis_slots = BoundedSemaphore(16)
+        self.thumb_slots = BoundedSemaphore(32)
         self.upload_slots = BoundedSemaphore(16)
         self.upload_sessions = BoundedSemaphore(2)
         try:
@@ -125,13 +129,14 @@ class GalleryRuntime:
         env = self.env
         flag = "COLOR_INDEX_BACKFILL_RUNNING" if kind == "colors" else "DIMENSION_BACKFILL_RUNNING"
         setattr(env, flag, True)
-        last, completed = "", 0
+        last, completed, failed = "", 0, 0
+        diagnostics = []
         condition = "(dominant_color='' OR color_family_scores_json='{}')" if kind == "colors" else "(image_width<=0 OR image_height<=0)"
         try:
             with env._connect_gallery_index_db() as db:
                 total = db.execute(f"SELECT COUNT(*) FROM gallery_images WHERE {condition}").fetchone()[0]
             while True:
-                context.checkpoint(completed, total)
+                context.checkpoint(completed + failed, total)
                 with env._connect_gallery_index_db() as db:
                     rows = db.execute(f"SELECT * FROM gallery_images WHERE {condition} AND relative_path>? ORDER BY relative_path LIMIT 100", (last,)).fetchall()
                 if not rows:
@@ -145,9 +150,11 @@ class GalleryRuntime:
                         if kind == "colors":
                             profile = env._extract_image_color_profile(path, last)
                             if not profile.get("dominant_color"):
-                                profile = {**env.COLOR_PROFILE_DEFAULT, "dominant_color": "#000000", "color_family": "black", "color_families_text": "\nblack\n", "color_family_scores_json": '{"black":1.0}', "palette_json": '["#000000"]'}
+                                raise ValueError("Image color analysis failed or exceeded the decode safety limit")
                         else:
                             width, height = env._read_image_dimensions(path)
+                            if not width or not height:
+                                raise ValueError("Image dimensions unavailable or exceeded the decode safety limit")
                         current = os.stat(path)
                         if (observed.st_size, observed.st_mtime_ns) != (current.st_size, current.st_mtime_ns):
                             continue
@@ -162,12 +169,15 @@ class GalleryRuntime:
                             else:
                                 db.execute("UPDATE gallery_images SET image_width=?,image_height=? WHERE relative_path=? AND content_revision=? AND asset_id=?", (width, height, last, row["content_revision"], row["asset_id"]))
                         completed += 1
-                    except (FileNotFoundError, ValueError, PermissionError):
+                    except (FileNotFoundError, ValueError, PermissionError) as error:
+                        failed += 1
+                        if len(diagnostics) < 50:
+                            diagnostics.append({"asset_id": row["asset_id"], "relative_path": last, "error": str(error)})
                         continue
             with env._connect_gallery_index_db() as db:
                 env._index_meta_set(db, "color_index_version" if kind == "colors" else "dimension_index_version", env.COLOR_INDEX_VERSION if kind == "colors" else env.DIMENSION_INDEX_VERSION)
-            context.checkpoint(completed, total)
-            return {"completed": completed, "total": total}
+            context.checkpoint(completed + failed, total)
+            return {"completed": completed, "failed": failed, "diagnostics": diagnostics, "total": total}
         finally:
             setattr(env, flag, False)
 
@@ -176,7 +186,12 @@ class GalleryRuntime:
             raise CatalogUnavailable(self.catalog_error)
         return self.catalog
 
-    def sync_identities(self, connection, sources):
+    def require_file_operations_ready(self):
+        with self.env.FILE_OPERATION_LOCK:
+            self.env.execute_moves([], os.path.join(self.env.DATA_DIR, "operation_journal"),
+                                   lambda: None, lambda: None, {})
+
+    def sync_identities(self, connection, sources, dimensions_current=()):
         catalog = self.require_catalog()
         for source in sources:
             if not source.get("enabled") or not source.get("exists"):
@@ -196,11 +211,21 @@ class GalleryRuntime:
                 changed = [(identity["asset_id"], identity["content_revision"], row["relative_path"]) for row, identity in zip(rows, identities) if row["asset_id"] != identity["asset_id"] or row["content_revision"] != identity["content_revision"]]
                 if changed:
                     connection.executemany("UPDATE gallery_images SET asset_id=?,content_revision=? WHERE relative_path=?", changed)
+                content_changed = [row["relative_path"] for row, identity in zip(rows, identities)
+                                   if row["asset_id"] and row["content_revision"] != identity["content_revision"]]
+                if content_changed:
+                    connection.executemany("UPDATE gallery_images SET dominant_color='',color_family='',color_families_text='',color_family_scores_json='{}',palette_json='[]',color_saturation=0,color_luma=0 WHERE relative_path=?", [(path,) for path in content_changed])
+                    connection.executemany("UPDATE gallery_images SET image_width=0,image_height=0 WHERE relative_path=?", [(path,) for path in content_changed if path not in dimensions_current])
+                    placeholders = ",".join("?" for _ in content_changed)
+                    refreshed = connection.execute(f"SELECT * FROM gallery_images WHERE relative_path IN ({placeholders})", content_changed).fetchall()
+                    self.env._sync_auxiliary_rows(connection, refreshed)
 
     def close(self):
-        if self.closed:
+        if self.closed or self.closing:
             return
-        self.closed = True
+        # Existing workers may still access the facade while draining. Keep this
+        # runtime available until every worker has stopped, then close storage.
+        self.closing = True
         if self.jobs:
             self.jobs.close()
         for executor in (self.scan_executor, self.analysis_executor, self.thumb_executor, self.read_executor, self.write_executor, self.upload_executor):
@@ -208,6 +233,7 @@ class GalleryRuntime:
         self.release_index_anchor()
         if self.catalog:
             self.catalog.close()
+        self.closed = True
 
     def release_index_anchor(self):
         if self.index_anchor:

@@ -14,7 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
 from pathlib import Path
-from .execution import QUERY_ONLY
+from .execution import QUERY_ONLY, DEFER_INDEX_REFRESH
 from .jobs import checkpoint, CURRENT_JOB
 
 def _is_gallery_index_corruption(env, error: BaseException) -> bool:
@@ -62,7 +62,7 @@ def _gallery_index_file_has_invalid_header(env) -> bool:
     return header != b"SQLite format 3\x00"
 
 
-def _record_gallery_index_migration(env, 
+def _record_gallery_index_migration(env,
     connection: sqlite3.Connection,
     migration_id: str,
     from_version: int,
@@ -552,13 +552,20 @@ def _indexed_relative_paths(env, connection: sqlite3.Connection) -> set[str]:
     return {env.normalize_relative_path(str(row["relative_path"])) for row in rows if str(row["relative_path"]).strip()}
 
 
-def _reconcile_missing_state_paths_to_index(env, 
+def _reconcile_missing_state_paths_to_index(env,
     connection: sqlite3.Connection,
     *,
     create_backup: bool = True,
 ) -> dict[str, object]:
     indexed_paths = env._indexed_relative_paths(connection)
-    result = env.migrate_missing_image_states(indexed_paths, indexed_paths, create_backup=create_backup)
+    protected_paths = set()
+    catalog = env.get_runtime().catalog
+    if catalog:
+        for path in env.get_image_state_map().keys() - indexed_paths:
+            source_id, relative_path = env.parse_image_ref(path)
+            if catalog.tracks_location(source_id, relative_path):
+                protected_paths.add(path)
+    result = env.migrate_missing_image_states(indexed_paths | protected_paths, indexed_paths, create_backup=create_backup)
     migrated = result.get("migrated", {})
     if migrated:
         env._sync_image_state_to_index_db(connection, env.get_image_state_map())
@@ -1095,6 +1102,9 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
         env._sync_image_state_to_index_db(connection, state_map)
         env._index_meta_set(connection, "source_signature", signature)
         env._index_meta_set(connection, "built_at", str(scanned_at))
+        if runtime.catalog:
+            runtime.sync_identities(connection, sources, dimensions_current={row["relative_path"] for row in upsert_payloads})
+            env._index_meta_set(connection, "asset_identity_version", "1")
         connection.commit()
 
     if priority_paths:
@@ -1110,7 +1120,7 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
 
 
 def ensure_image_index_db_current(env, force_refresh: bool = False, scope: str = "") -> tuple[list[dict[str, Any]], str]:
-    if QUERY_ONLY.get():
+    if QUERY_ONLY.get() or DEFER_INDEX_REFRESH.get():
         sources = env.list_gallery_sources()
         return sources, env._source_signature(sources)
     sources = env.list_gallery_sources()
@@ -1144,6 +1154,11 @@ def ensure_image_index_db_current(env, force_refresh: bool = False, scope: str =
 
 
 def get_image_index(env, force_refresh: bool = False) -> dict[str, Any]:
+    if DEFER_INDEX_REFRESH.get():
+        sources = env.list_gallery_sources()
+        return {"signature": env._source_signature(sources), "sources": sources, "images": [],
+                "subfolders": sorted(env._collect_directory_subfolders(sources)),
+                "output_dir": env.get_output_dir(), "built_at": env.IMAGE_INDEX_CACHE.get("built_at", 0)}
     sources = env.list_gallery_sources()
     signature = env._source_signature(sources)
 
@@ -1227,7 +1242,7 @@ def collect_subfolder_details(env, output_dir: str, force_refresh: bool = False)
     return sorted(details, key=lambda item: str(item["path"]).lower())
 
 
-def list_images(env, 
+def list_images(env,
     search: str = "",
     category: str = "",
     subfolder: str = "",
@@ -1317,7 +1332,7 @@ def _freshness_scope_key(env, signature: str, subfolder: str) -> str:
     )
 
 
-def _freshness_sources_for_subfolder(env, 
+def _freshness_sources_for_subfolder(env,
     sources: list[dict[str, Any]],
     subfolder: str,
 ) -> tuple[list[tuple[dict[str, Any], str]], str]:
@@ -1436,7 +1451,7 @@ def get_image_freshness(env, subfolder: str = "", known: str = "") -> dict[str, 
     }
 
 
-def list_images_page(env, 
+def list_images_page(env,
     page: int = 1,
     limit: int = 60,
     search: str = "",
@@ -1536,7 +1551,7 @@ def list_images_page(env,
     }
 
 
-def _build_image_filter_sql(env, 
+def _build_image_filter_sql(env,
     search: str = "",
     category: str = "",
     subfolder: str = "",
@@ -1621,7 +1636,7 @@ def _image_row_select_sql(env) -> str:
     """
 
 
-def _query_filtered_image_rows(env, 
+def _query_filtered_image_rows(env,
     connection: sqlite3.Connection,
     *,
     search: str = "",

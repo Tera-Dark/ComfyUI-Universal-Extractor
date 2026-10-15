@@ -44,6 +44,58 @@ def test_upload_commit_collision_preserves_user_file(tmp_path):
     assert (tmp_path / "a.png").read_bytes() == b"existing"
 
 
+def test_upload_later_publish_failure_rolls_back_earlier_files(tmp_path, monkeypatch):
+    import os
+    session = UploadSession(tmp_path / "data", validator(tmp_path))
+    for name in ("a.png", "b.png"):
+        session.write(session.add(str(tmp_path / name), "image"), b"new")
+    original = os.link
+    def fail_second(source, target):
+        if str(target).endswith("b.png"):
+            raise OSError("injected disk failure")
+        original(source, target)
+    monkeypatch.setattr(os, "link", fail_second)
+    with pytest.raises(OSError):
+        session.commit()
+    assert not (tmp_path / "a.png").exists()
+    assert not (tmp_path / "b.png").exists()
+    assert not list(tmp_path.rglob("*.part"))
+
+
+def test_upload_restart_recovers_link_created_before_journal_save(tmp_path):
+    import os
+    from py.gallery.uploads import _identity
+    session = UploadSession(tmp_path / "data", validator(tmp_path))
+    target = tmp_path / "a.png"
+    session.write(session.add(str(target), "image"), b"new")
+    session.entries[0]["identity"] = _identity(session.entries[0]["stage"])
+    session.status = "committing"
+    session.save()
+    os.link(session.entries[0]["stage"], target)
+    assert recover_uploads(tmp_path / "data", validator(tmp_path)) == []
+    assert not target.exists()
+
+
+@pytest.mark.parametrize("phase", ["catalog", "commit_journal"])
+def test_upload_final_commit_failure_still_rolls_back(tmp_path, monkeypatch, phase):
+    session = UploadSession(tmp_path / "data", validator(tmp_path))
+    target = tmp_path / "a.png"
+    session.write(session.add(str(target), "image"), b"new")
+    def fail():
+        raise OSError("injected final commit failure")
+    if phase == "commit_journal":
+        original = session.save
+        def save(status=None):
+            if status == "committed":
+                fail()
+            original(status)
+        monkeypatch.setattr(session, "save", save)
+    with pytest.raises(OSError):
+        session.commit(fail if phase == "catalog" else None)
+    assert not target.exists()
+    assert not list(tmp_path.rglob("*.part"))
+
+
 def test_batch_saves_once_and_noop_does_not_save(isolated_gallery_env, monkeypatch):
     from py.gallery import state_store
     env = isolated_gallery_env
@@ -128,6 +180,139 @@ def test_catalog_commit_failure_rolls_back_file_and_json(isolated_gallery_env, m
     assert (env.output_dir / "a.png").read_bytes() == b"one"
     assert env.service.get_image_state("a.png")["notes"] == "keep"
     assert catalog.get(identity)["relative_path"] == "a.png"
+
+
+@pytest.mark.parametrize("phase", ["stage", "publish", "json"])
+def test_file_transaction_fault_boundaries(isolated_gallery_env, monkeypatch, phase):
+    from py.gallery import file_transactions
+    env = isolated_gallery_env
+    source = env.output_dir / "a.png"
+    source.write_bytes(b"valuable")
+    identity = env.service.get_asset_identity("a.png")["asset_id"]
+    env.service.persist_image_state("a.png", {"notes": "keep"})
+    target_object, attribute = ((file_transactions.os, "rename") if phase == "stage" else
+                                (file_transactions, "_transfer_file") if phase == "publish" else
+                                (env.service, "move_image_states"))
+    original = getattr(target_object, attribute)
+    calls = []
+    def fail_once(*args, **kwargs):
+        calls.append(True)
+        if len(calls) == 1:
+            raise OSError(f"injected {phase} failure")
+        return original(*args, **kwargs)
+    monkeypatch.setattr(target_object, attribute, fail_once)
+    with pytest.raises(RuntimeError, match="journal"):
+        env.service.move_images(["a.png"], "destination")
+    assert source.read_bytes() == b"valuable"
+    assert not (env.output_dir / "destination" / "a.png").exists()
+    assert env.service.get_image_state("a.png")["notes"] == "keep"
+    assert env.service.get_runtime().catalog.get(identity)["relative_path"] == "a.png"
+
+
+def test_unresolved_transaction_blocks_folder_creation_and_upload_targets(isolated_gallery_env):
+    env = isolated_gallery_env
+    journal = env.data_dir / "operation_journal"
+    journal.mkdir()
+    (journal / "pending.json").write_text('{"status":"needs_recovery"}')
+    with pytest.raises(RuntimeError, match="Unresolved"):
+        env.service.create_folder("new")
+    with pytest.raises(RuntimeError, match="Unresolved"):
+        env.service.get_import_target_for_filename("a.png")
+    assert not (env.output_dir / "new").exists()
+
+
+def test_same_second_content_revision_invalidates_derived_dimensions_and_color(isolated_gallery_env, monkeypatch):
+    import os
+    env = isolated_gallery_env
+    monkeypatch.setattr(env.service, "_schedule_color_index_backfill", lambda *args: None)
+    monkeypatch.setattr(env.service, "_schedule_dimension_backfill", lambda *args: None)
+    path = env.output_dir / "a.png"
+    path.write_bytes(b"one")
+    env.service.list_images_page()
+    with env.service._connect_gallery_index_db() as db:
+        db.execute("UPDATE gallery_images SET image_width=10,image_height=20,dominant_color='#ff0000',color_family='red',color_family_scores_json='{\"red\":1}'")
+    previous = path.stat()
+    path.write_bytes(b"two")
+    # NTFS stores 100 ns ticks; a 1 ns edit can round back to the same value.
+    next_mtime = previous.st_mtime_ns + (100_000 if previous.st_mtime_ns % 1_000_000_000 < 999_900_000 else -100_000)
+    os.utime(path, ns=(previous.st_atime_ns, next_mtime))
+    env.service.ensure_image_index_db_current(force_refresh=True)
+    with env.service._connect_gallery_index_db() as db:
+        row = db.execute("SELECT * FROM gallery_images").fetchone()
+        assert row["content_revision"] == 2
+        assert row["image_width"] == row["image_height"] == 0
+        assert row["dominant_color"] == ""
+
+
+def test_analysis_result_is_discarded_after_resource_move(isolated_gallery_env, monkeypatch):
+    import threading
+    env = isolated_gallery_env
+    monkeypatch.setattr(env.service, "_schedule_color_index_backfill", lambda *args: None)
+    monkeypatch.setattr(env.service, "_schedule_dimension_backfill", lambda *args: None)
+    (env.output_dir / "a.png").write_bytes(b"one")
+    env.service.list_images_page()
+    runtime = env.service.get_runtime()
+    started, release = threading.Event(), threading.Event()
+    def blocked_fingerprint(path, filename):
+        started.set()
+        release.wait(5)
+        return {"file_hash": "old", "version": env.service.FINGERPRINT_VERSION}
+    monkeypatch.setattr(env.service, "build_image_fingerprint", blocked_fingerprint)
+    future = runtime.analysis_executor.submit(env.service.prewarm_image_fingerprints, relative_paths=["a.png"])
+    try:
+        assert started.wait(3)
+        env.service.rename_image("a.png", "b.png")
+    finally:
+        release.set()
+    future.result(5)
+    with env.service._connect_gallery_index_db() as db:
+        assert db.execute("SELECT COUNT(*) FROM gallery_image_fingerprints WHERE relative_path='a.png'").fetchone()[0] == 0
+
+
+@pytest.mark.parametrize("kind", ["colors", "dimensions"])
+def test_invalid_image_analysis_retains_soft_failure_diagnostics(isolated_gallery_env, monkeypatch, kind):
+    env = isolated_gallery_env
+    monkeypatch.setattr(env.service, "_schedule_color_index_backfill", lambda *args: None)
+    monkeypatch.setattr(env.service, "_schedule_dimension_backfill", lambda *args: None)
+    (env.output_dir / "broken.png").write_bytes(b"not an image")
+    identity = env.service.list_images_page()["images"][0]["asset_id"]
+    jobs = env.service.get_runtime().get_jobs()
+    job = jobs.enqueue(kind, version="test-processor")
+    result = jobs.future(job["id"]).result(5)
+    assert result["failed"] == 1
+    assert result["diagnostics"][0]["asset_id"] == identity
+    assert job["payload"]["_processor_version"] == "test-processor"
+    assert env.service.list_images_page()["total"] == 1
+    with env.service._connect_gallery_index_db() as db:
+        assert db.execute("SELECT dominant_color FROM gallery_images").fetchone()[0] == ""
+
+
+@pytest.mark.parametrize("error_type,attempts", [(OSError, 2), (PermissionError, 1)])
+def test_jobs_retry_only_transient_io(tmp_path, error_type, attempts):
+    from concurrent.futures import ThreadPoolExecutor
+    from py.gallery.catalog import Catalog
+    from py.gallery.jobs import JobScheduler
+    calls = []
+    def handler(context, payload):
+        calls.append(True)
+        if len(calls) == 1:
+            raise error_type("injected IO error")
+        return {"ok": True}
+    catalog = Catalog(tmp_path)
+    with ThreadPoolExecutor(1) as scan, ThreadPoolExecutor(2) as analysis:
+        scheduler = JobScheduler(catalog, scan, analysis, {"refresh_index": ("scan", handler)})
+        try:
+            job = scheduler.enqueue("refresh_index")
+            future = scheduler.future(job["id"])
+            if error_type is PermissionError:
+                with pytest.raises(RuntimeError, match="injected IO"):
+                    future.result(5)
+            else:
+                assert future.result(5) == {"ok": True}
+            assert scheduler.get(job["id"])["attempts"] == attempts
+        finally:
+            scheduler.close()
+    catalog.close()
 
 
 @pytest.mark.anyio
@@ -218,8 +403,47 @@ def test_job_queue_is_bounded_and_active_requests_coalesce(tmp_path):
             scheduler.catalog.close()
 
 
+def test_catalog_schema_upgrade_keeps_backup(tmp_path, monkeypatch):
+    from py.gallery.catalog import Catalog
+    catalog = Catalog(tmp_path)
+    catalog.close()
+    monkeypatch.setattr(Catalog, "VERSION", 2)
+    upgraded = Catalog(tmp_path)
+    try:
+        assert list(tmp_path.glob("catalog.sqlite3.bak-*"))
+        with upgraded.connect() as db:
+            assert db.execute("PRAGMA user_version").fetchone()[0] == 2
+    finally:
+        upgraded.close()
+
+
+def test_shutdown_keeps_runtime_available_until_workers_finish(isolated_gallery_env):
+    import threading
+    service = isolated_gallery_env.service
+    runtime = service.get_runtime()
+    release = threading.Event()
+    observed = []
+    def draining_worker():
+        release.wait(3)
+        observed.append(service.get_runtime())
+    runtime.analysis_executor.submit(draining_worker)
+    original_shutdown = runtime.scan_executor.shutdown
+    def begin_shutdown(**kwargs):
+        release.set()
+        return original_shutdown(**kwargs)
+    runtime.scan_executor.shutdown = begin_shutdown
+    original_close = runtime.release_index_anchor
+    def release_after_workers():
+        assert observed == [runtime]
+        original_close()
+    runtime.release_index_anchor = release_after_workers
+    runtime.close()
+    assert runtime.closed
+
+
 @pytest.mark.anyio
-async def test_interrupted_upload_leaves_no_partial(isolated_gallery_env):
+@pytest.mark.parametrize("failure", [ConnectionResetError, asyncio.CancelledError])
+async def test_interrupted_upload_leaves_no_partial(isolated_gallery_env, failure):
     from py.gallery import routes
     class Part:
         filename = "broken.png"
@@ -228,7 +452,7 @@ async def test_interrupted_upload_leaves_no_partial(isolated_gallery_env):
             self.count += 1
             if self.count == 1:
                 return b"partial"
-            raise ConnectionResetError("disconnected")
+            raise failure("disconnected")
     class Reader:
         async def next(self):
             return Part()
@@ -236,7 +460,7 @@ async def test_interrupted_upload_leaves_no_partial(isolated_gallery_env):
         content_length = None
         async def multipart(self):
             return Reader()
-    with pytest.raises(ConnectionResetError):
+    with pytest.raises(failure):
         await routes.api_import_files(Request())
     assert not list(isolated_gallery_env.output_dir.rglob("*.part"))
     assert not list(isolated_gallery_env.output_dir.rglob("broken.png"))

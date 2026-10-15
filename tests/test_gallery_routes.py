@@ -254,3 +254,25 @@ async def test_json_arrays_and_invalid_bulk_paths_are_rejected(gallery_client):
     assert response.status == 400
     response = await client.post("/universal_gallery/api/images/move", json={"relative_paths": [None]})
     assert response.status == 400
+
+
+@pytest.mark.anyio
+async def test_catalog_failure_keeps_snapshot_browsable_and_blocks_mutations(gallery_client, isolated_gallery_env):
+    import asyncio
+    client, _ = gallery_client
+    env = isolated_gallery_env
+    (env.output_dir / "a.png").write_bytes(b"one")
+    first = await client.get("/universal_gallery/api/images")
+    assert first.status == 200
+    original = (await first.json())["images"][0]["asset_id"]
+    runtime = env.service.get_runtime()
+    await asyncio.to_thread(runtime.close)
+    (env.data_dir / "catalog.sqlite3").write_bytes(b"unavailable authoritative data")
+    response = await client.get("/universal_gallery/api/images")
+    assert response.status == 200
+    assert (await response.json())["images"][0]["asset_id"] == original
+    context = await client.get("/universal_gallery/api/context")
+    assert (await context.json())["read_only"] is True
+    mutation = await client.post("/universal_gallery/api/images/rename", json={"relative_path": "a.png", "new_filename": "b.png"})
+    assert mutation.status == 503
+    assert (env.output_dir / "a.png").exists()

@@ -32,7 +32,7 @@ def send_to_system_recycle_bin(env, path: str):
     send2trash(normalized_path)
 
 
-def add_trash_item(env, 
+def add_trash_item(env,
     *,
     kind: str,
     name: str,
@@ -240,11 +240,12 @@ def purge_trash_item(env, item_id: str) -> dict[str, Any]:
         return {"ok": True, "id": item_id}
 
 
-def get_import_target_for_filename(env, 
+def get_import_target_for_filename(env,
     filename: str,
     target_source_id: str = "",
     target_subfolder: str = 'universal_gallery_imports',
 ) -> tuple[str | None, str | None, dict[str, str] | None]:
+    env.get_runtime().require_file_operations_ready()
     env.ensure_data_dir()
 
     original_name = os.path.basename(filename)
@@ -282,6 +283,8 @@ def get_import_target_for_filename(env,
             number += 1
         return "image", target, None
     if extension in env.SUPPORTED_LIBRARY_EXTENSIONS:
+        if original_name.lower() in env.RUNTIME_STATE_FILENAMES:
+            raise ValueError("runtime state cannot be imported as a prompt library")
         return "library", env.ensure_unique_path(env.DATA_DIR, original_name), None
 
     return None, None, {"filename": original_name, "reason": "unsupported file type"}
@@ -401,6 +404,8 @@ def rename_image(env, relative_path: str, new_filename: str) -> dict:
     original_ext = os.path.splitext(source_relative_path)[1]
     if not os.path.splitext(clean_name)[1]:
         clean_name = f"{clean_name}{original_ext}"
+    if not clean_name.lower().endswith(env.SUPPORTED_IMAGE_EXTENSIONS):
+        raise ValueError("unsupported image extension")
 
     target_source_relative = env.normalize_relative_path(os.path.join(os.path.dirname(source_relative_path), clean_name))
     target_relative = env.make_image_ref(source_id, target_source_relative)
@@ -436,7 +441,7 @@ def rename_image(env, relative_path: str, new_filename: str) -> dict:
     }
 
 
-def batch_rename_images(env, 
+def batch_rename_images(env,
     relative_paths: list[str],
     template: str,
     start_number: int = 1,
@@ -530,6 +535,7 @@ def batch_rename_images(env,
 
 
 def create_folder(env, subfolder: str) -> dict[str, Any]:
+    env.get_runtime().require_file_operations_ready()
     source, normalized_subfolder, full_path = env._resolve_folder_ref_path(subfolder, require_writable=True)
     if not normalized_subfolder:
         raise ValueError("folder path required")

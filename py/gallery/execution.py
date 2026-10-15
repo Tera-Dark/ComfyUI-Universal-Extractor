@@ -20,6 +20,7 @@ _SLOTS = BoundedSemaphore(16)
 _UPLOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ue-upload")
 _UPLOAD_SLOTS = BoundedSemaphore(16)
 QUERY_ONLY = ContextVar("gallery_query_only", default=False)
+DEFER_INDEX_REFRESH = ContextVar("gallery_defer_index_refresh", default=False)
 
 
 async def await_task(future):
@@ -29,17 +30,21 @@ async def await_task(future):
 
 
 async def execute(runtime, function, *args, lane="read", **kwargs):
-    slots = runtime.read_slots if lane == "read" else runtime.write_slots
+    slots = {"read": runtime.read_slots, "write": runtime.write_slots,
+             "scan": runtime.scan_slots, "analysis": runtime.analysis_slots, "thumb": runtime.thumb_slots}[lane]
     if not slots.acquire(blocking=False):
         raise web.HTTPServiceUnavailable(text='{"error":"Gallery is busy. Retry shortly."}', content_type="application/json", headers={"Retry-After": "2"})
     def work():
         source_token = SOURCE_SNAPSHOT.set(runtime.env.list_gallery_sources() if lane == "read" else None)
         token = QUERY_ONLY.set(lane == "read")
+        defer_token = DEFER_INDEX_REFRESH.set(lane == "write")
         try:
+            name = getattr(getattr(function, "func", function), "__name__", "")
             if lane == "write":
                 runtime.require_catalog()
+                if name not in {"persist_image_state", "batch_update_images", "create_gallery_board", "update_gallery_board", "delete_gallery_board", "update_board_images", "create_task", "cancel"}:
+                    runtime.require_file_operations_ready()
             result = function(*args, **kwargs)
-            name = getattr(getattr(function, "func", function), "__name__", "")
             if lane == "write" and name not in {"create_task", "cancel"}:
                 runtime.require_catalog().apply([])
             if lane == "write" and runtime.env.IMAGE_INDEX_CACHE.get("built_at"):
@@ -48,9 +53,10 @@ async def execute(runtime, function, *args, lane="read", **kwargs):
             return result
         finally:
             QUERY_ONLY.reset(token)
+            DEFER_INDEX_REFRESH.reset(defer_token)
             SOURCE_SNAPSHOT.reset(source_token)
     executor = {"read": runtime.read_executor, "write": runtime.write_executor,
-                "scan": runtime.scan_executor, "analysis": runtime.analysis_executor}[lane]
+                "scan": runtime.scan_executor, "analysis": runtime.analysis_executor, "thumb": runtime.thumb_executor}[lane]
     try:
         future = executor.submit(work)
     except BaseException:

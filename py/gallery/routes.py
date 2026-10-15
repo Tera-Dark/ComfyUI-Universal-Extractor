@@ -100,7 +100,10 @@ async def run_gallery_task(function, *args, **kwargs):
         await await_task(runtime.get_jobs().future(job["id"]))
         return await execute(runtime, function, *args, **kwargs)
     lane = "write" if name in _WRITE_TASKS else "scan" if name == "get_image_freshness" else "analysis" if name in {"list_variant_groups", "get_variant_group_images", "get_image_metadata"} else "read"
-    return await execute(runtime, function, *args, lane=lane, **kwargs)
+    result = await execute(runtime, function, *args, lane=lane, **kwargs)
+    if lane == "write" and runtime.env.IMAGE_INDEX_CACHE.get("dirty"):
+        await runtime.prepare_index()
+    return result
 
 
 async def run_upload_task(function, *args):
@@ -518,7 +521,7 @@ async def api_thumbnail(request: web.Request) -> web.StreamResponse:
         return _bad_request("relative_path required")
 
     try:
-        _, thumb_path = await asyncio.to_thread(get_thumbnail_path, relative_path, size)
+        _, thumb_path = await execute(gallery_service.get_runtime(), get_thumbnail_path, relative_path, size, lane="thumb")
     except FileNotFoundError as error:
         return web.json_response({"error": str(error)}, status=404)
     except (RuntimeError, ValueError) as error:
@@ -645,6 +648,7 @@ async def api_update_image_state(request: web.Request) -> web.Response:
 
 
 def _validate_upload_destination(path, kind):
+    gallery_service.get_runtime().require_file_operations_ready()
     if kind == "library":
         gallery_service._ensure_within_directory(gallery_service.DATA_DIR, path, "library")
         if not path.lower().endswith(".json"):
@@ -708,7 +712,12 @@ async def _receive_import_files(request: web.Request) -> web.Response:
                     await run_upload_task(session.write, index, chunk)
             if skipped_item:
                 skipped.append(skipped_item)
-        entries = await run_upload_task(session.commit)
+        def commit_upload():
+            with gallery_service.FILE_OPERATION_LOCK:
+                gallery_service.get_runtime().require_file_operations_ready()
+                # A scan that began before publication must retry its snapshot.
+                return session.commit(lambda: gallery_service.get_runtime().require_catalog().apply([]))
+        entries = await run_upload_task(commit_upload)
         images, libraries = [], []
         for entry in entries:
             target = entry["target"]

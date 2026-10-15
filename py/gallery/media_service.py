@@ -19,9 +19,8 @@ def _read_image_dimensions(env, full_path: str) -> tuple[int, int]:
     if not env.HAS_PIL:
         return 0, 0
     try:
-        with env.guarded_image_open(full_path) as image:
-            width, height = image.size
-            return int(width or 0), int(height or 0)
+        dimensions = env.get_runtime().processor.probe(full_path)
+        return int(dimensions.get("width") or 0), int(dimensions.get("height") or 0)
     except env.DecompressionBombError as error:
         print(f"[Universal Extractor] image dimensions skipped ({full_path}): {error}")
         return 0, 0
@@ -284,7 +283,7 @@ def _lookup_fingerprint_rows(env, connection: sqlite3.Connection, paths: list[st
     return fingerprints
 
 
-def _sync_fingerprints_for_rows(env, 
+def _sync_fingerprints_for_rows(env,
     connection: sqlite3.Connection,
     rows: list[sqlite3.Row],
     source_by_id: dict[str, dict[str, Any]],
@@ -525,7 +524,7 @@ def _variant_items_for_rows(env, rows: list[sqlite3.Row], fingerprint_rows: list
     return items
 
 
-def list_variant_groups(env, 
+def list_variant_groups(env,
     *,
     search: str = "",
     category: str = "",
@@ -581,7 +580,7 @@ def list_variant_groups(env,
     }
 
 
-def get_variant_group_images(env, 
+def get_variant_group_images(env,
     *,
     group_id: str,
     group_type: str = "",
@@ -631,7 +630,7 @@ def get_variant_group_images(env,
     }
 
 
-def prewarm_image_fingerprints(env, 
+def prewarm_image_fingerprints(env,
     *,
     relative_paths: list[str] | None = None,
     subfolder: str = "",

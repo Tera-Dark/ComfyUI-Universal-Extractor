@@ -21,8 +21,8 @@ class UploadSession:
         self.entries = []
         self.status = "receiving"
 
-    def save(self):
-        save_json(str(self.journal), {"version": 1, "id": self.id, "status": self.status, "entries": self.entries})
+    def save(self, status=None):
+        save_json(str(self.journal), {"version": 1, "id": self.id, "status": status or self.status, "entries": self.entries})
 
     def add(self, target, kind):
         self.validate(target, kind)
@@ -48,7 +48,7 @@ class UploadSession:
         with open(self.entries[index]["stage"], "ab") as stream:
             stream.write(chunk)
 
-    def commit(self):
+    def commit(self, on_publish=None):
         try:
             for entry in self.entries:
                 self.validate(entry["target"], entry["kind"])
@@ -63,8 +63,10 @@ class UploadSession:
                 os.link(entry["stage"], entry["target"])
                 entry["published"] = True
                 self.save()
+            if on_publish:
+                on_publish()
+            self.save(status="committed")
             self.status = "committed"
-            self.save()
         except BaseException:
             self.abort()
             raise

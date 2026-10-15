@@ -56,7 +56,7 @@ def normalize_library_filename(env, name: str) -> str:
     return clean_name
 
 
-def import_library_data(env, 
+def import_library_data(env,
     source_filename: str,
     raw_payload: bytes,
     mode: str = "create",
@@ -295,7 +295,7 @@ def _build_artist_candidates(env, data: list[dict[str, Any]]) -> list[dict[str, 
     return candidates
 
 
-def search_library_artists(env, 
+def search_library_artists(env,
     name: str,
     query: str = "",
     filter_mode: str = "none",
@@ -329,7 +329,7 @@ def search_library_artists(env,
     }
 
 
-def generate_artist_string(env, 
+def generate_artist_string(env,
     name: str,
     query: str = "",
     count: int = 3,

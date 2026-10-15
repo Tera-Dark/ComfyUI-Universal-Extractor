@@ -614,7 +614,7 @@ def test_missing_pinned_state_merges_without_overwriting_target_metadata(isolate
     assert service.get_image_state("old/image.png")["pinned"] is False
 
 
-def test_incremental_refresh_preserves_pin_after_external_move(isolated_gallery_env, monkeypatch):
+def test_incremental_refresh_keeps_known_identity_state_at_external_move_origin(isolated_gallery_env, monkeypatch):
     service = isolated_gallery_env.service
     monkeypatch.setattr(service, "_schedule_color_index_backfill", lambda *_args, **_kwargs: None)
     monkeypatch.setattr(service, "_schedule_dimension_backfill", lambda *_args, **_kwargs: None)
@@ -625,6 +625,7 @@ def test_incremental_refresh_preserves_pin_after_external_move(isolated_gallery_
     service.persist_image_state("old/image.png", {"pinned": True, "title": "Moved externally"})
     first_page = service.list_images_page(favorites_only=True, force_refresh=True)
     assert first_page["total"] == 1
+    original_id = first_page["images"][0]["asset_id"]
 
     relocated_dir = isolated_gallery_env.output_dir / "Archive" / "old"
     relocated_dir.mkdir(parents=True)
@@ -635,9 +636,14 @@ def test_incremental_refresh_preserves_pin_after_external_move(isolated_gallery_
 
     refreshed = service.list_images_page(favorites_only=True, force_refresh=True)
 
-    assert refreshed["total"] == 1
-    assert refreshed["images"][0]["relative_path"] == "Archive/old/image.png"
-    assert refreshed["images"][0]["title"] == "Moved externally"
+    # 1.6 identity policy explicitly replaces suffix guessing for known assets.
+    assert refreshed["total"] == 0
+    assert service.get_image_state("old/image.png")["title"] == "Moved externally"
+    assert service.get_runtime().catalog.get(original_id)["availability"] == "missing"
+    new_image = service.list_images_page()["images"][0]
+    assert new_image["relative_path"] == "Archive/old/image.png"
+    assert new_image["asset_id"] != original_id
+    assert new_image["title"] == ""
 
 
 def test_force_refresh_incrementally_updates_changed_files(isolated_gallery_env, monkeypatch):

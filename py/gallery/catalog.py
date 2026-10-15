@@ -34,8 +34,10 @@ class Catalog:
                 if version > self.VERSION:
                     raise CatalogUnavailable("Catalog is newer than this plugin; restore matching code.")
                 if version and version < self.VERSION:
-                    with sqlite3.connect(str(self.path) + f".bak-{time.time_ns()}") as backup:
+                    backup = sqlite3.connect(str(self.path) + f".bak-{time.time_ns()}")
+                    try:
                         db.backup(backup)
+                    finally:
                         backup.close()
                 db.executescript("""
                     CREATE TABLE IF NOT EXISTS assets(
@@ -50,6 +52,7 @@ class Catalog:
                       ON assets(source_id, namespace, location_key)
                       WHERE availability IN ('online','missing');
                     CREATE INDEX IF NOT EXISTS assets_trash ON assets(trash_id);
+                    CREATE INDEX IF NOT EXISTS assets_location_history ON assets(source_id, location_key);
                     CREATE TABLE IF NOT EXISTS catalog_meta(key TEXT PRIMARY KEY, value INTEGER NOT NULL);
                     INSERT OR IGNORE INTO catalog_meta VALUES('generation',0);
                     CREATE TABLE IF NOT EXISTS catalog_migrations(version INTEGER PRIMARY KEY, applied_at REAL NOT NULL);
@@ -120,6 +123,13 @@ class Catalog:
         with self.connect() as db:
             row = db.execute("SELECT * FROM assets WHERE asset_id=?", (asset_id,)).fetchone()
             return dict(row) if row else None
+
+    def tracks_location(self, source_id, relative_path):
+        # Include old namespaces and tombstones: a known identity must never be
+        # reassigned by legacy suffix-based annotation recovery.
+        with self.connect() as db:
+            return db.execute("SELECT 1 FROM assets WHERE source_id=? AND location_key=? LIMIT 1",
+                              (source_id, os.path.normcase(relative_path.replace("\\", "/")))).fetchone() is not None
 
     def snapshot(self, ids):
         return [row for asset_id in ids if (row := self.get(asset_id))]
