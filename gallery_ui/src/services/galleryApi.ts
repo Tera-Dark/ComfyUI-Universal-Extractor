@@ -1,5 +1,6 @@
 import { reportJobActivity } from "./jobActivity";
 import type { GalleryJob } from "../types/universal-gallery";
+import type { ImageSearchResponse } from "../types/universal-gallery";
 import type {
   BatchUpdateResult,
   BoardMutationResult,
@@ -42,7 +43,7 @@ export class ApiRequestError extends Error {
 }
 
 const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> => {
-  const tracked = typeof input === "string" && (input.includes("force_refresh=true") || (input.includes("fingerprints/prewarm") || input.includes("/images/variant-")) || (input.endsWith("/jobs") && init?.method === "POST"));
+  const tracked = typeof input === "string" && (input.includes("force_refresh=true") || (input.includes("fingerprints/prewarm") || input.includes("/images/variant-") || input.includes("/images/search-by-image")) || (input.endsWith("/jobs") && init?.method === "POST"));
   if (tracked) reportJobActivity(1);
   try {
   const response = await fetch(input, init);
@@ -80,6 +81,11 @@ const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Pro
 };
 
 export const galleryApi = {
+  async searchByImage(file: File, minimum = 70, signal?: AbortSignal) {
+    const body = new FormData();
+    body.append("image", file);
+    return requestJson<ImageSearchResponse>(`/universal_gallery/api/images/search-by-image?minimum=${minimum}`, { method: "POST", body, signal });
+  },
   async listJobs(signal?: AbortSignal) {
     return requestJson<{ jobs: GalleryJob[]; total: number }>("/universal_gallery/api/jobs?limit=50", { signal });
   },

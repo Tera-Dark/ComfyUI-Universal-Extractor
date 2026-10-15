@@ -1232,6 +1232,8 @@ def register_routes(app):
         app.cleanup_ctx.append(_gallery_lifecycle)
     from .job_routes import handlers
     create_job, list_jobs, get_job, cancel_job = handlers(gallery_service)
+    from .image_search_routes import handler as image_search_handler
+    _safe_add_route(app.router, "post", "/universal_gallery/api/images/search-by-image", image_search_handler(gallery_service))
     _safe_add_route(app.router, "post", "/universal_gallery/api/jobs", create_job)
     _safe_add_route(app.router, "get", "/universal_gallery/api/jobs", list_jobs)
     _safe_add_route(app.router, "get", "/universal_gallery/api/jobs/{id}", get_job)

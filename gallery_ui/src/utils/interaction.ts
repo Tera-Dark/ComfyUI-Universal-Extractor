@@ -72,7 +72,7 @@ export const FloatingLayerPortal = ({ children }: { children: ReactNode }) => {
 export const useDismissableLayer = (
   active: boolean,
   onDismiss: () => void,
-  options: { closeOnContextMenu?: boolean; closeOnScroll?: boolean } = {},
+  options: { closeOnContextMenu?: boolean; closeOnScroll?: boolean; closeOnResize?: boolean } = {},
 ) => {
   useEffect(() => {
     if (!active) {
@@ -100,7 +100,7 @@ export const useDismissableLayer = (
     };
 
     window.addEventListener("click", onDismiss);
-    window.addEventListener("resize", onDismiss);
+    if (options.closeOnResize !== false) window.addEventListener("resize", onDismiss);
     window.addEventListener("keydown", handleKeyDown);
     if (options.closeOnContextMenu) {
       window.addEventListener("contextmenu", onDismiss);
@@ -111,7 +111,7 @@ export const useDismissableLayer = (
 
     return () => {
       window.removeEventListener("click", onDismiss);
-      window.removeEventListener("resize", onDismiss);
+      if (options.closeOnResize !== false) window.removeEventListener("resize", onDismiss);
       window.removeEventListener("keydown", handleKeyDown);
       if (options.closeOnContextMenu) {
         window.removeEventListener("contextmenu", onDismiss);
@@ -120,5 +120,5 @@ export const useDismissableLayer = (
         window.removeEventListener("scroll", handleScroll, true);
       }
     };
-  }, [active, onDismiss, options.closeOnContextMenu, options.closeOnScroll]);
+  }, [active, onDismiss, options.closeOnContextMenu, options.closeOnScroll, options.closeOnResize]);
 };

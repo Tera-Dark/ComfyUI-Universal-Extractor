@@ -436,6 +436,15 @@ export interface GalleryJob {
   payload: Record<string, unknown>;
 }
 
+export interface ImageSearchResponse {
+  matches: Array<{ image: ImageRecord; score: number; match_type: "exact" | "similar"; full_path: string }>;
+  indexed: number;
+  total: number;
+  pending: number;
+  failed: number;
+  job?: GalleryJob;
+}
+
 export interface DetailNavigationState {
   items: ImageRecord[];
   currentIndex: number;

@@ -18,7 +18,7 @@ except ImportError:
     HAS_PIL = False
 
 
-FINGERPRINT_VERSION = "2"
+FINGERPRINT_VERSION = "3"
 DHASH_SIZE = 8
 FILENAME_SEQUENCE_RE = re.compile(
     r"^(?P<base>.+?)(?:[_\-\s]+(?P<number>\d{3,})(?:[_\-\s]*(?:upscaled?|hires|final|edit|基础生图|最终成图|系数放大))*)$",
@@ -121,11 +121,14 @@ def build_metadata_hashes(image_path: str) -> tuple[str, str]:
 
 
 def build_image_fingerprint(image_path: str, filename: str) -> dict[str, Any]:
+    from .image_search import describe_image
+
     error = ""
     visual_hash = ""
     prompt_hash = ""
     workflow_hash = ""
     file_hash = ""
+    search_descriptor = {}
     try:
         hasher = hashlib.sha256()
         with open(image_path, "rb") as handle:
@@ -139,12 +142,17 @@ def build_image_fingerprint(image_path: str, filename: str) -> dict[str, Any]:
     except DecompressionBombError as exc:
         error = str(exc)
     try:
+        search_descriptor = describe_image(image_path)
+    except Exception as exc:
+        error = error or str(exc)
+    try:
         prompt_hash, workflow_hash = build_metadata_hashes(image_path)
     except Exception as exc:
         error = error or str(exc)
 
     return {
         "visual_hash": visual_hash,
+        "search_descriptor": search_descriptor,
         "file_hash": file_hash,
         "prompt_hash": prompt_hash,
         "workflow_hash": workflow_hash,

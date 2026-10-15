@@ -18,12 +18,12 @@ def handlers(service):
         payload = body.get("payload", {})
         if not isinstance(payload, dict):
             raise ValueError("payload must be an object")
-        allowed = {"subfolder", "force"} if kind == "refresh_index" else {"subfolder", "relative_paths", "limit", "search", "category", "board_id", "date_from", "date_to", "favorites_only", "color_family"}
+        allowed = {"subfolder", "force"} if kind == "refresh_index" else {"subfolder", "relative_paths", "limit", "search", "category", "board_id", "date_from", "date_to", "favorites_only", "color_family", "whole_library"}
         if set(payload) - allowed:
             raise ValueError("unsupported task parameter")
         payload = dict(payload)
         for key, value in payload.items():
-            if key in {"force", "favorites_only"}:
+            if key in {"force", "favorites_only", "whole_library"}:
                 if not isinstance(value, bool):
                     raise ValueError(f"{key} must be boolean")
             elif key == "limit":
@@ -31,6 +31,8 @@ def handlers(service):
                     raise ValueError("limit must be between 1 and 2000")
             elif key != "relative_paths" and (not isinstance(value, str) or len(value) > 2000):
                 raise ValueError(f"invalid {key}")
+        if payload.get("whole_library") and set(payload) != {"whole_library"}:
+            raise ValueError("whole_library cannot be combined with scoped parameters")
         subfolder = payload.get("subfolder", "")
         if subfolder:
             source_id, relative = service.parse_folder_ref(subfolder)

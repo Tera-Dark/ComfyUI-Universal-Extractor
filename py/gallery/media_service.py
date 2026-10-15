@@ -263,6 +263,7 @@ def _fingerprint_row_current(env, row: sqlite3.Row, fingerprint: sqlite3.Row | N
         return False
     return (
         str(fingerprint["version"] or "") == env.FINGERPRINT_VERSION
+        and int(fingerprint["file_mtime_ns"] or 0) > 0
         and ("asset_id" not in row.keys() or (fingerprint["asset_id"] == row["asset_id"] and fingerprint["content_revision"] == row["content_revision"]))
         and int(fingerprint["file_size"] or 0) == int(row["size"] or 0)
         and int(fingerprint["modified_at"] or 0) == int(row["modified_at"] or 0)
@@ -289,6 +290,8 @@ def _sync_fingerprints_for_rows(env,
     source_by_id: dict[str, dict[str, Any]],
     *,
     limit: int = 360,
+    progress_offset: int = 0,
+    progress_total: int | None = None,
 ) -> dict[str, Any]:
     if QUERY_ONLY.get():
         return {"queued": 0, "completed": 0, "failed": 0, "last_error": ""}
@@ -305,7 +308,7 @@ def _sync_fingerprints_for_rows(env,
 
     for row in stale_rows[: max(1, int(limit or env.FINGERPRINT_SYNC_LIMIT))]:
         from .jobs import checkpoint
-        checkpoint(completed + failed, queued)
+        checkpoint(progress_offset + completed + failed, progress_total if progress_total is not None else queued)
         connection.commit()
         relative_path = str(row["relative_path"])
         source = source_by_id.get(str(row["source_id"]))
@@ -314,6 +317,7 @@ def _sync_fingerprints_for_rows(env,
         full_path = env._full_path_for_index_row(row, source)
         before_stat = None
         try:
+            _, full_path = env.resolve_image_path(relative_path)
             before_stat = os.stat(full_path)
             fingerprint = env.get_runtime().processor.build_fingerprints(full_path, str(row["filename"]))
         except Exception as error:
@@ -337,7 +341,7 @@ def _sync_fingerprints_for_rows(env,
                 if before_stat is None or observed.st_size != int(row["size"]) or (observed.st_size, observed.st_mtime_ns) != (before_stat.st_size, before_stat.st_mtime_ns):
                     continue
                 identity = env.get_runtime().catalog.get(row["asset_id"]) if "asset_id" in row.keys() and row["asset_id"] else None
-                if identity and (identity["availability"] != "online" or identity["content_revision"] != row["content_revision"] or identity["relative_path"] != row["source_relative_path"] or identity["source_id"] != row["source_id"]):
+                if identity and (identity["availability"] != "online" or identity["content_revision"] != row["content_revision"] or identity["relative_path"] != row["source_relative_path"] or identity["source_id"] != row["source_id"] or identity["mtime_ns"] != before_stat.st_mtime_ns):
                     continue
             except OSError:
                 continue
@@ -345,9 +349,9 @@ def _sync_fingerprints_for_rows(env,
                 """
                 INSERT INTO gallery_image_fingerprints(
                     relative_path, source_id, file_size, modified_at, file_hash, visual_hash,
-                    prompt_hash, workflow_hash, filename_group_key, error, indexed_at, version
+                    prompt_hash, workflow_hash, filename_group_key, error, indexed_at, version, search_descriptor
                 )
-                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(relative_path) DO UPDATE SET
                     source_id = excluded.source_id,
                     file_size = excluded.file_size,
@@ -359,7 +363,8 @@ def _sync_fingerprints_for_rows(env,
                     filename_group_key = excluded.filename_group_key,
                     error = excluded.error,
                     indexed_at = excluded.indexed_at,
-                    version = excluded.version
+                    version = excluded.version,
+                    search_descriptor = excluded.search_descriptor
                 """,
                 (
                     relative_path,
@@ -374,11 +379,13 @@ def _sync_fingerprints_for_rows(env,
                     str(fingerprint.get("error") or ""),
                     time.time(),
                     env.FINGERPRINT_VERSION,
+                    json.dumps(fingerprint.get("search_descriptor") or {}),
                 ),
             )
 
             if "asset_id" in row.keys():
                 connection.execute("UPDATE gallery_image_fingerprints SET asset_id=?,content_revision=? WHERE relative_path=?", (row["asset_id"], row["content_revision"], relative_path))
+            connection.execute("UPDATE gallery_image_fingerprints SET file_mtime_ns=? WHERE relative_path=?", (observed.st_mtime_ns, relative_path))
             connection.commit()
 
     return {"queued": queued, "completed": completed, "failed": failed, "last_error": last_error}

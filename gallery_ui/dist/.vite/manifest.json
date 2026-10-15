@@ -1,70 +1,78 @@
 {
-  "_I18nProvider-rc5_XKDn.js": {
-    "file": "assets/I18nProvider-rc5_XKDn.js",
+  "_I18nProvider-D2pJdNmW.js": {
+    "file": "assets/I18nProvider-D2pJdNmW.js",
     "name": "I18nProvider"
   },
-  "_boxes-Cxc-MEZu.js": {
-    "file": "assets/boxes-Cxc-MEZu.js",
+  "_boxes-rWzjRscZ.js": {
+    "file": "assets/boxes-rWzjRscZ.js",
     "name": "boxes",
     "imports": [
-      "_I18nProvider-rc5_XKDn.js"
+      "_I18nProvider-D2pJdNmW.js"
     ]
   },
-  "_copy-zjQcrb_W.js": {
-    "file": "assets/copy-zjQcrb_W.js",
+  "_copy-DGVg_jYl.js": {
+    "file": "assets/copy-DGVg_jYl.js",
     "name": "copy",
     "imports": [
-      "_I18nProvider-rc5_XKDn.js"
+      "_I18nProvider-D2pJdNmW.js"
     ]
   },
-  "_download-BIZJ3hrD.js": {
-    "file": "assets/download-BIZJ3hrD.js",
+  "_download-w9DeY2h_.js": {
+    "file": "assets/download-w9DeY2h_.js",
     "name": "download",
     "imports": [
-      "_I18nProvider-rc5_XKDn.js"
+      "_I18nProvider-D2pJdNmW.js"
     ]
   },
-  "_refresh-ccw-B8R1rXEk.js": {
-    "file": "assets/refresh-ccw-B8R1rXEk.js",
+  "_image-plus-Dny5FjUd.js": {
+    "file": "assets/image-plus-Dny5FjUd.js",
+    "name": "image-plus",
+    "imports": [
+      "_I18nProvider-D2pJdNmW.js"
+    ]
+  },
+  "_refresh-ccw-Db9RhmbX.js": {
+    "file": "assets/refresh-ccw-Db9RhmbX.js",
     "name": "refresh-ccw",
     "imports": [
-      "_I18nProvider-rc5_XKDn.js"
+      "_I18nProvider-D2pJdNmW.js"
     ]
   },
-  "_save-CO1E18l-.js": {
-    "file": "assets/save-CO1E18l-.js",
+  "_save-CUz-FtXJ.js": {
+    "file": "assets/save-CUz-FtXJ.js",
     "name": "save",
     "imports": [
-      "_I18nProvider-rc5_XKDn.js"
+      "_I18nProvider-D2pJdNmW.js"
     ]
   },
-  "_sparkles-Dt4m8UTB.js": {
-    "file": "assets/sparkles-Dt4m8UTB.js",
+  "_sparkles-BojjEWa7.js": {
+    "file": "assets/sparkles-BojjEWa7.js",
     "name": "sparkles",
     "imports": [
-      "_I18nProvider-rc5_XKDn.js"
+      "_I18nProvider-D2pJdNmW.js"
     ]
   },
-  "_wand-sparkles-BQONB1eT.js": {
-    "file": "assets/wand-sparkles-BQONB1eT.js",
+  "_wand-sparkles-BRh5Xs7c.js": {
+    "file": "assets/wand-sparkles-BRh5Xs7c.js",
     "name": "wand-sparkles",
     "imports": [
-      "_I18nProvider-rc5_XKDn.js"
+      "_I18nProvider-D2pJdNmW.js"
     ]
   },
   "index.html": {
-    "file": "assets/index-BcMNuy5x.js",
+    "file": "assets/index-Cn9pZDL_.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_I18nProvider-rc5_XKDn.js"
+      "_I18nProvider-D2pJdNmW.js"
     ],
     "dynamicImports": [
       "src/components/gallery/DualFolderWorkspace.tsx",
       "src/components/gallery/VariantGroupsView.tsx",
       "src/components/gallery/BoardShareModal.tsx",
       "src/components/gallery/MetadataViewerModal.tsx",
+      "src/components/gallery/ImageSearchModal.tsx",
       "src/components/gallery/ImageDetailModal.tsx",
       "src/components/library/LibraryWorkspace.tsx",
       "src/components/settings/SettingsWorkspace.tsx",
@@ -75,91 +83,106 @@
     ]
   },
   "src/components/gallery/BoardShareModal.tsx": {
-    "file": "assets/BoardShareModal-CDXfFpKI.js",
+    "file": "assets/BoardShareModal-Cn8hxlE7.js",
     "name": "BoardShareModal",
     "src": "src/components/gallery/BoardShareModal.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-rc5_XKDn.js",
-      "_copy-zjQcrb_W.js",
-      "_download-BIZJ3hrD.js",
+      "_I18nProvider-D2pJdNmW.js",
+      "_copy-DGVg_jYl.js",
+      "_download-w9DeY2h_.js",
       "index.html"
     ]
   },
   "src/components/gallery/DualFolderWorkspace.tsx": {
-    "file": "assets/DualFolderWorkspace-b_7pF_bL.js",
+    "file": "assets/DualFolderWorkspace-ByAm3OTd.js",
     "name": "DualFolderWorkspace",
     "src": "src/components/gallery/DualFolderWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-rc5_XKDn.js",
-      "_refresh-ccw-B8R1rXEk.js",
+      "_I18nProvider-D2pJdNmW.js",
+      "_refresh-ccw-Db9RhmbX.js",
       "index.html",
       "src/components/gallery/MetadataViewerModal.tsx"
     ]
   },
   "src/components/gallery/ImageDetailModal.tsx": {
-    "file": "assets/ImageDetailModal-Da87uP4G.js",
+    "file": "assets/ImageDetailModal-o75d4Dxf.js",
     "name": "ImageDetailModal",
     "src": "src/components/gallery/ImageDetailModal.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-rc5_XKDn.js",
-      "_sparkles-Dt4m8UTB.js",
-      "_boxes-Cxc-MEZu.js",
-      "_copy-zjQcrb_W.js",
-      "_save-CO1E18l-.js",
+      "_I18nProvider-D2pJdNmW.js",
+      "_sparkles-BojjEWa7.js",
+      "_boxes-rWzjRscZ.js",
+      "_copy-DGVg_jYl.js",
+      "_save-CUz-FtXJ.js",
       "index.html"
     ],
     "css": [
       "assets/ImageDetailModal-B1vU-WEK.css"
     ]
   },
+  "src/components/gallery/ImageSearchModal.tsx": {
+    "file": "assets/ImageSearchModal-CWEdn2ED.js",
+    "name": "ImageSearchModal",
+    "src": "src/components/gallery/ImageSearchModal.tsx",
+    "isDynamicEntry": true,
+    "imports": [
+      "_I18nProvider-D2pJdNmW.js",
+      "_image-plus-Dny5FjUd.js",
+      "index.html"
+    ],
+    "css": [
+      "assets/ImageSearchModal-B9S2m0Ex.css"
+    ]
+  },
   "src/components/gallery/MetadataViewerModal.tsx": {
-    "file": "assets/MetadataViewerModal-SEzBlbF8.js",
+    "file": "assets/MetadataViewerModal-YxJ8Vpl5.js",
     "name": "MetadataViewerModal",
     "src": "src/components/gallery/MetadataViewerModal.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-rc5_XKDn.js",
+      "_I18nProvider-D2pJdNmW.js",
       "index.html"
     ]
   },
   "src/components/gallery/VariantGroupsView.tsx": {
-    "file": "assets/VariantGroupsView-Bh02jzkw.js",
+    "file": "assets/VariantGroupsView-DMz34BDK.js",
     "name": "VariantGroupsView",
     "src": "src/components/gallery/VariantGroupsView.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-rc5_XKDn.js",
+      "_I18nProvider-D2pJdNmW.js",
       "index.html"
     ]
   },
   "src/components/library/LibraryWorkspace.tsx": {
-    "file": "assets/LibraryWorkspace-BZUSFmEr.js",
+    "file": "assets/LibraryWorkspace-Cb1UVrkE.js",
     "name": "LibraryWorkspace",
     "src": "src/components/library/LibraryWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-rc5_XKDn.js",
-      "_sparkles-Dt4m8UTB.js",
-      "_wand-sparkles-BQONB1eT.js",
-      "_boxes-Cxc-MEZu.js",
-      "_copy-zjQcrb_W.js",
-      "_download-BIZJ3hrD.js",
-      "_refresh-ccw-B8R1rXEk.js",
-      "_save-CO1E18l-.js",
+      "_I18nProvider-D2pJdNmW.js",
+      "_sparkles-BojjEWa7.js",
+      "_wand-sparkles-BRh5Xs7c.js",
+      "_boxes-rWzjRscZ.js",
+      "_copy-DGVg_jYl.js",
+      "_download-w9DeY2h_.js",
+      "_refresh-ccw-Db9RhmbX.js",
+      "_save-CUz-FtXJ.js",
       "index.html"
     ]
   },
   "src/components/settings/SettingsWorkspace.tsx": {
-    "file": "assets/SettingsWorkspace-21Z8ybsm.js",
+    "file": "assets/SettingsWorkspace-BVKVMpGI.js",
     "name": "SettingsWorkspace",
     "src": "src/components/settings/SettingsWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-rc5_XKDn.js",
-      "_save-CO1E18l-.js",
+      "_I18nProvider-D2pJdNmW.js",
+      "_image-plus-Dny5FjUd.js",
+      "_save-CUz-FtXJ.js",
       "index.html"
     ],
     "css": [
@@ -167,15 +190,15 @@
     ]
   },
   "src/components/workbench/WorkbenchWorkspace.tsx": {
-    "file": "assets/WorkbenchWorkspace-pUAner-o.js",
+    "file": "assets/WorkbenchWorkspace-D6aRpIKy.js",
     "name": "WorkbenchWorkspace",
     "src": "src/components/workbench/WorkbenchWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-rc5_XKDn.js",
-      "_sparkles-Dt4m8UTB.js",
-      "_wand-sparkles-BQONB1eT.js",
-      "_copy-zjQcrb_W.js",
+      "_I18nProvider-D2pJdNmW.js",
+      "_sparkles-BojjEWa7.js",
+      "_wand-sparkles-BRh5Xs7c.js",
+      "_copy-DGVg_jYl.js",
       "index.html"
     ],
     "css": [

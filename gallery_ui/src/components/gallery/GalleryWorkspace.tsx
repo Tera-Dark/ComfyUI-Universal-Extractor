@@ -59,6 +59,7 @@ const DualFolderWorkspace = lazy(() => import("./DualFolderWorkspace").then((m) 
 const VariantGroupsView = lazy(() => import("./VariantGroupsView").then((m) => ({ default: m.VariantGroupsView })));
 const BoardShareModal = lazy(() => import("./BoardShareModal").then((m) => ({ default: m.BoardShareModal })));
 const MetadataViewerModal = lazy(() => import("./MetadataViewerModal").then((m) => ({ default: m.MetadataViewerModal })));
+const ImageSearchModal = lazy(() => import("./ImageSearchModal").then((m) => ({ default: m.ImageSearchModal })));
 
 const MASONRY_GAP = 14;
 const SELECTION_AUTO_SCROLL_EDGE_PX = 72;
@@ -232,6 +233,19 @@ export const GalleryWorkspace = ({
   );
   const [dualFolderMode, setDualFolderMode] = useState(false);
   const [variantMode, setVariantMode] = useState(false);
+  const [showImageSearch, setShowImageSearch] = useState(false);
+  const [imageSearchFile, setImageSearchFile] = useState<File | null>(null);
+  const closeImageSearch = useCallback(() => { setShowImageSearch(false); setImageSearchFile(null); }, []);
+  useEffect(() => {
+    if (isTrashView) return;
+    const paste = (event: ClipboardEvent) => {
+      if (isEditableTarget(event.target) || document.querySelector('[aria-modal="true"]')) return;
+      const file = [...(event.clipboardData?.files ?? [])].find((item) => item.type.startsWith("image/"));
+      if (file) { event.preventDefault(); setImageSearchFile(file); setShowImageSearch(true); }
+    };
+    window.addEventListener("paste", paste);
+    return () => window.removeEventListener("paste", paste);
+  }, [isTrashView]);
   const [variantType, setVariantType] = useState<VariantGroupType | "">("");
   const { begin: beginVariantRequest, invalidate: invalidateVariantRequest } = useVariantRequests();
 
@@ -1278,6 +1292,7 @@ export const GalleryWorkspace = ({
           sortOrder={sortOrder}
           searchValue={searchValue}
           onSearchChange={onSearchChange}
+          onImageSearch={() => { setImageSearchFile(null); setShowImageSearch(true); }}
           onApplyPendingLiveRefresh={onApplyPendingLiveRefresh}
           onToggleFiltersMenu={() => setShowFiltersMenu((current) => !current)}
           onCloseFiltersMenu={() => setShowFiltersMenu(false)}
@@ -1730,6 +1745,15 @@ export const GalleryWorkspace = ({
         </FloatingLayerPortal>
       ) : null}
 
+      {showImageSearch && !isTrashView ? <Suspense fallback={null}><ImageSearchModal initialFile={imageSearchFile} onClose={closeImageSearch} onOpenDetail={onOpenDetail}
+        onLocate={(image) => {
+          setDualFolderMode(false); setVariantMode(false); clearSelection();
+          onCategoryChange(""); onDateFromChange(""); onDateToChange(""); onColorFamilyChange("");
+          const relative = image.source_relative_path || image.relative_path.replace(/^[^:]+::/, "");
+          const folder = relative.includes("/") ? relative.slice(0, relative.lastIndexOf("/")) : "";
+          onOpenImportFolder?.(`${image.source_id || "default_output"}::${folder}`);
+          onSearchChange?.(image.filename);
+        }} /></Suspense> : null}
       {showBackToTop ? (
         <button
           className="ue-scrolltop-btn"

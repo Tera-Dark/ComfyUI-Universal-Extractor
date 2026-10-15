@@ -4,6 +4,8 @@ All notable changes to the ComfyUI Universal Extractor project will be documente
 
 ## Unreleased
 
+- Add local reverse image search: paste, drop or choose a reference to locate originals across enabled gallery sources. Match exact files and compressed/resized copies, show full paths, copy paths and jump to the containing folder. Build full-library visual fingerprints in persistent background tasks; keep reference uploads in memory. See [usage and limits](docs/image-search.zh-CN.md).
+
 ## 1.6.0 - 2026-10-15
 
 ### Gallery foundation

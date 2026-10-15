@@ -43,6 +43,7 @@ class GalleryRuntime:
         self.thumb_slots = BoundedSemaphore(32)
         self.upload_slots = BoundedSemaphore(16)
         self.upload_sessions = BoundedSemaphore(2)
+        self.image_search_sessions = BoundedSemaphore(2)
         try:
             self.catalog = Catalog(env.DATA_DIR)
         except CatalogUnavailable as error:
@@ -138,6 +139,9 @@ class GalleryRuntime:
                 except TimeoutError:
                     pass
             future.result()
+        if payload.get("whole_library"):
+            from .image_search import build_search_index
+            return build_search_index(self.env, context)
         options = {key: value for key, value in payload.items() if not key.startswith("_")}
         context.checkpoint(0, 1)
         result = self.env.prewarm_image_fingerprints(**options)

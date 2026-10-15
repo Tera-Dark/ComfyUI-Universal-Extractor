@@ -110,7 +110,7 @@ def _env_positive_int(name: str, default: int) -> int:
 
 THUMB_SIZE = 480
 GALLERY_INDEX_DB_FILE = os.path.join(DATA_DIR, "gallery_index.sqlite3")
-GALLERY_INDEX_SCHEMA_VERSION = 9
+GALLERY_INDEX_SCHEMA_VERSION = 10
 COLOR_INDEX_VERSION = "3"
 DIMENSION_INDEX_VERSION = "1"
 COLOR_FAMILY_MIN_RATIO = 0.25

@@ -11,6 +11,7 @@ import {
   Pin,
   RotateCcw,
   Search,
+  FolderSearch,
   Share2,
   SlidersHorizontal,
   Tag,
@@ -62,6 +63,7 @@ interface GalleryToolbarProps {
   sortOrder: string;
   searchValue?: string;
   onSearchChange?: (value: string) => void;
+  onImageSearch?: () => void;
   onApplyPendingLiveRefresh: () => void;
   onToggleFiltersMenu: () => void;
   onCloseFiltersMenu: () => void;
@@ -122,6 +124,7 @@ export const GalleryToolbar = ({
   sortOrder,
   searchValue = "",
   onSearchChange,
+  onImageSearch,
   onApplyPendingLiveRefresh,
   onToggleFiltersMenu,
   onCloseFiltersMenu,
@@ -284,6 +287,7 @@ export const GalleryToolbar = ({
             </div>
           ) : null}
 
+          {onImageSearch ? <button type="button" className="ue-filter-trigger" onClick={onImageSearch} title={t("imageSearchPaste")}><FolderSearch size={15} /><span>{t("imageSearchTitle")}</span></button> : null}
           <div className="ue-filter-controls ue-filter-controls--gallery">
             <div className="ue-toolbar-group ue-toolbar-group--browse">
               <div className="ue-filter-popover">

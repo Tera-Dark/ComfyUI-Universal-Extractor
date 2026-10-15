@@ -230,7 +230,7 @@ def _initialize_gallery_index_db(env, connection: sqlite3.Connection):
     fingerprint_columns = {row["name"] for row in connection.execute("PRAGMA table_info(gallery_image_fingerprints)").fetchall()}
     if "file_hash" not in fingerprint_columns:
         connection.execute("ALTER TABLE gallery_image_fingerprints ADD COLUMN file_hash TEXT NOT NULL DEFAULT ''")
-    for name, definition in {"asset_id": "TEXT NOT NULL DEFAULT ''", "content_revision": "INTEGER NOT NULL DEFAULT 0"}.items():
+    for name, definition in {"asset_id": "TEXT NOT NULL DEFAULT ''", "content_revision": "INTEGER NOT NULL DEFAULT 0", "search_descriptor": "TEXT NOT NULL DEFAULT '{}'", "file_mtime_ns": "INTEGER NOT NULL DEFAULT 0"}.items():
         if name not in fingerprint_columns:
             connection.execute(f"ALTER TABLE gallery_image_fingerprints ADD COLUMN {name} {definition}")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_fingerprint_file ON gallery_image_fingerprints(file_hash)")
