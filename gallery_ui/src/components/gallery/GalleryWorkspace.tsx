@@ -1,3 +1,4 @@
+import { useVariantRequests } from "../../hooks/useVariantRequests";
 import { preferredScrollBehavior } from "../../utils/imageLoading";
 import { readStorageItem, writeStorageItem } from "../../utils/safeStorage";
 import { Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -231,8 +232,8 @@ export const GalleryWorkspace = ({
   const [dualFolderMode, setDualFolderMode] = useState(false);
   const [variantMode, setVariantMode] = useState(false);
   const [variantType, setVariantType] = useState<VariantGroupType | "">("");
-  const variantRequest = useRef(0);
-  useEffect(()=>()=>{variantRequest.current++;},[]);
+  const { begin: beginVariantRequest, invalidate: invalidateVariantRequest } = useVariantRequests();
+
   const [variantGroups, setVariantGroups] = useState<VariantGroup[]>([]);
   const [variantStatus, setVariantStatus] = useState<FingerprintIndexStatus | null>(null);
   const [variantLoading, setVariantLoading] = useState(false);
@@ -625,7 +626,7 @@ export const GalleryWorkspace = ({
 
   const loadVariantGroups = useCallback(
     async (forceRefresh = false) => {
-      const requestId=++variantRequest.current;
+      const request = beginVariantRequest();
       setVariantLoading(true);
       setVariantError("");
       try {
@@ -634,22 +635,22 @@ export const GalleryWorkspace = ({
           type: variantType,
           limit: 120,
           forceRefresh,
-        });
-        if(requestId!==variantRequest.current)return;
+        }, request.signal);
+        if(!request.isCurrent())return;
         setVariantGroups(response.groups);
         setVariantStatus(response.fingerprint_status);
       } catch (error) {
-        if(requestId===variantRequest.current)setVariantError(error instanceof Error ? error.message : t("variantEmptyText"));
+        if(request.isCurrent())setVariantError(error instanceof Error ? error.message : t("variantEmptyText"));
       } finally {
-        if(requestId===variantRequest.current)setVariantLoading(false);
+        if(request.isCurrent())setVariantLoading(false);
       }
     },
-    [t, variantQuery, variantType],
+    [t, variantQuery, variantType, beginVariantRequest],
   );
 
   const openVariantGroup = useCallback(
     async (group: VariantGroup, nextPage = 1) => {
-      const requestId=++variantRequest.current;
+      const request = beginVariantRequest();
       setVariantLoading(true);
       setVariantImages([]);
       clearSelection();
@@ -661,20 +662,20 @@ export const GalleryWorkspace = ({
           type: group.type,
           page: nextPage,
           limit: 60,
-        });
-        if(requestId!==variantRequest.current)return;
+        }, request.signal);
+        if(!request.isCurrent())return;
         setSelectedVariantGroup(response.group ?? group);
         setVariantImages(response.images);
         setVariantTotal(response.total);
         setVariantPage(response.page);
         clearSelection();
       } catch (error) {
-        if(requestId===variantRequest.current)setVariantError(error instanceof Error ? error.message : t("variantEmptyText"));
+        if(request.isCurrent())setVariantError(error instanceof Error ? error.message : t("variantEmptyText"));
       } finally {
-        if(requestId===variantRequest.current)setVariantLoading(false);
+        if(request.isCurrent())setVariantLoading(false);
       }
     },
-    [clearSelection, t, variantQuery],
+    [clearSelection, t, variantQuery, beginVariantRequest],
   );
 
   useEffect(() => {
@@ -686,7 +687,7 @@ export const GalleryWorkspace = ({
 
   useEffect(() => {
     if (!variantMode) {
-      variantRequest.current++;
+      invalidateVariantRequest();
       setVariantLoading(false);
       setSelectedVariantGroup(null);
       setVariantImages([]);
@@ -698,7 +699,7 @@ export const GalleryWorkspace = ({
     if (!isTrashView) {
       void loadVariantGroups();
     }
-  }, [clearSelection, isTrashView, loadVariantGroups, variantMode, variantQuery, variantType]);
+  }, [clearSelection, isTrashView, loadVariantGroups, variantMode, variantQuery, variantType, invalidateVariantRequest]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {

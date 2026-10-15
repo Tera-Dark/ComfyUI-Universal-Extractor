@@ -906,6 +906,13 @@ const en = {
   errorLibraryNameRequired: "Library name is required",
   imageStateSaveError: "Failed to save image info",
   errorJsonInvalid: "JSON format error",
+  jobRetry: "Retry",
+  jobRefresh: "Refresh library",
+  jobFingerprints: "Analyze images",
+  jobRunning: "Running",
+  jobFailed: "Failed",
+  jobCancelled: "Cancelled",
+  jobCompleted: "Completed",
 } as const;
 
 export default en;

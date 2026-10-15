@@ -43,6 +43,9 @@ export interface MoveTargetOption {
 }
 
 export interface ImageRecord {
+  asset_id?: string;
+  content_revision?: number;
+  media_type?: "image";
   filename: string;
   relative_path: string;
   subfolder: string;
@@ -305,6 +308,8 @@ export interface LibraryEntriesPageResponse {
 }
 
 export interface GalleryContext {
+  catalog_error?: string;
+  read_only?: boolean;
   base_dir: string;
   output_dir_absolute: string;
   output_dir_relative: string;
@@ -356,6 +361,9 @@ export interface BatchUpdateResult {
   ok: boolean;
   updated: string[];
   last_state: ImageState | null;
+  states?: Record<string, ImageState>;
+  missing?: string[];
+  failed?: Array<{ path: string; error: string }>;
   categories: string[];
   boards?: BoardSummary[];
 }
@@ -400,6 +408,7 @@ export interface BoardMutationResult {
 }
 
 export interface TrashItem {
+  asset_id?: string | null;
   id: string;
   kind: "image" | "folder" | "library";
   name: string;
@@ -412,6 +421,19 @@ export interface TrashItem {
   thumb_url?: string;
   size?: number;
   relative_path?: string;
+}
+
+export interface GalleryJob {
+  id: string;
+  kind: "refresh_index" | "fingerprint_assets" | "colors" | "dimensions";
+  state: "queued" | "running" | "cancelling" | "succeeded" | "failed" | "cancelled";
+  completed: number;
+  total: number;
+  error: string;
+  created_at: number;
+  updated_at: number;
+  attempts: number;
+  payload: Record<string, unknown>;
 }
 
 export interface DetailNavigationState {

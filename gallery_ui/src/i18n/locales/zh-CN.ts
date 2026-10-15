@@ -903,6 +903,13 @@ const zhCN = {
   errorLibraryNameRequired: "请输入词库文件名",
   imageStateSaveError: "保存图像信息失败",
   errorJsonInvalid: "JSON 格式不正确",
+  jobRetry: "重试",
+  jobRefresh: "刷新资源库",
+  jobFingerprints: "分析图片",
+  jobRunning: "处理中",
+  jobFailed: "失败",
+  jobCancelled: "已取消",
+  jobCompleted: "已完成",
 } as const;
 
 export default zhCN;

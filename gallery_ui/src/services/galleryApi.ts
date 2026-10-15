@@ -1,3 +1,5 @@
+import { reportJobActivity } from "./jobActivity";
+import type { GalleryJob } from "../types/universal-gallery";
 import type {
   BatchUpdateResult,
   BoardMutationResult,
@@ -40,6 +42,9 @@ export class ApiRequestError extends Error {
 }
 
 const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Promise<T> => {
+  const tracked = typeof input === "string" && (input.includes("force_refresh=true") || (input.includes("fingerprints/prewarm") || input.includes("/images/variant-")) || (input.endsWith("/jobs") && init?.method === "POST"));
+  if (tracked) reportJobActivity(1);
+  try {
   const response = await fetch(input, init);
   if (!response.ok) {
     // Read the body once: response.json() consumes it even when parsing fails.
@@ -68,10 +73,24 @@ const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Pro
 
     throw new ApiRequestError(message, response.status, details);
   }
-  return response.json() as Promise<T>;
+  return await response.json() as T;
+  } finally {
+    if (tracked) reportJobActivity(-1);
+  }
 };
 
 export const galleryApi = {
+  async listJobs(signal?: AbortSignal) {
+    return requestJson<{ jobs: GalleryJob[]; total: number }>("/universal_gallery/api/jobs?limit=50", { signal });
+  },
+  async createJob(kind: "refresh_index" | "fingerprint_assets", payload: Record<string, unknown>) {
+    return requestJson<{ job: GalleryJob }>("/universal_gallery/api/jobs", {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, payload }),
+    });
+  },
+  async cancelJob(id: string) {
+    return requestJson<{ job: GalleryJob }>(`/universal_gallery/api/jobs/${encodeURIComponent(id)}/cancel`, { method: "POST" });
+  },
   async getContext(forceRefresh = false, signal?: AbortSignal) {
     const params = new URLSearchParams();
     if (forceRefresh) {
@@ -165,7 +184,7 @@ export const galleryApi = {
     type?: VariantGroupType | "";
     limit?: number;
     forceRefresh?: boolean;
-  } = {}) {
+  } = {}, signal?: AbortSignal) {
     const params = new URLSearchParams();
     if (options.search?.trim()) params.set("search", options.search.trim());
     if (options.category?.trim()) params.set("category", options.category.trim());
@@ -180,7 +199,7 @@ export const galleryApi = {
     if (options.type) params.set("type", options.type);
     if (options.limit) params.set("limit", String(options.limit));
     if (options.forceRefresh) params.set("force_refresh", "true");
-    return requestJson<VariantGroupResponse>(`/universal_gallery/api/images/variant-groups?${params}`);
+    return requestJson<VariantGroupResponse>(`/universal_gallery/api/images/variant-groups?${params}`, { signal });
   },
 
   async getVariantGroupImages(options: {
@@ -198,7 +217,7 @@ export const galleryApi = {
     colorFamily?: string;
     sortBy?: string;
     sortOrder?: string;
-  }) {
+  }, signal?: AbortSignal) {
     const params = new URLSearchParams({
       group_id: options.groupId,
       page: String(options.page ?? 1),
@@ -215,7 +234,7 @@ export const galleryApi = {
     if (options.colorFamily?.trim()) params.set("color_family", options.colorFamily.trim());
     if (options.sortBy) params.set("sort_by", options.sortBy);
     if (options.sortOrder) params.set("sort_order", options.sortOrder);
-    return requestJson<VariantGroupImagesResponse>(`/universal_gallery/api/images/variant-group?${params}`);
+    return requestJson<VariantGroupImagesResponse>(`/universal_gallery/api/images/variant-group?${params}`, { signal });
   },
 
   async prewarmFingerprints(options: {

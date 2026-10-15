@@ -1,3 +1,4 @@
+import { useGalleryJobs } from "./hooks/useGalleryJobs";
 import { Activity, Suspense, lazy, startTransition, useCallback, useEffect, useRef, useMemo, useState } from "react";
 
 import { GalleryWorkspace } from "./components/gallery/GalleryWorkspace";
@@ -111,6 +112,7 @@ function App() {
     thumbnailPrewarmEnabled: uiPreferences.enableImagePrefetch,
     initialScope: initialLocation.gallery,
   });
+  useGalleryJobs(activeTab === "gallery");
   const libraryDataEnabled = activeTab === "library" || activeTab === "workbench";
   const library = useLibraryData(libraryDataEnabled);
   const initialLibraryRef = useRef(initialLocation.tab === "library" || initialLocation.tab === "workbench" ? initialLocation.library : "");

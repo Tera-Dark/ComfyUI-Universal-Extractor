@@ -11,6 +11,7 @@ interface OperationItem {
   message: string;
   detail?: string;
   createdAt: number;
+  retry?: () => void;
 }
 
 export interface RunOperationOptions<T> {
@@ -27,6 +28,7 @@ interface OperationStatusContextValue {
   updateOperation: (id: string, message: string, tone: Exclude<OperationTone, "pending">, detail?: string) => void;
   dismissOperation: (id: string) => void;
   runOperation: <T>(operation: () => Promise<T>, options: RunOperationOptions<T>) => Promise<T>;
+  syncTask: (id: string, message: string, tone: OperationTone, detail: string, retry?: () => void) => void;
 }
 
 const OperationStatusContext = createContext<OperationStatusContextValue | null>(null);
@@ -127,14 +129,18 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
     }
   }, [dismissOperation, startOperation, updateOperation]);
 
+  const syncTask = useCallback((id: string, message: string, tone: OperationTone, detail: string, retry?: () => void) => {
+    upsertItem({ id: `task:${id}`, message, tone, detail, retry, createdAt: Date.now() });
+  }, [upsertItem]);
+
   useEffect(() => () => {
     dismissTimersRef.current.forEach((timer) => window.clearTimeout(timer));
     dismissTimersRef.current.clear();
   }, []);
 
   const value = useMemo(
-    () => ({ notify, startOperation, updateOperation, dismissOperation, runOperation }),
-    [dismissOperation, notify, runOperation, startOperation, updateOperation],
+    () => ({ notify, startOperation, updateOperation, dismissOperation, runOperation, syncTask }),
+    [dismissOperation, notify, runOperation, startOperation, updateOperation, syncTask],
   );
 
   return (
@@ -160,6 +166,7 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
             </div>
             <div className="ue-operation-copy">
               <strong>{item.message}</strong>
+              {item.retry ? <button type="button" onClick={item.retry}>{t("jobRetry")}</button> : null}
               {item.detail && item.tone === "error" ? (
                 <details className="ue-operation-details">
                   <summary>{t("operationViewDetails")}</summary>

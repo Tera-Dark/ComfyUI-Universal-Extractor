@@ -1,3 +1,5 @@
+import { useGalleryRefresh } from "./useGalleryRefresh";
+import { applyBatchImageState } from "./galleryBatchState";
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "../i18n/I18nProvider";
@@ -34,12 +36,6 @@ interface UseGalleryDataOptions {
   initialScope?: GalleryUrlScope;
 }
 
-interface RefreshWaiter {
-  parts: Set<"context" | "images">;
-  error: Error | null;
-  resolve: () => void;
-  reject: (error: Error) => void;
-}
 
 const getSourceRootRef = (folderRef: string) => {
   if (folderRef.includes(FOLDER_REF_SEPARATOR)) {
@@ -87,18 +83,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [importFolderRef, setImportFolderRef] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const refreshSequenceRef = useRef(0);
-  const refreshWaitersRef = useRef<Map<number, RefreshWaiter>>(new Map());
-  const completeRefreshPart = useCallback((key: number, part: "context" | "images", error?: Error) => {
-    const waiter = refreshWaitersRef.current.get(key);
-    if (!waiter) return;
-    waiter.parts.delete(part);
-    if (error) waiter.error ??= error;
-    if (!waiter.parts.size) {
-      refreshWaitersRef.current.delete(key);
-      if (waiter.error) waiter.reject(waiter.error);
-      else waiter.resolve();
-    }
-  }, []);
+  const { completeRefreshPart, waitForRefresh } = useGalleryRefresh(t("galleryRefreshInterrupted"));
   const hasLoadedImagesRef = useRef(false);
   const hasLoadedTrashRef = useRef(false);
   const consumedContextRefreshKeyRef = useRef(0);
@@ -201,9 +186,10 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
         }
         setContext(contextResponse);
         setColorIndexStatus(contextResponse.color_index_status ?? null);
-        if (contextResponse.index_error) {
-          setError(contextResponse.index_error);
-          requestError = new Error(contextResponse.index_error);
+        if (contextResponse.index_error || contextResponse.catalog_error) {
+          const message = contextResponse.index_error || contextResponse.catalog_error || t("galleryLoading");
+          setError(message);
+          requestError = new Error(message);
         }
       } catch (fetchError) {
         if (!isCancelled) {
@@ -498,18 +484,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   };
 
   const refresh = () => { triggerRefresh(); };
-  const refreshAndWait = () => new Promise<void>((resolve, reject) => {
-    const key = triggerRefresh();
-    refreshWaitersRef.current.set(key, { parts: new Set(["context", "images"]), error: null, resolve, reject });
-  });
-
-  useEffect(() => {
-    const waiters = refreshWaitersRef.current;
-    return () => {
-      waiters.forEach((waiter) => waiter.reject(new Error(t("galleryRefreshInterrupted"))));
-      waiters.clear();
-    };
-  }, [t]);
+  const refreshAndWait = () => waitForRefresh(triggerRefresh);
 
   const applyContextPatch = (
     updater: (current: GalleryContext) => GalleryContext,
@@ -639,22 +614,11 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
         : current.pinned_count,
     }));
     const updatedPaths = new Set(normalizedUpdatedPaths);
-    const imagePatch = response.last_state
-      ? {
-          favorite: response.last_state.favorite,
-          pinned: response.last_state.pinned,
-          boards: response.last_state.boards,
-          category: response.last_state.category,
-          title: response.last_state.title,
-          notes: response.last_state.notes,
-        }
-      : updates;
-    setImages((current) =>
-      current.map((image) => (updatedPaths.has(image.relative_path) ? { ...image, ...imagePatch } : image)),
-    );
-    setSelectedImage((current) =>
-      current && updatedPaths.has(current.relative_path) ? { ...current, ...imagePatch } : current,
-    );
+    setImages((current) => current.map((image) => updatedPaths.has(image.relative_path)
+      ? applyBatchImageState(image, response, updates) : previousImages.get(image.relative_path) ?? image));
+    setSelectedImage((current) => current && updatedPaths.has(current.relative_path)
+      ? applyBatchImageState(current, response, updates) : current);
+    setSelectedImagePaths((current) => current.filter((path) => !updatedPaths.has(path)));
     if (deferredSearchTerm.trim() || selectedCategory || selectedBoardId || favoritesOnly) {
       refresh();
     }
