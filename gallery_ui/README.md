@@ -2,7 +2,10 @@
 
 ## Maintenance notes
 
-- `npm run audit:dist` reports tracked `dist/assets/index-*.js` and `index-*.css` counts, sizes, and latest entrypoint assets.
+- `useGalleryData` composes scoped queries (`useGalleryQueries`), batch outcomes (`useGalleryBatchOperations`), and refresh completion (`useGalleryRefresh`). `useGalleryJobs` restores persistent task feedback and polls only while visible with active work. `useGallerySelection` owns click/range/keyboard anchors while box geometry stays with the measured layout; `useVariantRequests` aborts replaced analysis requests. Optional asset IDs preserve compatibility with old servers.
+- Task protocol and recovery: [foundation guide](../docs/foundation-1.6.0.zh-CN.md).
+
+- `npm run audit:dist` validates the Vite manifest, imported chunks and index asset references without rewriting hashed files.
 - `npm run audit:security` runs `npm audit --audit-level=moderate` so frontend dependency vulnerabilities stay visible.
 - The repository-level `scripts\verify.ps1` runs frontend security audit, build, dist audit, and release metadata checks after Python verification.
 - `WorkspaceSidebar` keeps folder source scoping and sorting helpers in `src/components/shared/folderTree.ts`; generated date-named folders sort by embedded valid dates before directory mtime in the default modified-order mode.

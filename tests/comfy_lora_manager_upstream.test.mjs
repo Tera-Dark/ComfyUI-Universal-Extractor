@@ -84,7 +84,7 @@ async function createHarness(type, initial, initialText, options = {}) {
     evalUpstream(context, type === "Lora Stacker (LoraManager)" ? "lora_stacker.js" : "lora_loader.js");
 
     // Run the ORIGINAL setValue body in a genuine list getter/setter wrapper.
-    const upstreamWidget = readFileSync(path.join(base, "loras_widget.js"), "utf8");
+    const upstreamWidget = readFileSync(path.join(base, "loras_widget.js"), "utf8").replace(/\r\n/g, "\n");
     const setter = upstreamWidget.match(/setValue: function\(v\) \{([\s\S]*?)\n    \},\n    hideOnZoom:/);
     assert.ok(setter, "Upstream DOM widget setter was located");
     const makeList = vm.runInContext(`(function (original, fireCallback) {

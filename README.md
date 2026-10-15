@@ -1,20 +1,18 @@
 # ComfyUI Universal Extractor
 
-## 1.5.0 · 图库加载与操作优化
+## 1.6.0 · 资源身份与后台任务基础
 
-在 1.4.0 基础上整合 LoRA 追加/覆盖与中部滚动修复，并优化大图库的状态索引、实时刷新和首屏加载。**仅提交源码和构建产物不会自动创建 GitHub Release 或发布 ComfyUI Registry 版本。**
+保留现有图片管理和 JSON 词库，新增稳定资源 ID、可恢复后台任务及查询/分析分流。收藏、笔记和图版仍保存在原 JSON；新增 `catalog.sqlite3` 是权威数据，不能按图片索引的方式删除重建。
 
-- **更快的图库状态更新**：收藏/图版/笔记改变时仅重新写入真正发生变化的 SQLite 和 FTS 行；图版统计不再为全部状态路径拼接超长查询；多图片路径查询分批，兼容较低的 SQLite 变量数限制。手动刷新上下文不再为图版重复扫描图源。
-- **更省资源的实时刷新**：指纹按稳定目录顺序流式计算，不再累积所有文件记录再排序；仅缓存最近 32 个浏览范围。
-- **首屏与操作体验**：双栏整理、变体、图版分享和元数据弹窗按需加载；切换图库范围时取消旧请求，不进入图库时不请求图片列表。关闭图片预加载偏好时也停止缩略图预热；密度面板提供“一键恢复每行 6 张”操作。浏览器禁用本地存储时，图廊、词库和侧边栏仍可使用会话内偏好。
+- 上传先暂存后独占提交，中断时按会话证据清理；批量备注只保存一次。
+- 图片改名、移动、入垃圾箱和恢复保留资源 ID；后台任务支持进度、取消、重试及重启恢复。
+- 图源、索引、文件操作、词库和媒体分析分层，旧 API 与节点保持兼容。视频音频、语义以图搜图尚未启用。
 
-更新后请重启 ComfyUI 并分别强制刷新主页面和图库，避免旧桥接与新版图库混用。之前被旧版覆盖而丢失的 LoRA 仍需从工作流历史或备份恢复；独立 CLIP 数值可保留，但折叠后在上游插件调整主强度可能同步 CLIP。桌面 6 列是无已存偏好时的上限，窄屏会自动减列，旧的自选密度仍保留。
+升级前停止 ComfyUI 并备份 data 和原图源，完整替换 dist，重启并刷新 ComfyUI 与图库。**源码提交不会自动发布 GitHub Release 或 ComfyUI Registry。**
 
-**更新内容：** [CHANGELOG.md](CHANGELOG.md) · **架构和联动细节：** [docs/architecture.md](docs/architecture.md)。
+[升级、API 与恢复手册](docs/foundation-1.6.0.zh-CN.md) · [架构](docs/architecture.md) · [变更日志](CHANGELOG.md)
 
-开发验证：`powershell -ExecutionPolicy Bypass -File scripts\verify.ps1`（Windows），或依次运行 Python 测试、桥接测试与 `cd gallery_ui && npm run verify`。前端使用干净构建和 manifest 校验。
-
-独立 UI 预览（无真实 ComfyUI/GPU）：`python scripts/preview.py`，访问 `http://127.0.0.1:8189/gallery/`。示例数据放在临时目录，不接触用户图源。
+开发验证：`powershell -ExecutionPolicy Bypass -File scripts\verify.ps1`。隔离 UI 预览：`python scripts/preview.py`，访问 `http://127.0.0.1:8189/gallery/`，示例数据位于临时目录。
 
 ComfyUI Universal Extractor 是一个 ComfyUI 自定义节点和图库工作台插件，包含两块核心能力：
 
@@ -131,7 +129,8 @@ ComfyUI-Universal-Extractor/
 │   ├── constants.py
 │   ├── paths.py
 │   ├── nodes/
-│   │   └── extractor_node.py
+│   │   ├── extractor_node.py
+│   │   └── prompt_snapshot.py
 │   └── gallery/
 │       ├── routes.py
 │       ├── service.py

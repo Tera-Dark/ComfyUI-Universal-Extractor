@@ -76,6 +76,7 @@ async def slow_metadata_keeps_draft(browser, errors):
         await expect(page.locator(".ue-lightbox-filmstrip-item.is-active")).not_to_have_attribute("aria-label", current_name)
     finally:
         release.set()
+        await page.unroute_all(behavior="ignoreErrors")
         await page.close()
     print("PASS: slow Metadata cannot overwrite draft; navigation offers cancel/discard; saving waits for load")
 
@@ -114,6 +115,7 @@ async def pending_save_locks_editor(browser, errors):
         await expect(page.locator(".ue-lightbox-filmstrip-item.is-active")).not_to_have_attribute("aria-label", old_name)
     finally:
         release.set()
+        await page.unroute_all(behavior="ignoreErrors")
         await page.close()
     print("PASS: editor is locked while save-and-continue is in flight; save advances only after response")
 

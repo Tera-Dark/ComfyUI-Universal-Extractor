@@ -367,6 +367,8 @@ async def empty_states_and_retry(browser, errors):
 
 async def background_refresh_and_inspector_layout(browser, errors):
     async def changed_freshness(page):
+        # This scenario requires overflow even with the current six-column default.
+        await page.add_init_script("localStorage.setItem('universal-extractor:grid-columns','3')")
         await page.route("**/universal_gallery/api/images/freshness?*", lambda route: route.fulfill(json={
             "changed": True, "fingerprint": "p12-updated", "total": 19,
             "latest_relative_path": "new-image.png", "checked_at": 1, "subfolder": "default_output::",

@@ -4,6 +4,19 @@ All notable changes to the ComfyUI Universal Extractor project will be documente
 
 ## Unreleased
 
+## 1.6.0 - 2026-10-15
+
+### Gallery foundation
+
+- Add an authoritative asset catalog with persistent IDs and content revisions, separate from rebuildable image indexes and unchanged JSON annotations/boards. Journal identity changes with file moves, rename, trash and restoration; preserve unresolved recovery evidence.
+- Split source, index, file, library and media domains behind compatible service exports. Add an image-provider contract for later media types; no video/audio or embedding models are enabled in this release.
+- Separate bounded snapshot reads, serialized mutations, scans and analysis. Persist refresh/fingerprint/color/dimension jobs with progress, deduplication, cancellation, retries and restart recovery. Expose validated same-origin job endpoints and reuse the bottom-right status center.
+- Stage uploads on the target volume, publish exclusively after reception, and clean only session-owned files on error/recovery. Batch annotations save once; return per-image states and retain failed selections.
+- Serve committed directory snapshots and use stable pagination/covering indexes. Briefly cache validated read sources with immediate configuration invalidation, reuse a request-owned read-only SQLite handle, and close it after the worker finishes. Version fingerprints and previews against asset/content changes; reject stale analysis commits.
+- Update vulnerable indirect frontend dependencies without forcing major upgrades and classify Tailwind build packages as development dependencies.
+
+Upgrade and recovery: [foundation guide](docs/foundation-1.6.0.zh-CN.md). Existing source refs, JSON libraries, ComfyUI node widgets and LoRA bridge behavior remain compatible. Back up data and sources, restart ComfyUI and refresh both pages; this commit does not publish a GitHub Release or Registry version.
+
 ## 1.5.0 - 2026-09-27
 
 Performance and quality-of-life update. This release also incorporates the previously unpushed LoRA/mid-scroll fixes from the local post-1.4.0 commit.

@@ -1,9 +1,12 @@
 # Gallery architecture and contracts
 
-The baseline architecture below remains relevant, except for these release changes:
+The current runtime preserves the contracts below. Installation, task API examples and recovery procedures are in [the 1.6.0 foundation guide](foundation-1.6.0.zh-CN.md). Historical RC notes describe their own versions.
 
-- `py/gallery/execution.py`: bounded serialized service worker; request cancellation does not abort writes.
+- `py/gallery/execution.py` / `runtime.py`: lifecycle-owned read (2/32 slots), mutation (1/16 slots), scan (1), analysis (2), upload (2 sessions) and thumbnail (2) lanes. HTTP reads use query-only connections and per-request source snapshots; cancellation does not abort submitted file commits.
+- Read-source validation snapshots live for at most one second and are invalidated immediately by source-config mtime/size or default-root changes. Mutations and scans validate directly; batch annotations use one fresh configuration snapshot with containment/existence checks per target. Signing normalized source roots does not repeat filesystem canonicalization. Each HTTP read shares one read-only SQLite handle across its helpers and closes it when the worker finishes.
 - `py/gallery/file_transactions.py`: stage/transfer/state commit, durable recovery evidence, conservative rollback; not cross-filesystem ACID.
+- `py/gallery/catalog.py` / `jobs.py`: authoritative asset IDs and persistent, bounded jobs; catalog corruption is read-only degradation, never index-style automatic rebuild. JSON remains the user-state authority.
+- `py/gallery/media.py`: provider contract, currently image-only.
 - `py/gallery/similarity.py`: exact-radius candidate generation using disjoint Hamming bands.
 - `py/nodes/prompt_snapshot.py`: optional resolved-text PNG metadata pass-through.
 - `gallery_ui/src/components/shared/DisclosureMenu.tsx`: accessible native disclosure for progressive actions.
@@ -12,7 +15,7 @@ The baseline architecture below remains relevant, except for these release chang
 - Release builds now clean dist and validate Vite manifest; old hash names are never rewritten. `sync-dist` is a non-mutating compatibility alias for the audit.
 - `scripts/check_release.py` is the portable metadata checker; PowerShell delegates to it.
 
-See the RC upgrade guide for supported transactions, limitations, and platform validation status.
+See the 1.6.0 foundation guide and validation record for supported transactions, limitations, and platform validation status.
 
 ---
 
@@ -25,10 +28,16 @@ This document summarizes the runtime architecture that matters for future backen
 - ComfyUI serves the committed frontend bundle from `gallery_ui/dist/` at `/gallery/`.
 - `/gallery/` serves `index.html` with `Cache-Control: no-store`; hashed files under `/gallery/assets/*` are served with long-lived immutable cache headers so unchanged chunks can be reused by the browser.
 - Gallery API routes live under `/universal_gallery/api/` in `py/gallery/routes.py`.
-- Gallery behavior is exposed through the compatibility facade in `py/gallery/service.py`. Low-risk helper domains now live beside it: `refs.py` owns source/image/folder ref normalization, `source_security.py` owns source path hardening and scope checks, `metadata.py` owns Pillow metadata reads, `recipe.py` owns structured Comfy prompt recipe extraction, `update_checker.py` owns GitHub release update status, and `state_store.py` owns persisted image state and boards.
+- Gallery behavior is exposed through the compatibility facade in `py/gallery/service.py`. `sources.py`, `indexing.py`, `file_ops.py`, `libraries.py` and `media_service.py` receive host-owned environment bindings and do not import the facade. Infrastructure is owned by `GalleryRuntime`; adjacent helpers remain: `refs.py` owns source/image/folder ref normalization, `source_security.py` owns source path hardening and scope checks, `metadata.py` owns Pillow metadata reads, `recipe.py` owns structured Comfy prompt recipe extraction, `update_checker.py` owns GitHub release update status, and `state_store.py` owns persisted image state and boards.
 - File APIs must stay scoped to registered gallery sources and supported image extensions.
 - Route-level safety is covered by `tests/test_gallery_routes.py`: API handlers must reject cross-origin `Origin`, `Referer`, or `Sec-Fetch-Site` requests, import endpoints must enforce configured size/count limits with 413 responses, and `/gallery/assets/*` must not serve files outside the committed dist assets directory.
 - `/gallery/` and `/gallery/assets/*` responses carry browser hardening headers through `py/gallery/routes.py`, including `nosniff` and a same-origin CSP compatible with the React app's dynamic inline styles.
+
+## Persistent task API
+
+`POST /universal_gallery/api/jobs` accepts only `refresh_index` or `fingerprint_assets` with validated source-scoped payloads; returns 202 and a job. `GET /jobs` paginates active/recent records, `GET /jobs/{id}` reads one, and `POST /jobs/{id}/cancel` requests checkpoint cancellation. Internal colors/dimensions tasks share the analysis lane. Queue capacity is 256 waiting jobs; active identical versioned requests coalesce. Transient I/O failures retry twice (2s, 10s); unfinished replay-safe jobs resume after restart. File transaction journals are never automatically replayed.
+
+The old forced-refresh/prewarm/variant APIs await the same scheduler and retain their response contracts. Progress is shown through the existing status center; visibility-aware combined polling stops on completion. Task HTTP cancellation leaves committed writes intact. Analysis computes outside write transactions and validates file, asset ID, location and content revision before short commits. The runtime retains idle WAL anchors to avoid a checkpoint on every connection close; all transactions and anchors close on shutdown.
 
 ## Update Status Flow
 
@@ -49,7 +58,9 @@ Runtime gallery data is stored under `data/`. User state remains JSON-backed, wh
 - `gallery_state.json`: editable image state, categories, pins, notes, and boards.
 - `gallery_state.json.bak-*`: timestamped backups created before automatic state recovery migrations.
 - `gallery_sources.json`: configured gallery sources.
-- `gallery_index.sqlite3`: derived image index.
+- `catalog.sqlite3`: authoritative identity and jobs (`assets`, `jobs`, `catalog_meta`, `catalog_migrations`), independent schema/backup, never deleted as a cache. Asset IDs survive index rebuilds and plugin moves/trash/restoration; duplicate content and external moves do not automatically merge identities.
+- `upload_journal/`: session-owned temporary upload recovery records.
+- `gallery_index.sqlite3`: derived image index, schema 9 with cached asset IDs/content revisions, versioned fingerprints, committed `gallery_folders` snapshots and covering/stable-order indexes. Hot context requests never traverse directories; initial upgrades may discover empty folders asynchronously after serving existing image rows.
 - `library_summary_cache.json`: derived prompt-library counts keyed by filename, file size, and `mtime_ns`; it is runtime state, not a user library.
 - `thumb_cache/`: generated thumbnails.
 - `trash/`: plugin-managed trash storage.
@@ -69,7 +80,7 @@ The index has composite indexes for common list views: source plus folder plus c
 
 ## Loading And Sync Strategy
 
-Normal image listing uses `list_images_page()`, which queries SQLite directly with pagination. It does not need to load the whole image index into Python.
+HTTP image listing prepares its index outside the read pool, then uses `list_images_page()` in a query-only snapshot with stable sort tie-breaks. Legacy direct Python facade calls retain synchronous maintenance semantics. Listing queries SQLite directly with pagination. It does not need to load the whole image index into Python.
 
 The first gallery load should use the existing SQLite index without `force_refresh=true`. Forced image refresh is reserved for user-triggered refreshes and freshness-detected changes, where the backend can prefer incremental sync over a full rebuild.
 
@@ -78,7 +89,7 @@ Automatic gallery sync is a two-step flow:
 1. The frontend calls `/universal_gallery/api/images/freshness` for the current folder/source view while the page is visible.
 2. If the fingerprint changed, the frontend calls `/api/images?force_refresh=true`; the backend performs incremental index sync when the existing DB signature is current.
 
-Incremental sync scans only the affected scope, upserts new or modified files, deletes missing files, and queues only changed paths for color backfill. Full rebuild remains the cold-start and repair fallback.
+Incremental sync scans only the affected scope, upserts new or modified files, deletes missing files, and queues only changed paths for color backfill. Full rebuild remains the cold-start and repair fallback. Scan commits validate the source mutation generation; inaccessible subtrees do not become deletion signals. Identity is registered in bounded batches, independently of decoding; failed analysis remains soft.
 
 `get_gallery_context()` avoids full image reads. It derives source counts, pinned count, subfolders, and move targets from SQLite aggregates plus lightweight directory discovery. Its forced refresh runs the index sync once; board summaries reuse the resulting database. `list_boards()` selects only actual indexed board members, ordered by creation time for automatic covers, rather than building a potentially over-limit `IN` query for every pinned/note state path.
 
@@ -86,7 +97,7 @@ The freshness endpoint still stats in-scope image files (file-in-place edits mus
 
 `list_libraries()` does not parse every prompt-library JSON file on each request. It uses `library_summary_cache.json` for list counts when filename, file size, and `mtime_ns` match, then invalidates the affected summary when a library is imported, saved, deleted, or otherwise invalidated through the service facade.
 
-Library page and artist-search routes clamp client-requested limits so large JSON libraries cannot produce unbounded responses. Import routes stream multipart files, enforce per-file, total-size, and count limits, and remove files written earlier in the same request if a later part fails a limit check.
+Library page and artist-search routes clamp client-requested limits so large JSON libraries cannot produce unbounded responses. Import routes stream multipart files with backpressure into target-volume `.ue-uploads/{session}/*.part` files, enforce per-file/total/count limits, then revalidate and exclusively publish using hard links. Journals permit startup cleanup only with verifiable ownership; unsupported target filesystems fail safely. File/JSON/catalog operations use compensation journals, not cross-store ACID.
 
 `GalleryContext.subfolders` keeps the legacy string list for API compatibility. `GalleryContext.subfolder_details` adds source id, relative path, and directory modified time for frontend source-scoped folder trees and default modified-time sorting.
 
@@ -94,7 +105,7 @@ Library page and artist-search routes clamp client-requested limits so large JSO
 
 Editable image state remains persisted in `gallery_state.json`. The state store serializes load-modify-save operations through a module-level lock and writes JSON atomically by replacing a same-directory temporary file, so interrupted writes do not leave partial JSON. The SQLite index caches those fields for fast list queries, but `_sync_image_state_to_index_db()` first compares `gallery_state_mtime` and `gallery_state_digest`; unchanged state skips DB writes. When the state file does change, the service compares indexed fields for all affected paths in batches of at most 900 bind parameters, updates only differing rows and rebuilds FTS/color helpers only for those rows. Removed state paths clear prior indexed fields. `py/gallery/sqlite_batch.py` is shared with variant fingerprint queries and prewarming, so those queries remain portable to bundled SQLite builds with a 999-parameter limit.
 
-Pin and board state is path-keyed, but refresh/build paths run a conservative recovery pass after current `gallery_images` rows exist. If a stateful path is no longer indexed and exactly one current image path ends with the full old path, the state is migrated and merged into the current path, with target metadata preserved and a `gallery_state.json.bak-*` backup created first. Basename-only or ambiguous matches are skipped.
+Pin and board state is path-keyed. For legacy paths never registered in the catalog, refresh/build preserves conservative suffix recovery after current rows exist: exactly one full-suffix match, target metadata priority and a `gallery_state.json.bak-*` backup. Known catalog paths, including old namespaces and tombstones, are excluded. External moves of known assets leave old state/identity at the missing location and create an independent asset; no suffix, hash or basename guess transfers notes.
 
 Color indexing is intentionally asynchronous:
 
@@ -161,7 +172,7 @@ The gallery must not call `window.open()` as a fallback for workflow handoff. If
 
 ## ComfyUI Nodes
 
-Node registration starts in the repository root `__init__.py`, which loads classes from `py/nodes/extractor_node.py` through `py/plugin.py`. The only registered generation node is `UniversalJsonSegmentRandomizer`, displayed in ComfyUI as `Universal Artist/Tag Randomizer`.
+Node registration starts in the repository root `__init__.py`, which loads classes from `py/nodes/extractor_node.py` through `py/plugin.py`. The generation node is `UniversalJsonSegmentRandomizer`, displayed as `Universal Artist/Tag Randomizer`; `UniversalPromptSnapshot` is the additional resolved-text pass-through node.
 
 `UniversalJsonSegmentRandomizer` reads the same `data/` libraries but resolves explicit field paths such as `name`, `other_names`, `meta.style`, or `tags.*`, flattens nested string/number values, optionally filters entries by another field path, and returns both the joined prompt string and a JSON string of selected segments. It supports `random`, `polling`, and `sequential` selection; duplicate policy control; and direct output formats for Anima artist strings, `artist:name`, weighted artist prompts, NAI-style weights, generic tag strings, and custom templates. Polling state is process-local and keyed by node id, library filename, field paths, filters, pool size/content hash, and seed, so separate nodes or changed libraries do not share offsets; restarting ComfyUI resets polling back to the seed-derived offset. Node file access is constrained to plain `.json` filenames in `data/` and excludes runtime state files listed in `RUNTIME_STATE_FILENAMES`.
 
