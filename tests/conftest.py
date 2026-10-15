@@ -90,7 +90,3 @@ def isolated_gallery_env(tmp_path, monkeypatch):
     yield result
     if service._runtime:
         service._runtime.close()
-    # Existing background providers are replaced by runtime jobs below; until
-    # then drain them before monkeypatch restores a different data directory.
-    for executor in {service.COLOR_INDEX_EXECUTOR, service.DIMENSION_BACKFILL_EXECUTOR, service.THUMB_PREWARM_EXECUTOR}:
-        executor.submit(lambda: None).result()

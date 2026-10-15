@@ -10,7 +10,7 @@ import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from threading import BoundedSemaphore, Lock
+from threading import BoundedSemaphore, Lock, RLock
 from typing import Any
 
 from ..constants import (
@@ -158,7 +158,6 @@ COLOR_PROFILE_DEFAULT = {
     "color_saturation": 0.0,
     "color_luma": 0.0,
 }
-THUMB_PREWARM_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ue-thumb")
 THUMB_PREWARM_PENDING: set[str] = set()
 THUMB_PREWARM_LOCK = Lock()
 THUMB_PREWARM_STATS: dict[str, Any] = {
@@ -169,11 +168,9 @@ THUMB_PREWARM_STATS: dict[str, Any] = {
     "updated_at": 0.0,
 }
 MAX_ARTIST_SEARCH_RESULTS = 5000
-COLOR_INDEX_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ue-color")
 COLOR_INDEX_BACKFILL_LOCK = Lock()
 COLOR_INDEX_BACKFILL_RUNNING = False
 COLOR_INDEX_QUEUED_PATHS: set[str] = set()
-DIMENSION_BACKFILL_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ue-dimensions")
 DIMENSION_BACKFILL_LOCK = Lock()
 DIMENSION_BACKFILL_RUNNING = False
 
@@ -366,14 +363,16 @@ get_gallery_context = _partial(indexing.get_gallery_context, _environment)
 
 
 _runtime = None
+_RUNTIME_LOCK = RLock()
 
 
 def get_runtime():
     global _runtime
-    if _runtime is None or _runtime.closed:
-        from .runtime import GalleryRuntime
-        _runtime = GalleryRuntime(_environment)
-    return _runtime
+    with _RUNTIME_LOCK:
+        if _runtime is None or _runtime.closed:
+            from .runtime import GalleryRuntime
+            _runtime = GalleryRuntime(_environment)
+        return _runtime
 
 
 def get_asset_identity(relative_path, register=True):

@@ -10,6 +10,8 @@ import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from functools import partial
 from threading import BoundedSemaphore
+from contextvars import ContextVar
+from .environment import SOURCE_SNAPSHOT
 
 from aiohttp import web
 
@@ -17,17 +19,60 @@ _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ue-gallery-ser
 _SLOTS = BoundedSemaphore(16)
 _UPLOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ue-upload")
 _UPLOAD_SLOTS = BoundedSemaphore(16)
+QUERY_ONLY = ContextVar("gallery_query_only", default=False)
 
 
-async def run_upload_task(function, *args):
-    if not _UPLOAD_SLOTS.acquire(blocking=False):
+async def await_task(future):
+    wrapped = asyncio.wrap_future(future)
+    wrapped.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
+    return await asyncio.shield(wrapped)
+
+
+async def execute(runtime, function, *args, lane="read", **kwargs):
+    slots = runtime.read_slots if lane == "read" else runtime.write_slots
+    if not slots.acquire(blocking=False):
+        raise web.HTTPServiceUnavailable(text='{"error":"Gallery is busy. Retry shortly."}', content_type="application/json", headers={"Retry-After": "2"})
+    def work():
+        source_token = SOURCE_SNAPSHOT.set(runtime.env.list_gallery_sources() if lane == "read" else None)
+        token = QUERY_ONLY.set(lane == "read")
+        try:
+            if lane == "write":
+                runtime.require_catalog()
+            result = function(*args, **kwargs)
+            name = getattr(getattr(function, "func", function), "__name__", "")
+            if lane == "write" and name not in {"create_task", "cancel"}:
+                runtime.require_catalog().apply([])
+            if lane == "write" and runtime.env.IMAGE_INDEX_CACHE.get("built_at"):
+                with runtime.env._connect_gallery_index_db() as db:
+                    runtime.env._sync_image_state_to_index_db(db)
+            return result
+        finally:
+            QUERY_ONLY.reset(token)
+            SOURCE_SNAPSHOT.reset(source_token)
+    executor = {"read": runtime.read_executor, "write": runtime.write_executor,
+                "scan": runtime.scan_executor, "analysis": runtime.analysis_executor}[lane]
+    try:
+        future = executor.submit(work)
+    except BaseException:
+        slots.release()
+        raise
+    future.add_done_callback(lambda _: slots.release())
+    wrapped = asyncio.wrap_future(future)
+    wrapped.add_done_callback(lambda done: done.exception() if not done.cancelled() else None)
+    return await asyncio.shield(wrapped)
+
+
+async def run_upload_task(function, *args, runtime=None):
+    slots = runtime.upload_slots if runtime else _UPLOAD_SLOTS
+    executor = runtime.upload_executor if runtime else _UPLOAD_EXECUTOR
+    if not slots.acquire(blocking=False):
         raise web.HTTPServiceUnavailable(headers={"Retry-After": "2"})
     try:
-        future = _UPLOAD_EXECUTOR.submit(function, *args)
+        future = executor.submit(function, *args)
     except BaseException:
-        _UPLOAD_SLOTS.release()
+        slots.release()
         raise
-    future.add_done_callback(lambda _: _UPLOAD_SLOTS.release())
+    future.add_done_callback(lambda _: slots.release())
     wrapped = asyncio.wrap_future(future)
     try:
         return await asyncio.shield(wrapped)

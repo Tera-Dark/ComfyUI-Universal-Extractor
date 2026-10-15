@@ -273,7 +273,14 @@ def get_import_target_for_filename(env,
         image_import_dir = os.path.join(target_source["path"], normalized_target_subfolder)
         image_import_dir = env._ensure_within_directory(target_source["path"], image_import_dir, target_source["name"])
         os.makedirs(image_import_dir, exist_ok=True)
-        return "image", env.ensure_unique_path(image_import_dir, original_name), None
+        target = env.ensure_unique_path(image_import_dir, original_name)
+        catalog = env.get_runtime().require_catalog()
+        stem, extension = os.path.splitext(original_name)
+        number = 1
+        while catalog.find(target_source, env.normalize_relative_path(os.path.relpath(target, target_source["path"]))):
+            target = env.ensure_unique_path(image_import_dir, f"{stem}_{number}{extension}")
+            number += 1
+        return "image", target, None
     if extension in env.SUPPORTED_LIBRARY_EXTENSIONS:
         return "library", env.ensure_unique_path(env.DATA_DIR, original_name), None
 
@@ -281,6 +288,8 @@ def get_import_target_for_filename(env,
 
 
 def build_import_result(env, imported_images: list[dict], imported_libraries: list[dict], skipped: list[dict]) -> dict:
+    for image in imported_images:
+        image["asset_id"] = env.get_asset_identity(image["relative_path"])["asset_id"]
     env.invalidate_image_index_cache()
     return {
         "ok": True,
@@ -794,5 +803,6 @@ def batch_update_images(env, relative_paths: list[str], updates: dict) -> dict:
         except (ValueError, FileNotFoundError) as error:
             failed.append({"path": relative_path, "error": str(error)})
     last_state, categories = env._state_store.update_image_states(touched, updates)
-    return {"ok": True, "updated": touched, "missing": missing, "failed": failed,
+    states = env.get_image_state_map()
+    return {"ok": True, "updated": touched, "states": {path: states[path] for path in touched if path in states}, "missing": missing, "failed": failed,
             "last_state": last_state, "categories": categories}

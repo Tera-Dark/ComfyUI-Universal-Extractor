@@ -70,8 +70,10 @@ def test_asset_identity_survives_rebuilt_index_and_tracks_content(isolated_galle
     first = env.service.list_images_page()["images"]
     ids = {row["filename"]: row["asset_id"] for row in first}
     assert ids["a.png"] and ids["a.png"] != ids["copy.png"]
-    for executor in (env.service.COLOR_INDEX_EXECUTOR, env.service.DIMENSION_BACKFILL_EXECUTOR):
-        executor.submit(lambda: None).result()
+    jobs = env.service.get_runtime().get_jobs()
+    for job in jobs.list(active_only=True)["jobs"]:
+        jobs.future(job["id"]).result(timeout=10)
+    env.service.get_runtime().release_index_anchor()
     Path(env.service.GALLERY_INDEX_DB_FILE).unlink()
     rebuilt = env.service.list_images_page()["images"]
     assert {row["filename"]: row["asset_id"] for row in rebuilt} == ids
@@ -126,6 +128,94 @@ def test_catalog_commit_failure_rolls_back_file_and_json(isolated_gallery_env, m
     assert (env.output_dir / "a.png").read_bytes() == b"one"
     assert env.service.get_image_state("a.png")["notes"] == "keep"
     assert catalog.get(identity)["relative_path"] == "a.png"
+
+
+@pytest.mark.anyio
+async def test_analysis_cannot_block_committed_list(isolated_gallery_env):
+    import threading
+    from py.gallery.execution import execute
+    env = isolated_gallery_env
+    (env.output_dir / "a.png").write_bytes(b"one")
+    runtime = env.service.get_runtime()
+    await runtime.prepare_index()
+    started, release = threading.Event(), threading.Event()
+    jobs = runtime.get_jobs()
+    def slow(context, _payload):
+        started.set()
+        release.wait(10)
+        context.checkpoint()
+        return {"ok": True}
+    jobs.handlers["fingerprint_assets"] = ("analysis", slow)
+    job = jobs.enqueue("fingerprint_assets", {"relative_paths": ["a.png"]})
+    try:
+        assert await asyncio.to_thread(started.wait, 3)
+        result = await asyncio.wait_for(execute(runtime, env.service.list_images_page), 2)
+        assert result["total"] == 1
+        assert not release.is_set()
+        jobs.cancel(job["id"])
+    finally:
+        release.set()
+    with pytest.raises(RuntimeError, match="cancelled"):
+        await asyncio.wrap_future(jobs.future(job["id"]))
+
+
+def test_persistent_jobs_recover_and_deduplicate(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    from py.gallery.catalog import Catalog
+    from py.gallery.jobs import JobScheduler
+    catalog = Catalog(tmp_path)
+    with catalog.connect() as db:
+        db.execute("INSERT INTO jobs(id,kind,dedupe_key,payload,state,created_at,updated_at) VALUES('recover','refresh_index','recover','{}','running',1,1)")
+    with ThreadPoolExecutor(1) as scan, ThreadPoolExecutor(2) as analysis:
+        scheduler = JobScheduler(catalog, scan, analysis, {"refresh_index": ("scan", lambda context, payload: {"recovered": True})})
+        try:
+            assert scheduler.future("recover").result(3) == {"recovered": True}
+            assert scheduler.get("recover")["attempts"] == 1
+        finally:
+            scheduler.close()
+            scheduler.catalog.close()
+
+
+def test_failed_scan_does_not_treat_source_as_deleted(isolated_gallery_env, monkeypatch):
+    env = isolated_gallery_env
+    (env.output_dir / "a.png").write_bytes(b"one")
+    identity = env.service.list_images_page()["images"][0]["asset_id"]
+    original = env.service.os.scandir
+    def deny(path):
+        if Path(path) == env.output_dir:
+            raise PermissionError("source temporarily unavailable")
+        return original(path)
+    monkeypatch.setattr(env.service.os, "scandir", deny)
+    assert env.service.list_images_page(force_refresh=True)["total"] == 1
+    assert env.service.get_runtime().catalog.get(identity)["availability"] == "online"
+
+
+def test_job_queue_is_bounded_and_active_requests_coalesce(tmp_path):
+    import threading
+    from concurrent.futures import ThreadPoolExecutor
+    from py.gallery.catalog import Catalog
+    from py.gallery.jobs import JobScheduler, QueueFull
+    release, started = threading.Event(), threading.Event()
+    def hold(context, payload):
+        started.set()
+        release.wait(10)
+        return {}
+    with ThreadPoolExecutor(1) as scan, ThreadPoolExecutor(2) as analysis:
+        scheduler = JobScheduler(Catalog(tmp_path), scan, analysis, {"refresh_index": ("scan", hold)})
+        try:
+            first = scheduler.enqueue("refresh_index", {"scope": "same"})
+            assert started.wait(3)
+            assert scheduler.enqueue("refresh_index", {"scope": "same"})["id"] == first["id"]
+            for number in range(256):
+                scheduler.enqueue("refresh_index", {"scope": str(number)})
+            with pytest.raises(QueueFull):
+                scheduler.enqueue("refresh_index", {"scope": "overflow"})
+        finally:
+            scheduler.close()
+            release.set()
+            scan.shutdown(wait=True)
+            analysis.shutdown(wait=True)
+            scheduler.catalog.close()
 
 
 @pytest.mark.anyio

@@ -7,6 +7,9 @@ runtime, not copied into individual domain modules.
 from __future__ import annotations
 
 from collections.abc import MutableMapping
+from contextvars import ContextVar
+
+SOURCE_SNAPSHOT = ContextVar("gallery_source_snapshot", default=None)
 
 
 class ServiceEnvironment:

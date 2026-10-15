@@ -13,6 +13,7 @@ from threading import Lock, BoundedSemaphore
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
+from .execution import QUERY_ONLY
 
 def _read_image_dimensions(env, full_path: str) -> tuple[int, int]:
     if not env.HAS_PIL:
@@ -223,261 +224,33 @@ def _color_index_is_current(env, connection: sqlite3.Connection) -> bool:
     return missing_count == 0
 
 
-def _schedule_dimension_backfill(env, sources: list[dict[str, Any]], signature: str):
-    pass  # state belongs to the injected environment
-    if not env.HAS_PIL:
+def _schedule_dimension_backfill(env, sources, signature):
+    if QUERY_ONLY.get():
         return
-    with env.DIMENSION_BACKFILL_LOCK:
-        if env.DIMENSION_BACKFILL_RUNNING:
-            return
-        env.DIMENSION_BACKFILL_RUNNING = True
-
-    source_snapshot = [
-        {
-            "id": str(source.get("id", "")),
-            "path": str(source.get("path", "")),
-            "enabled": bool(source.get("enabled", True)),
-            "exists": bool(source.get("exists", False)),
-        }
-        for source in sources
-    ]
-
-    def run_backfill():
-        pass  # state belongs to the injected environment
-        try:
-            source_by_id = {
-                source["id"]: source
-                for source in source_snapshot
-                if source["id"] and source["enabled"] and source["exists"] and source["path"]
-            }
-            with env._connect_gallery_index_db() as connection:
-                if env._index_meta_get(connection, "source_signature") != signature:
-                    return
-                rows = connection.execute(
-                    """
-                    SELECT relative_path, source_id, source_relative_path
-                    FROM gallery_images
-                    WHERE image_width <= 0 OR image_height <= 0
-                    LIMIT 500
-                    """
-                ).fetchall()
-                for row in rows:
-                    source = source_by_id.get(str(row["source_id"]))
-                    if not source:
-                        continue
-                    try:
-                        full_path = env._ensure_within_directory(
-                            source["path"],
-                            os.path.join(source["path"], str(row["source_relative_path"])),
-                            str(row["relative_path"]),
-                        )
-                    except ValueError:
-                        continue
-                    width, height = env._read_image_dimensions(full_path)
-                    if width > 0 and height > 0:
-                        connection.execute(
-                            """
-                            UPDATE gallery_images
-                            SET image_width = ?, image_height = ?
-                            WHERE relative_path = ?
-                            """,
-                            (width, height, str(row["relative_path"])),
-                        )
-                env._index_meta_set(connection, "dimension_index_version", env.DIMENSION_INDEX_VERSION)
-                connection.commit()
-        finally:
-            with env.DIMENSION_BACKFILL_LOCK:
-                env.DIMENSION_BACKFILL_RUNNING = False
-
-    env.DIMENSION_BACKFILL_EXECUTOR.submit(run_backfill)
+    runtime = env.get_runtime()
+    if runtime.catalog:
+        with env._connect_gallery_index_db() as db:
+            built = env._index_meta_get(db, "built_at")
+        runtime.get_jobs().enqueue("dimensions", {"_signature": signature, "_built": built}, version=env.DIMENSION_INDEX_VERSION)
 
 
-def _schedule_dimension_backfill_if_needed(env, connection: sqlite3.Connection, sources: list[dict[str, Any]], signature: str):
-    if env._index_meta_get(connection, "dimension_index_version") == env.DIMENSION_INDEX_VERSION:
+def _schedule_dimension_backfill_if_needed(env, connection, sources, signature):
+    if QUERY_ONLY.get():
         return
-    missing_count = int(
-        connection.execute(
-            """
-            SELECT COUNT(*) AS total
-            FROM gallery_images
-            WHERE image_width <= 0 OR image_height <= 0
-            """
-        ).fetchone()["total"]
-    )
-    if missing_count > 0:
+    if env._index_meta_get(connection, "dimension_index_version") != env.DIMENSION_INDEX_VERSION:
         env._schedule_dimension_backfill(sources, signature)
-    else:
-        env._index_meta_set(connection, "dimension_index_version", env.DIMENSION_INDEX_VERSION)
 
 
-def _schedule_color_index_backfill(env, 
-    sources: list[dict[str, Any]],
-    signature: str,
-    priority_paths: list[str] | None = None,
-):
-    pass  # state belongs to the injected environment
-    if not env.HAS_PIL:
+def _schedule_color_index_backfill(env, sources, signature, relative_paths=None):
+    if QUERY_ONLY.get():
         return
-
-    normalized_priority_paths = [
-        env.normalize_relative_path(path)
-        for path in (priority_paths or [])
-        if env.normalize_relative_path(path)
-    ]
-    with env.COLOR_INDEX_BACKFILL_LOCK:
-        env.COLOR_INDEX_QUEUED_PATHS.update(normalized_priority_paths)
-        if env.COLOR_INDEX_BACKFILL_RUNNING:
-            return
-        env.COLOR_INDEX_BACKFILL_RUNNING = True
-
-    source_snapshot = [
-        {
-            "id": str(source.get("id", "")),
-            "path": str(source.get("path", "")),
-            "enabled": bool(source.get("enabled", True)),
-            "exists": bool(source.get("exists", False)),
-        }
-        for source in sources
-    ]
-
-    def run_backfill():
-        pass  # state belongs to the injected environment
-        try:
-            source_by_id = {
-                source["id"]: source
-                for source in source_snapshot
-                if source["id"] and source["enabled"] and source["exists"] and source["path"]
-            }
-            processed = 0
-            with env._connect_gallery_index_db() as connection:
-                while True:
-                    if env._index_meta_get(connection, "source_signature") != signature:
-                        return
-
-                    with env.COLOR_INDEX_BACKFILL_LOCK:
-                        priority_batch = list(env.COLOR_INDEX_QUEUED_PATHS)[:80]
-                        for path in priority_batch:
-                            env.COLOR_INDEX_QUEUED_PATHS.discard(path)
-
-                    rows = []
-                    if priority_batch:
-                        placeholders = ",".join("?" for _ in priority_batch)
-                        rows = connection.execute(
-                            f"""
-                            SELECT relative_path, source_id, source_relative_path
-                            FROM gallery_images
-                            WHERE relative_path IN ({placeholders})
-                              AND (dominant_color = '' OR color_family_scores_json = '{{}}')
-                            LIMIT 80
-                            """,
-                            priority_batch,
-                        ).fetchall()
-
-                    if not rows:
-                        rows = connection.execute(
-                            """
-                            SELECT relative_path, source_id, source_relative_path
-                            FROM gallery_images
-                            WHERE dominant_color = '' OR color_family_scores_json = '{}'
-                            LIMIT 80
-                            """
-                        ).fetchall()
-                    if not rows:
-                        env._index_meta_set(connection, "color_index_version", env.COLOR_INDEX_VERSION)
-                        connection.commit()
-                        return
-
-                    updates = []
-                    failed_paths = []
-                    for row in rows:
-                        source = source_by_id.get(str(row["source_id"]))
-                        if not source:
-                            continue
-                        full_path = os.path.join(source["path"], str(row["source_relative_path"]))
-                        if not os.path.isfile(full_path) or not full_path.lower().endswith(env.SUPPORTED_IMAGE_EXTENSIONS):
-                            continue
-                        color_profile = env._extract_image_color_profile(full_path, str(row["relative_path"]))
-                        if (
-                            color_profile["dominant_color"] == env.COLOR_PROFILE_DEFAULT["dominant_color"]
-                            and color_profile["color_family_scores_json"] == env.COLOR_PROFILE_DEFAULT["color_family_scores_json"]
-                        ):
-                            failed_paths.append(str(row["relative_path"]))
-                            continue
-                        updates.append(
-                            (
-                                color_profile["dominant_color"],
-                                color_profile["color_family"],
-                                color_profile["color_families_text"],
-                                color_profile["color_family_scores_json"],
-                                color_profile["palette_json"],
-                                color_profile["color_saturation"],
-                                color_profile["color_luma"],
-                                str(row["relative_path"]),
-                            )
-                        )
-
-                    if updates:
-                        connection.executemany(
-                            """
-                            UPDATE gallery_images
-                            SET dominant_color = ?,
-                                color_family = ?,
-                                color_families_text = ?,
-                                color_family_scores_json = ?,
-                                palette_json = ?,
-                                color_saturation = ?,
-                                color_luma = ?
-                            WHERE relative_path = ?
-                            """,
-                            updates,
-                        )
-                        updated_paths = [path for *_color_fields, path in updates]
-                        placeholders = ",".join("?" for _ in updated_paths)
-                        updated_rows = connection.execute(
-                            f"""
-                            SELECT relative_path, filename, title, category, notes, color_family, color_families_text,
-                                   color_family_scores_json, created_at
-                            FROM gallery_images
-                            WHERE relative_path IN ({placeholders})
-                            """,
-                            updated_paths,
-                        ).fetchall()
-                        env._sync_auxiliary_rows(connection, updated_rows)
-                        processed += len(updates)
-                    skipped_paths = failed_paths if failed_paths else ([] if updates else [str(row["relative_path"]) for row in rows])
-                    if skipped_paths:
-                        connection.executemany(
-                            """
-                            UPDATE gallery_images
-                            SET dominant_color = '#000000',
-                                color_family = 'black',
-                                color_families_text = '\nblack\n',
-                                color_family_scores_json = '{"black": 1.0}',
-                                palette_json = '["#000000"]'
-                            WHERE relative_path = ?
-                            """,
-                            [(path,) for path in skipped_paths],
-                        )
-                        placeholders = ",".join("?" for _ in skipped_paths)
-                        skipped_rows = connection.execute(
-                            f"""
-                            SELECT relative_path, filename, title, category, notes, color_family, color_families_text,
-                                   color_family_scores_json, created_at
-                            FROM gallery_images
-                            WHERE relative_path IN ({placeholders})
-                            """,
-                            skipped_paths,
-                        ).fetchall()
-                        env._sync_auxiliary_rows(connection, skipped_rows)
-                    connection.commit()
-
-                    if processed and processed % 800 == 0:
-                        env.invalidate_image_index_cache()
-        finally:
-            with env.COLOR_INDEX_BACKFILL_LOCK:
-                env.COLOR_INDEX_BACKFILL_RUNNING = False
-
-    env.COLOR_INDEX_EXECUTOR.submit(run_backfill)
+    runtime = env.get_runtime()
+    if runtime.catalog:
+        with env._connect_gallery_index_db() as db:
+            missing = db.execute("SELECT 1 FROM gallery_images WHERE dominant_color='' OR color_family_scores_json='{}' LIMIT 1").fetchone()
+            built = env._index_meta_get(db, "built_at")
+        if missing:
+            runtime.get_jobs().enqueue("colors", {"_signature": signature, "_built": built}, version=env.COLOR_INDEX_VERSION)
 
 
 def _full_path_for_index_row(env, row: sqlite3.Row | dict[str, Any], source: dict[str, Any]) -> str:
@@ -491,6 +264,7 @@ def _fingerprint_row_current(env, row: sqlite3.Row, fingerprint: sqlite3.Row | N
         return False
     return (
         str(fingerprint["version"] or "") == env.FINGERPRINT_VERSION
+        and ("asset_id" not in row.keys() or (fingerprint["asset_id"] == row["asset_id"] and fingerprint["content_revision"] == row["content_revision"]))
         and int(fingerprint["file_size"] or 0) == int(row["size"] or 0)
         and int(fingerprint["modified_at"] or 0) == int(row["modified_at"] or 0)
     )
@@ -517,6 +291,8 @@ def _sync_fingerprints_for_rows(env,
     *,
     limit: int = 360,
 ) -> dict[str, Any]:
+    if QUERY_ONLY.get():
+        return {"queued": 0, "completed": 0, "failed": 0, "last_error": ""}
     if not rows:
         return {"queued": 0, "completed": 0, "failed": 0, "last_error": ""}
 
@@ -529,12 +305,17 @@ def _sync_fingerprints_for_rows(env,
     last_error = ""
 
     for row in stale_rows[: max(1, int(limit or env.FINGERPRINT_SYNC_LIMIT))]:
+        from .jobs import checkpoint
+        checkpoint(completed + failed, queued)
+        connection.commit()
         relative_path = str(row["relative_path"])
         source = source_by_id.get(str(row["source_id"]))
         if not source:
             continue
         full_path = env._full_path_for_index_row(row, source)
+        before_stat = None
         try:
+            before_stat = os.stat(full_path)
             fingerprint = env.get_runtime().processor.build_fingerprints(full_path, str(row["filename"]))
         except Exception as error:
             fingerprint = {
@@ -551,41 +332,55 @@ def _sync_fingerprints_for_rows(env,
             last_error = str(fingerprint["error"])
         else:
             completed += 1
-        connection.execute(
-            """
-            INSERT INTO gallery_image_fingerprints(
-                relative_path, source_id, file_size, modified_at, file_hash, visual_hash,
-                prompt_hash, workflow_hash, filename_group_key, error, indexed_at, version
+        with env.FILE_OPERATION_LOCK:
+            try:
+                observed = os.stat(full_path)
+                if before_stat is None or observed.st_size != int(row["size"]) or (observed.st_size, observed.st_mtime_ns) != (before_stat.st_size, before_stat.st_mtime_ns):
+                    continue
+                identity = env.get_runtime().catalog.get(row["asset_id"]) if "asset_id" in row.keys() and row["asset_id"] else None
+                if identity and (identity["availability"] != "online" or identity["content_revision"] != row["content_revision"] or identity["relative_path"] != row["source_relative_path"] or identity["source_id"] != row["source_id"]):
+                    continue
+            except OSError:
+                continue
+            connection.execute(
+                """
+                INSERT INTO gallery_image_fingerprints(
+                    relative_path, source_id, file_size, modified_at, file_hash, visual_hash,
+                    prompt_hash, workflow_hash, filename_group_key, error, indexed_at, version
+                )
+                VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(relative_path) DO UPDATE SET
+                    source_id = excluded.source_id,
+                    file_size = excluded.file_size,
+                    modified_at = excluded.modified_at,
+                    file_hash = excluded.file_hash,
+                    visual_hash = excluded.visual_hash,
+                    prompt_hash = excluded.prompt_hash,
+                    workflow_hash = excluded.workflow_hash,
+                    filename_group_key = excluded.filename_group_key,
+                    error = excluded.error,
+                    indexed_at = excluded.indexed_at,
+                    version = excluded.version
+                """,
+                (
+                    relative_path,
+                    str(row["source_id"]),
+                    int(row["size"] or 0),
+                    int(row["modified_at"] or 0),
+                    str(fingerprint.get("file_hash") or ""),
+                    str(fingerprint.get("visual_hash") or ""),
+                    str(fingerprint.get("prompt_hash") or ""),
+                    str(fingerprint.get("workflow_hash") or ""),
+                    str(fingerprint.get("filename_group_key") or ""),
+                    str(fingerprint.get("error") or ""),
+                    time.time(),
+                    env.FINGERPRINT_VERSION,
+                ),
             )
-            VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(relative_path) DO UPDATE SET
-                source_id = excluded.source_id,
-                file_size = excluded.file_size,
-                modified_at = excluded.modified_at,
-                file_hash = excluded.file_hash,
-                visual_hash = excluded.visual_hash,
-                prompt_hash = excluded.prompt_hash,
-                workflow_hash = excluded.workflow_hash,
-                filename_group_key = excluded.filename_group_key,
-                error = excluded.error,
-                indexed_at = excluded.indexed_at,
-                version = excluded.version
-            """,
-            (
-                relative_path,
-                str(row["source_id"]),
-                int(row["size"] or 0),
-                int(row["modified_at"] or 0),
-                str(fingerprint.get("file_hash") or ""),
-                str(fingerprint.get("visual_hash") or ""),
-                str(fingerprint.get("prompt_hash") or ""),
-                str(fingerprint.get("workflow_hash") or ""),
-                str(fingerprint.get("filename_group_key") or ""),
-                str(fingerprint.get("error") or ""),
-                time.time(),
-                env.FINGERPRINT_VERSION,
-            ),
-        )
+
+            if "asset_id" in row.keys():
+                connection.execute("UPDATE gallery_image_fingerprints SET asset_id=?,content_revision=? WHERE relative_path=?", (row["asset_id"], row["content_revision"], relative_path))
+            connection.commit()
 
     return {"queued": queued, "completed": completed, "failed": failed, "last_error": last_error}
 
@@ -803,23 +598,6 @@ def get_variant_group_images(env,
     sort_by: str = "created_at",
     sort_order: str = "desc",
 ) -> dict[str, Any]:
-    result = env.list_variant_groups(
-        search=search,
-        category=category,
-        subfolder=subfolder,
-        board_id=board_id,
-        date_from=date_from,
-        date_to=date_to,
-        favorites_only=favorites_only,
-        color_family=color_family,
-        sort_by=sort_by,
-        sort_order=sort_order,
-        group_type=group_type,
-        limit=200,
-    )
-    groups = result.get("groups", [])
-    source_groups = env._build_variant_groups_from_items([])
-    # Recompute with private images only when needed for the selected group.
     sources, _ = env.ensure_image_index_db_current(scope=subfolder)
     source_by_id = {source["id"]: source for source in sources}
     with env._connect_gallery_index_db() as connection:
@@ -839,10 +617,6 @@ def get_variant_group_images(env,
         fingerprint_rows = env._rows_with_fingerprints(connection, rows)
     source_groups = env._build_variant_groups_from_items(env._variant_items_for_rows(rows, fingerprint_rows, source_by_id))
     selected = next((group for group in source_groups if group["id"] == group_id), None)
-    if selected is None and groups:
-        selected_public = next((group for group in groups if group["id"] == group_id), None)
-        if selected_public:
-            selected = {**selected_public, "_images": selected_public.get("images_preview", [])}
     images = list(selected.get("_images", [])) if selected else []
     safe_page = max(1, int(page or 1))
     safe_limit = max(1, min(120, int(limit or 60)))
@@ -921,6 +695,8 @@ def get_fingerprint_index_status(env) -> dict[str, Any]:
                 WHERE fingerprint.version = ?
                   AND fingerprint.file_size = image.size
                   AND fingerprint.modified_at = image.modified_at
+                  AND fingerprint.asset_id = image.asset_id
+                  AND fingerprint.content_revision = image.content_revision
                 """,
                 (env.FINGERPRINT_VERSION,),
             ).fetchone()["total"]
@@ -997,7 +773,7 @@ def get_thumbnail_path(env, relative_path: str, size: int = 480) -> tuple[str, s
 
     env.ensure_thumb_cache_dir()
     stat = os.stat(full_path)
-    cache_key = hashlib.sha1(f"{normalized}|{int(stat.st_mtime)}|{size}".encode("utf-8")).hexdigest()
+    cache_key = hashlib.sha1(f"{normalized}|{stat.st_mtime_ns}|{stat.st_size}|{size}".encode("utf-8")).hexdigest()
     thumb_path = os.path.join(env.THUMB_CACHE_DIR, f"{cache_key}.webp")
 
     if not os.path.exists(thumb_path):
@@ -1070,7 +846,7 @@ def enqueue_thumbnail_prewarm(env, relative_paths: list[str], size: int = 480, l
             env.THUMB_PREWARM_STATS["updated_at"] = time.time()
 
         queued.append(normalized)
-        env.THUMB_PREWARM_EXECUTOR.submit(env._run_thumbnail_prewarm, normalized, size, queue_key)
+        env.get_runtime().thumb_executor.submit(env._run_thumbnail_prewarm, normalized, size, queue_key)
 
     return {"ok": True, "queued": queued, "skipped": skipped, "status": env.get_thumbnail_prewarm_status()}
 

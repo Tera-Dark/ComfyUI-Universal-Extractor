@@ -13,6 +13,7 @@ from threading import Lock, BoundedSemaphore
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
+from .environment import SOURCE_SNAPSHOT
 
 def _default_gallery_sources(env) -> list[dict[str, Any]]:
     output_dir = env.get_output_dir()
@@ -98,6 +99,9 @@ def _write_gallery_sources_file(env, sources: list[dict[str, Any]]):
 
 
 def list_gallery_sources(env) -> list[dict[str, Any]]:
+    snapshot = SOURCE_SNAPSHOT.get()
+    if snapshot is not None:
+        return snapshot
     defaults = env._default_gallery_sources()
     default_by_id = {source["id"]: source for source in defaults}
     custom_sources: list[dict[str, Any]] = []
@@ -252,6 +256,8 @@ def diagnose_gallery_sources(env) -> dict[str, Any]:
                     with os.scandir(full_path) as iterator:
                         for entry in iterator:
                             if entry.is_dir(follow_symlinks=False):
+                                if entry.name == ".ue-uploads":
+                                    continue
                                 directory_count += 1
                             elif entry.is_file(follow_symlinks=False) and entry.name.lower().endswith(env.SUPPORTED_IMAGE_EXTENSIONS):
                                 image_count += 1

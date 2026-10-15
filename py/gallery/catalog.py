@@ -26,6 +26,7 @@ class Catalog:
     def __init__(self, data_dir):
         self.path = Path(data_dir) / "catalog.sqlite3"
         self.lock = RLock()
+        self.anchor = None
         self.path.parent.mkdir(parents=True, exist_ok=True)
         try:
             with self.connect() as db:
@@ -65,8 +66,17 @@ class Catalog:
                 """)
                 db.execute("INSERT OR IGNORE INTO catalog_migrations VALUES(?,?)", (self.VERSION, time.time()))
                 db.execute(f"PRAGMA user_version={self.VERSION}")
+            # Keep WAL open without retaining a transaction. Closing the last
+            # connection after every tiny update forces repeated checkpoints.
+            self.anchor = sqlite3.connect(self.path, check_same_thread=False)
+            self.anchor.execute("SELECT value FROM catalog_meta LIMIT 1").fetchall()
         except (sqlite3.DatabaseError, OSError) as error:
             raise CatalogUnavailable(f"Catalog unavailable; preserve {self.path} and its WAL files: {error}") from error
+
+    def close(self):
+        if self.anchor:
+            self.anchor.close()
+            self.anchor = None
 
     def connect(self):
         db = sqlite3.connect(self.path, timeout=5, factory=ClosingConnection)

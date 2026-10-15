@@ -11,7 +11,9 @@ from aiohttp import web
 from ..constants import GALLERY_INDEX_FILE, GALLERY_UI_DIR, IMPORT_IMAGE_SUBFOLDER, TRASH_DIR
 from ..paths import build_relative_display, get_comfy_base_dir, get_output_dir
 from .update_checker import check_update_status
-from .execution import run_gallery_task, run_upload_task
+from .execution import await_task, execute, run_upload_task as _run_upload_task
+from .catalog import CatalogUnavailable
+from .jobs import QueueFull
 from .uploads import UploadSession, recover_uploads
 from . import service as gallery_service
 from .service import (
@@ -71,6 +73,38 @@ from .service import (
     update_library_entry,
     delete_library_entry,
 )
+
+
+_WRITE_TASKS = {
+    "get_import_target_for_filename", "build_import_result", "persist_image_state", "batch_update_images",
+    "rename_image", "batch_rename_images", "move_images", "delete_images", "create_folder", "delete_folder",
+    "merge_folder", "rename_folder", "restore_trash_item", "purge_trash_item", "save_gallery_source",
+    "delete_gallery_source", "save_library", "delete_library", "import_library_data", "create_library_entry",
+    "update_library_entry", "delete_library_entry", "create_gallery_board", "update_gallery_board",
+    "delete_gallery_board", "update_board_images",
+}
+_INDEX_READS = {"get_gallery_context", "list_images_page", "list_boards", "list_variant_groups", "get_variant_group_images", "prewarm_image_fingerprints", "get_image_metadata"}
+
+
+async def run_gallery_task(function, *args, **kwargs):
+    runtime = gallery_service.get_runtime()
+    name = getattr(getattr(function, "func", function), "__name__", "")
+    if name in _INDEX_READS:
+        await runtime.prepare_index(kwargs.get("subfolder", ""), kwargs.pop("force_refresh", False))
+    if name == "prewarm_image_fingerprints":
+        job = runtime.enqueue_fingerprints(kwargs)
+        return await await_task(runtime.get_jobs().future(job["id"]))
+    if name in {"list_variant_groups", "get_variant_group_images"}:
+        allowed = {"search", "category", "subfolder", "board_id", "date_from", "date_to", "favorites_only", "color_family"}
+        job = runtime.enqueue_fingerprints({key: value for key, value in kwargs.items() if key in allowed})
+        await await_task(runtime.get_jobs().future(job["id"]))
+        return await execute(runtime, function, *args, **kwargs)
+    lane = "write" if name in _WRITE_TASKS else "scan" if name == "get_image_freshness" else "analysis" if name in {"list_variant_groups", "get_variant_group_images", "get_image_metadata"} else "read"
+    return await execute(runtime, function, *args, lane=lane, **kwargs)
+
+
+async def run_upload_task(function, *args):
+    return await _run_upload_task(function, *args, runtime=gallery_service.get_runtime())
 
 
 def _env_int(name: str, default: int) -> int:
@@ -145,6 +179,10 @@ def _guarded(handler):
             return await handler(request)
         except web.HTTPException:
             raise
+        except (CatalogUnavailable, QueueFull) as error:
+            return web.json_response({"error": str(error)}, status=503, headers={"Retry-After": "2"})
+        except FileNotFoundError as error:
+            return web.json_response({"error": str(error)}, status=404)
         except (ValueError, TypeError) as error:
             return _bad_request(str(error))
         except FileExistsError as error:
@@ -621,6 +659,17 @@ def _validate_upload_destination(path, kind):
 
 
 async def api_import_files(request: web.Request) -> web.Response:
+    runtime = gallery_service.get_runtime()
+    runtime.require_catalog()
+    if not runtime.upload_sessions.acquire(blocking=False):
+        raise web.HTTPServiceUnavailable(headers={"Retry-After": "2"})
+    try:
+        return await _receive_import_files(request)
+    finally:
+        runtime.upload_sessions.release()
+
+
+async def _receive_import_files(request: web.Request) -> web.Response:
     if request.content_length and request.content_length > MAX_IMPORT_TOTAL_BYTES:
         return _payload_too_large("import payload too large")
     session = UploadSession(gallery_service.DATA_DIR, _validate_upload_destination)
@@ -1135,15 +1184,40 @@ async def api_update_status(request: web.Request) -> web.Response:
 
 
 async def _recover_upload_sessions(_app):
+    if gallery_service.get_runtime().catalog is None:
+        print(f"[Universal Extractor] Read-only mode: {gallery_service.get_runtime().catalog_error}")
+        return
     errors = await run_upload_task(recover_uploads, gallery_service.DATA_DIR, _validate_upload_destination)
     for error in errors:
         print(f"[Universal Extractor] Upload recovery required: {error}")
 
 
+_LIFECYCLE = web.AppKey("ue_gallery_lifecycle", bool)
+_RUNTIME = web.AppKey("ue_gallery_runtime", object)
+
+
+async def _gallery_lifecycle(app):
+    runtime = gallery_service.get_runtime()
+    app[_RUNTIME] = runtime
+    if runtime.catalog:
+        runtime.get_jobs()
+    try:
+        yield
+    finally:
+        await asyncio.to_thread(runtime.close)
+
+
 def register_routes(app):
-    if not app.get("ue_upload_recovery_registered"):
-        app["ue_upload_recovery_registered"] = True
+    if not app.get(_LIFECYCLE):
+        app[_LIFECYCLE] = True
+        app.cleanup_ctx.append(_gallery_lifecycle)
         app.on_startup.append(_recover_upload_sessions)
+    from .job_routes import handlers
+    create_job, list_jobs, get_job, cancel_job = handlers(gallery_service)
+    _safe_add_route(app.router, "post", "/universal_gallery/api/jobs", create_job)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/jobs", list_jobs)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/jobs/{id}", get_job)
+    _safe_add_route(app.router, "post", "/universal_gallery/api/jobs/{id}/cancel", cancel_job)
     _safe_add_route(app.router, "get", "/universal_gallery/api/context", api_gallery_context)
     _safe_add_route(app.router, "get", "/universal_gallery/api/update-status", api_update_status)
     _safe_add_route(app.router, "get", "/universal_gallery/api/images", api_list_images)

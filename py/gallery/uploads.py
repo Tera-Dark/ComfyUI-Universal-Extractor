@@ -95,6 +95,9 @@ class UploadSession:
                     if entry.get("published"):
                         raise RuntimeError(f"Upload needs manual recovery: {self.journal}")
                     continue
+                stage = Path(entry["stage"])
+                if not stage.exists() or not os.path.samefile(stage, target):
+                    raise RuntimeError(f"Upload ownership cannot be verified: {self.journal}")
                 target.unlink()
         self.cleanup()
 

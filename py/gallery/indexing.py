@@ -13,6 +13,9 @@ from threading import Lock, BoundedSemaphore
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
+from pathlib import Path
+from .execution import QUERY_ONLY
+from .jobs import checkpoint, CURRENT_JOB
 
 def _is_gallery_index_corruption(env, error: BaseException) -> bool:
     if not isinstance(error, sqlite3.DatabaseError):
@@ -32,6 +35,7 @@ def _unique_gallery_index_quarantine_path(env, path: str) -> str:
 
 
 def _quarantine_gallery_index_db(env, reason: str) -> list[str]:
+    env.get_runtime().release_index_anchor()
     quarantined: list[str] = []
     for path in (env.GALLERY_INDEX_DB_FILE, f"{env.GALLERY_INDEX_DB_FILE}-wal", f"{env.GALLERY_INDEX_DB_FILE}-shm"):
         if not os.path.exists(path):
@@ -220,6 +224,9 @@ def _initialize_gallery_index_db(env, connection: sqlite3.Connection):
     fingerprint_columns = {row["name"] for row in connection.execute("PRAGMA table_info(gallery_image_fingerprints)").fetchall()}
     if "file_hash" not in fingerprint_columns:
         connection.execute("ALTER TABLE gallery_image_fingerprints ADD COLUMN file_hash TEXT NOT NULL DEFAULT ''")
+    for name, definition in {"asset_id": "TEXT NOT NULL DEFAULT ''", "content_revision": "INTEGER NOT NULL DEFAULT 0"}.items():
+        if name not in fingerprint_columns:
+            connection.execute(f"ALTER TABLE gallery_image_fingerprints ADD COLUMN {name} {definition}")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_fingerprint_file ON gallery_image_fingerprints(file_hash)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_fingerprint_visual ON gallery_image_fingerprints(visual_hash)")
     connection.execute("CREATE INDEX IF NOT EXISTS idx_gallery_fingerprint_prompt ON gallery_image_fingerprints(prompt_hash)")
@@ -230,19 +237,35 @@ def _initialize_gallery_index_db(env, connection: sqlite3.Connection):
 
 
 def _connect_gallery_index_db(env) -> sqlite3.Connection:
+    if QUERY_ONLY.get():
+        connection = sqlite3.connect(Path(env.GALLERY_INDEX_DB_FILE).resolve().as_uri() + "?mode=ro", uri=True,
+            timeout=env.GALLERY_INDEX_BUSY_TIMEOUT_MS / 1000, factory=env.ClosingConnection)
+        connection.row_factory = sqlite3.Row
+        connection.execute("PRAGMA query_only=ON")
+        return connection
     env.ensure_data_dir()
+    runtime = env.get_runtime()
     if env._gallery_index_file_has_invalid_header():
         env._quarantine_gallery_index_db("invalid sqlite header")
+        runtime.index_initialized.clear()
     connection = sqlite3.connect(env.GALLERY_INDEX_DB_FILE, timeout=env.GALLERY_INDEX_BUSY_TIMEOUT_MS / 1000, factory=env.ClosingConnection)
+    connection.row_factory = sqlite3.Row
+    connection.execute(f"PRAGMA busy_timeout={env.GALLERY_INDEX_BUSY_TIMEOUT_MS}")
+    identity = (env.GALLERY_INDEX_DB_FILE, os.stat(env.GALLERY_INDEX_DB_FILE).st_ino)
     try:
-        env._initialize_gallery_index_db(connection)
+        if identity not in runtime.index_initialized:
+            env._initialize_gallery_index_db(connection)
+            runtime.index_initialized.add(identity)
+            if runtime.index_anchor is None:
+                runtime.index_anchor = sqlite3.connect(env.GALLERY_INDEX_DB_FILE, check_same_thread=False)
+                runtime.index_anchor.execute("SELECT value FROM gallery_index_meta LIMIT 1").fetchall()
     except sqlite3.DatabaseError as error:
         connection.close()
         if not env._is_gallery_index_corruption(error):
             raise
         env._quarantine_gallery_index_db(str(error))
-        connection = sqlite3.connect(env.GALLERY_INDEX_DB_FILE, timeout=env.GALLERY_INDEX_BUSY_TIMEOUT_MS / 1000, factory=env.ClosingConnection)
-        env._initialize_gallery_index_db(connection)
+        runtime.index_initialized.clear()
+        return env._connect_gallery_index_db()
     return connection
 
 
@@ -430,6 +453,8 @@ def _sync_auxiliary_rows(env, connection: sqlite3.Connection, rows: list[sqlite3
 
 
 def _ensure_auxiliary_tables_current(env, connection: sqlite3.Connection):
+    if QUERY_ONLY.get():
+        return False
     if env._index_meta_get(connection, "auxiliary_schema_version") == str(env.GALLERY_INDEX_SCHEMA_VERSION):
         return
     rows = connection.execute(
@@ -447,6 +472,8 @@ def _ensure_auxiliary_tables_current(env, connection: sqlite3.Connection):
 
 
 def _sync_image_state_to_index_db(env, connection: sqlite3.Connection, state_map: dict[str, dict[str, Any]] | None = None):
+    if QUERY_ONLY.get():
+        return False
     state_mtime, state_digest = env._gallery_state_signature(state_map)
     if (
         env._index_meta_get(connection, "gallery_state_mtime") == state_mtime
@@ -548,9 +575,10 @@ def _load_image_index_from_db(env, sources: list[dict[str, Any]], signature: str
     with env._connect_gallery_index_db() as connection:
         if env._index_meta_get(connection, "source_signature") != signature:
             return None
-        if not env._color_index_is_current(connection):
+        if not QUERY_ONLY.get() and not env._color_index_is_current(connection):
             env._schedule_color_index_backfill(sources, signature)
-        env._schedule_dimension_backfill_if_needed(connection, sources, signature)
+        if not QUERY_ONLY.get():
+            env._schedule_dimension_backfill_if_needed(connection, sources, signature)
         rows = connection.execute(
             """
             SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
@@ -637,7 +665,7 @@ def get_color_index_status(env) -> dict[str, Any]:
 
 def _save_image_index_to_db(env, index: dict[str, Any]):
     image_states = env.get_image_state_map()
-    with env._connect_gallery_index_db() as connection:
+    with env.get_runtime().scan_commit(), env._connect_gallery_index_db() as connection:
         connection.execute("DELETE FROM gallery_images")
         connection.execute("DELETE FROM gallery_image_fingerprints")
         scanned_at = time.time()
@@ -750,6 +778,8 @@ def _build_image_index(env, sources: list[dict[str, Any]], include_color_profile
 
             for entry in entries:
                 if entry.is_dir(follow_symlinks=False):
+                    if entry.name == ".ue-uploads":
+                        continue
                     if source.get("recursive", True):
                         stack.append(entry.path)
                     continue
@@ -774,7 +804,7 @@ def _build_image_index(env, sources: list[dict[str, Any]], include_color_profile
 
                 original_url, resolved_subfolder = env.build_view_url(image_ref)
                 color_profile = env._extract_image_color_profile(entry.path) if include_color_profiles else dict(env.COLOR_PROFILE_DEFAULT)
-                image_width, image_height = env._read_image_dimensions(entry.path)
+                image_width, image_height = (0, 0) if CURRENT_JOB.get() else env._read_image_dimensions(entry.path)
                 source_counts[source["id"]] = source_counts.get(source["id"], 0) + 1
                 images.append(
                     {
@@ -856,11 +886,18 @@ def _image_record_for_file(env, source: dict[str, Any], full_path: str, stat: os
     }
 
 
+class ScanRecords(dict):
+    def __init__(self):
+        super().__init__()
+        self.failed_sources = set()
+
+
 def _scan_index_records_for_scope(env, sources: list[dict[str, Any]], scope: str = "") -> dict[str, dict[str, Any]]:
     scoped_sources, _ = env._freshness_sources_for_subfolder(sources, scope)
-    records: dict[str, dict[str, Any]] = {}
+    records = ScanRecords()
     for source, relative_scope in scoped_sources:
         if not source.get("enabled", True) or not source.get("exists"):
+            records.failed_sources.add(source["id"])
             continue
         source_root = source.get("path", "")
         if not source_root:
@@ -878,15 +915,19 @@ def _scan_index_records_for_scope(env, sources: list[dict[str, Any]], scope: str
 
         stack = [scan_root]
         while stack:
+            checkpoint()
             current_dir = stack.pop()
             try:
                 with os.scandir(current_dir) as iterator:
                     entries = list(iterator)
             except (FileNotFoundError, PermissionError, OSError):
+                records.failed_sources.add(source["id"])
                 continue
             for entry in entries:
                 try:
                     if entry.is_dir(follow_symlinks=False):
+                        if entry.name == ".ue-uploads":
+                            continue
                         if source.get("recursive", True):
                             stack.append(entry.path)
                         continue
@@ -907,7 +948,7 @@ def _scope_where_sql(env, sources: list[dict[str, Any]], scope: str = "") -> tup
     params: list[Any] = []
     for source, relative_scope in scoped_sources:
         source_id = source.get("id")
-        if not source_id:
+        if not source_id or not source.get("enabled") or not source.get("exists"):
             continue
         if relative_scope:
             clauses.append("(source_id = ? AND (lower(relative_dir) = ? OR lower(relative_dir) LIKE ?))")
@@ -931,10 +972,10 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
     upsert_payloads: list[dict[str, Any]] = []
     priority_paths: list[str] = []
 
-    with env._connect_gallery_index_db() as connection:
+    with env.get_runtime().scan_commit(), env._connect_gallery_index_db() as connection:
         existing_rows = connection.execute(
             f"""
-            SELECT relative_path, size, modified_at
+            SELECT relative_path, source_id, source_relative_path, size, modified_at
             FROM gallery_images
             WHERE {where_sql}
             """,
@@ -942,7 +983,14 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
         ).fetchall()
         existing = {str(row["relative_path"]): row for row in existing_rows}
         scanned_paths = set(scanned_records)
-        deleted_paths = sorted(set(existing) - scanned_paths)
+        failed_sources = getattr(scanned_records, "failed_sources", set())
+        deleted_paths = sorted(path for path in set(existing) - scanned_paths if existing[path]["source_id"] not in failed_sources)
+        runtime = env.get_runtime()
+        if runtime.catalog:
+            for source in sources:
+                if source["id"] in failed_sources or not source.get("enabled") or not source.get("exists"):
+                    continue
+                runtime.catalog.mark_missing(source, [existing[path]["source_relative_path"] for path in deleted_paths if existing[path]["source_id"] == source["id"]])
 
         for relative_path, record in scanned_records.items():
             existing_row = existing.get(relative_path)
@@ -953,7 +1001,7 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
             ):
                 continue
             image_state = state_map.get(relative_path, env.default_image_state())
-            image_width, image_height = env._read_image_dimensions(str(record.get("full_path", "")))
+            image_width, image_height = (0, 0) if CURRENT_JOB.get() else env._read_image_dimensions(str(record.get("full_path", "")))
             record = {
                 **record,
                 "image_width": image_width,
@@ -1062,9 +1110,12 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
 
 
 def ensure_image_index_db_current(env, force_refresh: bool = False, scope: str = "") -> tuple[list[dict[str, Any]], str]:
+    if QUERY_ONLY.get():
+        sources = env.list_gallery_sources()
+        return sources, env._source_signature(sources)
     sources = env.list_gallery_sources()
     signature = env._source_signature(sources)
-    with env.IMAGE_INDEX_LOCK:
+    with env.get_runtime().scan_sync_lock:
         should_sync = force_refresh or env.IMAGE_INDEX_CACHE.get("dirty") or not env._image_index_db_has_signature(signature)
         if should_sync:
             if force_refresh or env._image_index_db_has_signature(signature):
@@ -1082,7 +1133,7 @@ def ensure_image_index_db_current(env, force_refresh: bool = False, scope: str =
                     "dirty": False,
                 }
             )
-        with env._connect_gallery_index_db() as connection:
+        with env.get_runtime().scan_commit(), env._connect_gallery_index_db() as connection:
             if should_sync or env._index_meta_get(connection, "asset_identity_version") != "1":
                 runtime = env.get_runtime()
                 if runtime.catalog:
@@ -1096,7 +1147,7 @@ def get_image_index(env, force_refresh: bool = False) -> dict[str, Any]:
     sources = env.list_gallery_sources()
     signature = env._source_signature(sources)
 
-    with env.IMAGE_INDEX_LOCK:
+    with env.get_runtime().scan_sync_lock:
         should_rebuild = (
             force_refresh
             or env.IMAGE_INDEX_CACHE.get("dirty")
@@ -1325,6 +1376,8 @@ def _scan_image_freshness(env, sources: list[dict[str, Any]], subfolder: str) ->
             for entry in entries:
                 try:
                     if entry.is_dir(follow_symlinks=False):
+                        if entry.name == ".ue-uploads":
+                            continue
                         if source.get("recursive", True):
                             stack.append(entry.path)
                         continue
@@ -1414,9 +1467,10 @@ def list_images_page(env,
     offset = (safe_page - 1) * safe_limit
     with env._connect_gallery_index_db() as connection:
         env._ensure_auxiliary_tables_current(connection)
-        if not env._color_index_is_current(connection):
+        if not QUERY_ONLY.get() and not env._color_index_is_current(connection):
             env._schedule_color_index_backfill(sources, signature)
-        env._schedule_dimension_backfill_if_needed(connection, sources, signature)
+        if not QUERY_ONLY.get():
+            env._schedule_dimension_backfill_if_needed(connection, sources, signature)
         env._sync_image_state_to_index_db(connection)
         try:
             total = int(
@@ -1754,6 +1808,8 @@ def get_gallery_context(env, force_refresh: bool = False) -> dict:
     indexed_sources = [{**source, "image_count": source_counts.get(source["id"], 0)} for source in sources]
 
     return {
+        "catalog_error": env.get_runtime().catalog_error,
+        "read_only": env.get_runtime().catalog is None,
         "base_dir": base_dir,
         "output_dir_absolute": output_dir,
         "output_dir_relative": env.build_relative_display(output_dir, base_dir) if output_dir else "",

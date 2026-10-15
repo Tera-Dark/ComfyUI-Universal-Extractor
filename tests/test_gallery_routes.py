@@ -65,6 +65,29 @@ async def test_fingerprint_prewarm_keeps_same_origin_guard(gallery_client):
 
 
 @pytest.mark.anyio
+async def test_jobs_validate_input_and_origin(gallery_client):
+    client, _ = gallery_client
+    response = await client.post("/universal_gallery/api/jobs", json={"kind": "arbitrary_command"})
+    assert response.status == 400
+    response = await client.post("/universal_gallery/api/jobs", json={"kind": "refresh_index", "payload": {"subfolder": "../escape"}})
+    assert response.status == 400
+    response = await client.post("/universal_gallery/api/jobs", json={"kind": "refresh_index"}, headers={"Origin": "https://evil.example"})
+    assert response.status == 403
+    response = await client.post("/universal_gallery/api/jobs", json={"kind": "refresh_index", "payload": {"force": False}})
+    assert response.status == 202
+    job = (await response.json())["job"]
+    import json
+    contract = json.loads((Path(__file__).parent / "fixtures/gallery-contracts.json").read_text())
+    assert set(contract["job"]).issubset(job)
+    assert job["kind"] == "refresh_index"
+    response = await client.get(f"/universal_gallery/api/jobs/{job['id']}")
+    assert response.status == 200
+    assert (await response.json())["job"]["id"] == job["id"]
+    response = await client.get("/universal_gallery/api/jobs/not-found")
+    assert response.status == 404
+
+
+@pytest.mark.anyio
 async def test_update_status_route_returns_version_payload(gallery_client, monkeypatch):
     client, routes = gallery_client
 

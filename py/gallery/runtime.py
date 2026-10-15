@@ -2,7 +2,14 @@
 from __future__ import annotations
 
 import os
+import json
+import time
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor
+from threading import RLock
+from threading import BoundedSemaphore
+
+from .jobs import JobScheduler, checkpoint, CURRENT_JOB
 
 from .catalog import Catalog, CatalogUnavailable
 from .media import ImageProcessor
@@ -21,12 +28,148 @@ class GalleryRuntime:
         self.upload_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ue-upload")
         self.thumb_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ue-thumb")
         self.index_initialized = set()
+        self.index_anchor = None
+        self.jobs_lock = RLock()
+        self.scan_sync_lock = RLock()
+        self.read_slots = BoundedSemaphore(32)
+        self.write_slots = BoundedSemaphore(16)
+        self.upload_slots = BoundedSemaphore(16)
+        self.upload_sessions = BoundedSemaphore(2)
         try:
             self.catalog = Catalog(env.DATA_DIR)
         except CatalogUnavailable as error:
             self.catalog = None
             self.catalog_error = str(error)
         self.jobs = None
+
+    def get_jobs(self):
+        with self.jobs_lock:
+            if self.jobs is None:
+                self.jobs = JobScheduler(self.require_catalog(), self.scan_executor, self.analysis_executor, {
+                    "refresh_index": ("scan", self._refresh),
+                    "fingerprint_assets": ("analysis", self._fingerprints),
+                    "colors": ("analysis", lambda ctx, payload: self._derive(ctx, "colors")),
+                    "dimensions": ("analysis", lambda ctx, payload: self._derive(ctx, "dimensions")),
+                })
+            return self.jobs
+
+    def _refresh(self, context, payload):
+        context.scan_generation = self.require_catalog().generation()
+        context.checkpoint(0, 1)
+        self.env.ensure_image_index_db_current(force_refresh=payload.get("force", True), scope=payload.get("subfolder", ""))
+        sources = self.env.list_gallery_sources()
+        signature = self.env._source_signature(sources)
+        self.env._schedule_dimension_backfill(sources, signature)
+        self.env._schedule_color_index_backfill(sources, signature)
+        context.checkpoint(1, 1)
+        return {"ok": True}
+
+    @contextmanager
+    def scan_commit(self):
+        with self.env.FILE_OPERATION_LOCK:
+            context = CURRENT_JOB.get()
+            expected = getattr(context, "scan_generation", None)
+            if expected is not None and self.require_catalog().generation() != expected:
+                raise OSError("Source changed during scan; retrying from a fresh snapshot")
+            yield
+
+    async def prepare_index(self, scope="", force=False):
+        import asyncio
+        from .execution import await_task, execute
+        env = self.env
+        def ready():
+            sources = env.list_gallery_sources()
+            signature = env._source_signature(sources)
+            return (env.IMAGE_INDEX_CACHE.get("signature") == signature
+                    and not env.IMAGE_INDEX_CACHE.get("dirty") and os.path.exists(env.GALLERY_INDEX_DB_FILE))
+        if not force and await execute(self, ready):
+            return
+        if self.catalog is None:
+            # Already committed index remains readable in catalog failure mode.
+            if os.path.exists(env.GALLERY_INDEX_DB_FILE):
+                def prepare_derived_schema():
+                    with env._connect_gallery_index_db():
+                        pass
+                await execute(self, prepare_derived_schema, lane="scan")
+                return
+            self.require_catalog()
+        job = self.get_jobs().enqueue("refresh_index", {"subfolder": scope, "force": force, "_generation": self.catalog.generation()})
+        await await_task(self.get_jobs().future(job["id"]))
+
+    def _fingerprints(self, context, payload):
+        if not self.env.IMAGE_INDEX_CACHE.get("built_at"):
+            job = self.get_jobs().enqueue("refresh_index", {"force": False, "subfolder": payload.get("subfolder", "")})
+            future = self.get_jobs().future(job["id"])
+            while not future.done():
+                context.checkpoint()
+                try:
+                    future.result(.2)
+                except TimeoutError:
+                    pass
+            future.result()
+        options = {key: value for key, value in payload.items() if not key.startswith("_")}
+        context.checkpoint(0, 1)
+        result = self.env.prewarm_image_fingerprints(**options)
+        context.checkpoint(result.get("completed", 0), result.get("queued", 0))
+        return result
+
+    def enqueue_fingerprints(self, options):
+        built = ""
+        if os.path.exists(self.env.GALLERY_INDEX_DB_FILE):
+            with self.env._connect_gallery_index_db() as db:
+                built = self.env._index_meta_get(db, "built_at")
+        return self.get_jobs().enqueue("fingerprint_assets", {**options, "_index_version": built,
+            "_generation": self.require_catalog().generation()}, version=self.env.FINGERPRINT_VERSION)
+
+    def _derive(self, context, kind):
+        env = self.env
+        flag = "COLOR_INDEX_BACKFILL_RUNNING" if kind == "colors" else "DIMENSION_BACKFILL_RUNNING"
+        setattr(env, flag, True)
+        last, completed = "", 0
+        condition = "(dominant_color='' OR color_family_scores_json='{}')" if kind == "colors" else "(image_width<=0 OR image_height<=0)"
+        try:
+            with env._connect_gallery_index_db() as db:
+                total = db.execute(f"SELECT COUNT(*) FROM gallery_images WHERE {condition}").fetchone()[0]
+            while True:
+                context.checkpoint(completed, total)
+                with env._connect_gallery_index_db() as db:
+                    rows = db.execute(f"SELECT * FROM gallery_images WHERE {condition} AND relative_path>? ORDER BY relative_path LIMIT 100", (last,)).fetchall()
+                if not rows:
+                    break
+                for row in rows:
+                    context.checkpoint()
+                    last = row["relative_path"]
+                    try:
+                        _, path = env.resolve_image_path(last)
+                        observed = os.stat(path)
+                        if kind == "colors":
+                            profile = env._extract_image_color_profile(path, last)
+                            if not profile.get("dominant_color"):
+                                profile = {**env.COLOR_PROFILE_DEFAULT, "dominant_color": "#000000", "color_family": "black", "color_families_text": "\nblack\n", "color_family_scores_json": '{"black":1.0}', "palette_json": '["#000000"]'}
+                        else:
+                            width, height = env._read_image_dimensions(path)
+                        current = os.stat(path)
+                        if (observed.st_size, observed.st_mtime_ns) != (current.st_size, current.st_mtime_ns):
+                            continue
+                        with env.FILE_OPERATION_LOCK, env._connect_gallery_index_db() as db:
+                            identity = self.catalog.get(row["asset_id"]) if row["asset_id"] else None
+                            if identity and (identity["availability"] != "online" or identity["content_revision"] != row["content_revision"] or identity["relative_path"] != row["source_relative_path"] or identity["source_id"] != row["source_id"]):
+                                continue
+                            if kind == "colors":
+                                db.execute("UPDATE gallery_images SET dominant_color=?,color_family=?,color_families_text=?,color_family_scores_json=?,palette_json=?,color_saturation=?,color_luma=? WHERE relative_path=? AND content_revision=? AND asset_id=?", (*[profile[key] for key in ("dominant_color", "color_family", "color_families_text", "color_family_scores_json", "palette_json", "color_saturation", "color_luma")], last, row["content_revision"], row["asset_id"]))
+                                updated = db.execute("SELECT * FROM gallery_images WHERE relative_path=?", (last,)).fetchall()
+                                env._sync_auxiliary_rows(db, updated)
+                            else:
+                                db.execute("UPDATE gallery_images SET image_width=?,image_height=? WHERE relative_path=? AND content_revision=? AND asset_id=?", (width, height, last, row["content_revision"], row["asset_id"]))
+                        completed += 1
+                    except (FileNotFoundError, ValueError, PermissionError):
+                        continue
+            with env._connect_gallery_index_db() as db:
+                env._index_meta_set(db, "color_index_version" if kind == "colors" else "dimension_index_version", env.COLOR_INDEX_VERSION if kind == "colors" else env.DIMENSION_INDEX_VERSION)
+            context.checkpoint(completed, total)
+            return {"completed": completed, "total": total}
+        finally:
+            setattr(env, flag, False)
 
     def require_catalog(self):
         if self.catalog is None:
@@ -62,3 +205,12 @@ class GalleryRuntime:
             self.jobs.close()
         for executor in (self.scan_executor, self.analysis_executor, self.thumb_executor, self.read_executor, self.write_executor, self.upload_executor):
             executor.shutdown(wait=True, cancel_futures=True)
+        self.release_index_anchor()
+        if self.catalog:
+            self.catalog.close()
+
+    def release_index_anchor(self):
+        if self.index_anchor:
+            self.index_anchor.close()
+            self.index_anchor = None
+        self.index_initialized.clear()

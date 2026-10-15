@@ -1,0 +1,21 @@
+{
+  "asset": {
+    "asset_id": "c6f62f58-bf8e-4e9a-a08c-9bb45904ac5d",
+    "content_revision": 1,
+    "media_type": "image",
+    "filename": "sample.png",
+    "relative_path": "sample.png"
+  },
+  "job": {
+    "id": "77ee768b633245b3921b94813af6687d",
+    "kind": "refresh_index",
+    "state": "running",
+    "completed": 0,
+    "total": 1,
+    "error": "",
+    "attempts": 1,
+    "created_at": 1,
+    "updated_at": 1,
+    "payload": {"subfolder": "default_output::", "force": true}
+  }
+}
