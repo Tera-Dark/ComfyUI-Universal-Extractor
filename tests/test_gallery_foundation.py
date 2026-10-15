@@ -70,6 +70,8 @@ def test_asset_identity_survives_rebuilt_index_and_tracks_content(isolated_galle
     first = env.service.list_images_page()["images"]
     ids = {row["filename"]: row["asset_id"] for row in first}
     assert ids["a.png"] and ids["a.png"] != ids["copy.png"]
+    for executor in (env.service.COLOR_INDEX_EXECUTOR, env.service.DIMENSION_BACKFILL_EXECUTOR):
+        executor.submit(lambda: None).result()
     Path(env.service.GALLERY_INDEX_DB_FILE).unlink()
     rebuilt = env.service.list_images_page()["images"]
     assert {row["filename"]: row["asset_id"] for row in rebuilt} == ids
@@ -90,6 +92,40 @@ def test_corrupt_authoritative_catalog_is_not_rebuilt(isolated_gallery_env):
     from py.gallery.catalog import CatalogUnavailable
     with pytest.raises(CatalogUnavailable):
         runtime.require_catalog()
+
+
+def test_identity_survives_move_trash_restore(isolated_gallery_env):
+    env = isolated_gallery_env
+    (env.output_dir / "a.png").write_bytes(b"one")
+    identity = env.service.list_images_page()["images"][0]["asset_id"]
+    env.service.move_images(["a.png"], "destination")
+    assert env.service.get_asset_identity("destination/a.png")["asset_id"] == identity
+    env.service.delete_images(["destination/a.png"])
+    item = env.service.list_trash_items()[0]
+    assert item["asset_id"] == identity
+    assert env.service.get_runtime().catalog.get(identity)["availability"] == "trashed"
+    env.service.restore_trash_item(item["id"])
+    assert env.service.get_asset_identity("destination/a.png")["asset_id"] == identity
+
+
+def test_catalog_commit_failure_rolls_back_file_and_json(isolated_gallery_env, monkeypatch):
+    env = isolated_gallery_env
+    (env.output_dir / "a.png").write_bytes(b"one")
+    identity = env.service.get_asset_identity("a.png")["asset_id"]
+    env.service.persist_image_state("a.png", {"notes": "keep"})
+    catalog = env.service.get_runtime().catalog
+    original, calls = catalog.apply, []
+    def fail_first(changes):
+        calls.append(True)
+        if len(calls) == 1:
+            raise OSError("injected catalog write failure")
+        return original(changes)
+    monkeypatch.setattr(catalog, "apply", fail_first)
+    with pytest.raises(RuntimeError, match="journal"):
+        env.service.move_images(["a.png"], "destination")
+    assert (env.output_dir / "a.png").read_bytes() == b"one"
+    assert env.service.get_image_state("a.png")["notes"] == "keep"
+    assert catalog.get(identity)["relative_path"] == "a.png"
 
 
 @pytest.mark.anyio

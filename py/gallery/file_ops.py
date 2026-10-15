@@ -13,6 +13,7 @@ from threading import Lock, BoundedSemaphore
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
+from .catalog import source_namespace
 
 def ensure_trash_storage_dir(env) -> str:
     env.ensure_trash_dir()
@@ -39,10 +40,13 @@ def add_trash_item(env,
     storage_path: str,
     state_snapshot: dict[str, dict] | None = None,
     image_count: int | None = None,
+    trash_id: str | None = None,
+    asset_id: str | None = None,
 ) -> dict[str, Any]:
     trash_state = env.load_trash_state()
     item = {
-        "id": uuid.uuid4().hex,
+        "id": trash_id or uuid.uuid4().hex,
+        "asset_id": asset_id,
         "kind": kind,
         "name": name,
         "original_path": original_path,
@@ -117,6 +121,11 @@ def move_path_to_trash(env, *, full_path: str, kind: str, original_path: str, st
     if not os.path.exists(full_path):
         raise FileNotFoundError("path not found")
 
+    if kind in {"image", "folder"}:
+        entry = {"full_path": full_path, "kind": kind, "original_path": original_path, "state_snapshot": state_snapshot or {}}
+        env._trash_batch([entry])
+        return env.get_trash_item(entry["trash_id"])
+
     storage_dir = env.ensure_trash_storage_dir()
     extension = os.path.splitext(full_path)[1] if os.path.isfile(full_path) else ""
     storage_name = f"{uuid.uuid4().hex}{extension}"
@@ -163,18 +172,24 @@ def restore_trash_item(env, item_id: str) -> dict[str, Any]:
             os.makedirs(parent_dir, exist_ok=True)
         with env.FILE_OPERATION_LOCK, env._state_store.GALLERY_STATE_LOCK:
             state_before, trash_before = env._state_store.load_gallery_state(), env.load_trash_state()
+            catalog = env.get_runtime().require_catalog()
+            before = catalog.trash_assets(item_id)
+            after = [{**row, "availability": "online", "trash_id": ""} for row in before]
             def commit_restore():
                 if item.get("state_snapshot"):
                     env.restore_image_states(item["state_snapshot"])
                 env.remove_trash_item(item_id)
+                catalog.apply(after)
             def rollback_restore():
                 env._state_store.save_gallery_state(state_before)
                 env.save_trash_state(trash_before)
+                catalog.apply(before)
             try:
                 env.execute_moves([(storage_path, target_path)], os.path.join(env.DATA_DIR, "operation_journal"),
-                              commit_restore, rollback_restore, {"gallery": state_before, "trash": trash_before})
+                              commit_restore, rollback_restore, {"gallery": state_before, "trash": trash_before, "catalog_before": before, "catalog_after": after})
             finally:
                 env.invalidate_image_index_cache()
+        env.ensure_image_index_db_current(force_refresh=True)
         return {"ok": True, "id": item_id, "subfolders": env.collect_subfolders(output_dir), "categories": env.collect_categories()}
 
     if kind == "library":
@@ -192,14 +207,37 @@ def restore_trash_item(env, item_id: str) -> dict[str, Any]:
 
 
 def purge_trash_item(env, item_id: str) -> dict[str, Any]:
-    item = env.get_trash_item(item_id)
-    if not item:
-        raise FileNotFoundError("trash item not found")
-    storage_path = env.resolve_trash_storage_path(item)
-    if os.path.exists(storage_path):
-        env.send_to_system_recycle_bin(storage_path)
-    env.remove_trash_item(item_id)
-    return {"ok": True, "id": item_id}
+    catalog = env.get_runtime().require_catalog()
+    with env.FILE_OPERATION_LOCK:
+        item = env.get_trash_item(item_id)
+        if not item:
+            raise FileNotFoundError("trash item not found")
+        storage_path = env.resolve_trash_storage_path(item)
+        journal_dir = os.path.join(env.DATA_DIR, "operation_journal")
+        # Refuse all new operations if an earlier file transaction needs recovery.
+        env.execute_moves([], journal_dir, lambda: None, lambda: None, {})
+        journal = os.path.join(journal_dir, f"purge-{uuid.uuid4().hex}.json")
+        evidence = {"version": 1, "kind": "purge", "status": "pending", "trash": item,
+                    "catalog_before": catalog.trash_assets(item_id)}
+        env.save_json(journal, evidence)
+        removed = False
+        try:
+            if os.path.exists(storage_path):
+                env.send_to_system_recycle_bin(storage_path)
+            removed = True
+            catalog.purge(item_id)
+            env.remove_trash_item(item_id)
+            evidence["status"] = "committed"
+            env.save_json(journal, evidence)
+            os.remove(journal)
+        except BaseException:
+            if not removed and os.path.exists(storage_path):
+                os.remove(journal)
+            else:
+                evidence["status"] = "needs_recovery"
+                env.save_json(journal, evidence)
+            raise
+        return {"ok": True, "id": item_id}
 
 
 def get_import_target_for_filename(env, 
@@ -284,15 +322,55 @@ def persist_image_state(env, relative_path: str, updates: dict) -> dict:
     return {"ok": True, "state": state, "categories": categories}
 
 
+def _asset_rows_for_path(env, ref, full_path):
+    catalog = env.get_runtime().require_catalog()
+    source_id, relative = env.parse_image_ref(ref)
+    source = env.get_gallery_source(source_id)
+    candidates = []
+    if os.path.isdir(full_path):
+        for root, dirs, files in os.walk(full_path, followlinks=False):
+            dirs[:] = [name for name in dirs if not os.path.islink(os.path.join(root, name))]
+            candidates.extend(os.path.join(root, name) for name in files)
+    else:
+        candidates.append(full_path)
+    rows = []
+    for path in candidates:
+        if not path.lower().endswith(env.SUPPORTED_IMAGE_EXTENSIONS) or os.path.islink(path):
+            continue
+        relative = env.normalize_relative_path(os.path.relpath(path, source["path"]))
+        env.resolve_image_path(env.make_image_ref(source_id, relative))
+        stat = os.stat(path)
+        identity = catalog.observe_many(source, [(relative, stat.st_size, stat.st_mtime_ns)])[0]
+        rows.append(catalog.get(identity["asset_id"]))
+    return rows
+
+
 def _execute_image_moves(env, path_mapping: dict[str, str], full_moves: list[tuple[str, str]]):
+    catalog = env.get_runtime().require_catalog()
     with env.FILE_OPERATION_LOCK, env._state_store.GALLERY_STATE_LOCK:
         snapshot = env._state_store.load_gallery_state()
+        before, after = [], []
+        for old_ref, new_ref in path_mapping.items():
+            if not old_ref.lower().endswith(env.SUPPORTED_IMAGE_EXTENSIONS):
+                continue
+            _, full_path = env.resolve_image_path(old_ref)
+            rows = _asset_rows_for_path(env, old_ref, full_path)
+            target_id, target_relative = env.parse_image_ref(new_ref)
+            target_source = env.get_gallery_source(target_id)
+            for row in rows:
+                before.append(row)
+                after.append({**row, "source_id": target_id, "namespace": source_namespace(target_source["path"]),
+                              "relative_path": target_relative, "location_key": os.path.normcase(target_relative), "availability": "online"})
+        def commit():
+            categories = env.move_image_states(path_mapping)
+            catalog.apply(after)
+            return categories
+        def rollback():
+            env._state_store.save_gallery_state(snapshot)
+            catalog.apply(before)
         try:
-            return env.execute_moves(
-                full_moves, os.path.join(env.DATA_DIR, "operation_journal"),
-                lambda: env.move_image_states(path_mapping),
-                lambda: env._state_store.save_gallery_state(snapshot), snapshot,
-            )
+            return env.execute_moves(full_moves, os.path.join(env.DATA_DIR, "operation_journal"), commit, rollback,
+                                     {"gallery": snapshot, "catalog_before": before, "catalog_after": after})
         finally:
             env.invalidate_image_index_cache()
 
@@ -329,6 +407,7 @@ def rename_image(env, relative_path: str, new_filename: str) -> dict:
     return {
         "ok": True,
         "image": {
+            "asset_id": env.get_asset_identity(target_relative)["asset_id"],
             "filename": os.path.basename(target_source_relative),
             "relative_path": target_relative,
             "source_id": source_id,
@@ -646,35 +725,37 @@ def move_images(env, relative_paths: list[str], target_subfolder: str, target_so
 
 
 def _trash_batch(env, entries):
+    catalog = env.get_runtime().require_catalog()
     with env.FILE_OPERATION_LOCK, env._state_store.GALLERY_STATE_LOCK:
-        state_before = env._state_store.load_gallery_state()
-        trash_before = env.load_trash_state()
+        state_before, trash_before = env._state_store.load_gallery_state(), env.load_trash_state()
         storage = env.ensure_trash_storage_dir()
-        moves = []
+        moves, before, after = [], [], []
         for entry in entries:
+            entry["trash_id"] = uuid.uuid4().hex
             extension = os.path.splitext(entry["full_path"])[1] if entry["kind"] == "image" else ""
             entry["storage_full"] = os.path.join(storage, uuid.uuid4().hex + extension)
             moves.append((entry["full_path"], entry["storage_full"]))
-
+            rows = _asset_rows_for_path(env, entry["original_path"], entry["full_path"])
+            entry["asset_id"] = rows[0]["asset_id"] if len(rows) == 1 and entry["kind"] == "image" else None
+            before.extend(rows)
+            after.extend({**row, "availability": "trashed", "trash_id": entry["trash_id"]} for row in rows)
         def commit():
             removed = []
             for entry in entries:
-                env.add_trash_item(
-                    kind=entry["kind"], name=os.path.basename(entry["full_path"]),
-                    original_path=entry["original_path"],
-                    storage_path=os.path.relpath(entry["storage_full"], env.TRASH_DIR),
-                    state_snapshot=entry["state_snapshot"], image_count=len(entry["state_snapshot"]),
-                )
+                env.add_trash_item(kind=entry["kind"], name=os.path.basename(entry["full_path"]), original_path=entry["original_path"],
+                    storage_path=os.path.relpath(entry["storage_full"], env.TRASH_DIR), state_snapshot=entry["state_snapshot"],
+                    image_count=len(entry["state_snapshot"]), trash_id=entry["trash_id"], asset_id=entry["asset_id"])
                 removed.extend(entry["state_snapshot"])
-            return env.remove_image_states(removed) if removed else env.collect_categories()
-
+            categories = env.remove_image_states(removed) if removed else env.collect_categories()
+            catalog.apply(after)
+            return categories
         def rollback():
             env._state_store.save_gallery_state(state_before)
             env.save_trash_state(trash_before)
-
+            catalog.apply(before)
         try:
             return env.execute_moves(moves, os.path.join(env.DATA_DIR, "operation_journal"), commit, rollback,
-                                 {"gallery": state_before, "trash": trash_before})
+                {"gallery": state_before, "trash": trash_before, "catalog_before": before, "catalog_after": after})
         finally:
             env.invalidate_image_index_cache()
 
