@@ -83,6 +83,9 @@ export const galleryApi = {
   async listJobs(signal?: AbortSignal) {
     return requestJson<{ jobs: GalleryJob[]; total: number }>("/universal_gallery/api/jobs?limit=50", { signal });
   },
+  async getJob(id: string, signal?: AbortSignal) {
+    return requestJson<{ job: GalleryJob }>(`/universal_gallery/api/jobs/${encodeURIComponent(id)}`, { signal });
+  },
   async createJob(kind: "refresh_index" | "fingerprint_assets", payload: Record<string, unknown>) {
     return requestJson<{ job: GalleryJob }>("/universal_gallery/api/jobs", {
       method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, payload }),

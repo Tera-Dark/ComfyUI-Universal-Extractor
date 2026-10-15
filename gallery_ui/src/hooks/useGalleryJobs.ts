@@ -34,10 +34,27 @@ export const useGalleryJobs = (enabled: boolean) => {
       if (inFlight) { rerun = true; return; }
       inFlight = true;
       controller = new AbortController();
-      let pending = false;
+      const hasObservedActive = () => [...observed.current.values()].some((signature) =>
+        ["queued", "running", "cancelling"].includes(signature.split(":", 1)[0]));
+      let pending = hasObservedActive();
       try {
         const response = await galleryApi.listJobs(controller.signal);
         if (disposed || controller.signal.aborted) return;
+        const returned = new Set(response.jobs.map((job) => job.id));
+        const missing = [...observed.current].filter(([id, signature]) => !returned.has(id)
+          && ["queued", "running", "cancelling"].includes(signature.split(":", 1)[0]));
+        // Recently completed jobs can fall outside the first list page. Resolve
+        // previously displayed tasks explicitly, with bounded HTTP concurrency.
+        if (typeof galleryApi.getJob === "function") {
+          for (let offset = 0; offset < missing.length; offset += 8) {
+            const extra = await Promise.all(missing.slice(offset, offset + 8).map(async ([id]) => {
+              try { return (await galleryApi.getJob(id, controller!.signal)).job; }
+              catch { return null; }
+            }));
+            if (disposed || controller.signal.aborted) return;
+            response.jobs.push(...extra.filter((job): job is GalleryJob => job !== null));
+          }
+        }
         for (const job of response.jobs) {
           pending ||= active(job);
           const relevant = job.kind === "refresh_index" || job.kind === "fingerprint_assets";
@@ -51,6 +68,7 @@ export const useGalleryJobs = (enabled: boolean) => {
           syncTask(job.id, `${label} · ${t(active(job) ? "jobRunning" : job.state === "failed" ? "jobFailed" : job.state === "cancelled" ? "jobCancelled" : "jobCompleted")}`,
             tone, job.error || `${job.completed} / ${job.total}`, job.state === "failed" ? () => { void retry(job); } : undefined);
         }
+        pending = response.jobs.some(active) || hasObservedActive();
       } catch {
         // Missing task endpoints on an older server must not break the Gallery.
       } finally {
