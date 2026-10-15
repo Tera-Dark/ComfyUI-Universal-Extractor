@@ -21,6 +21,7 @@ _UPLOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ue-uplo
 _UPLOAD_SLOTS = BoundedSemaphore(16)
 QUERY_ONLY = ContextVar("gallery_query_only", default=False)
 DEFER_INDEX_REFRESH = ContextVar("gallery_defer_index_refresh", default=False)
+READ_CONNECTIONS = ContextVar("gallery_read_connections", default=None)
 
 
 async def await_task(future):
@@ -35,9 +36,11 @@ async def execute(runtime, function, *args, lane="read", **kwargs):
     if not slots.acquire(blocking=False):
         raise web.HTTPServiceUnavailable(text='{"error":"Gallery is busy. Retry shortly."}', content_type="application/json", headers={"Retry-After": "2"})
     def work():
-        source_token = SOURCE_SNAPSHOT.set(runtime.env.list_gallery_sources() if lane == "read" else None)
+        source_token = SOURCE_SNAPSHOT.set(runtime.source_snapshot() if lane == "read" else None)
         token = QUERY_ONLY.set(lane == "read")
         defer_token = DEFER_INDEX_REFRESH.set(lane == "write")
+        read_connections = {} if lane == "read" else None
+        read_token = READ_CONNECTIONS.set(read_connections)
         try:
             name = getattr(getattr(function, "func", function), "__name__", "")
             if lane == "write":
@@ -52,6 +55,10 @@ async def execute(runtime, function, *args, lane="read", **kwargs):
                     runtime.env._sync_image_state_to_index_db(db)
             return result
         finally:
+            if read_connections:
+                for connection in read_connections.values():
+                    connection.close()
+            READ_CONNECTIONS.reset(read_token)
             QUERY_ONLY.reset(token)
             DEFER_INDEX_REFRESH.reset(defer_token)
             SOURCE_SNAPSHOT.reset(source_token)

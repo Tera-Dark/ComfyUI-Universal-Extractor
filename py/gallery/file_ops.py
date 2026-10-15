@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
 from .catalog import source_namespace
+from .environment import SOURCE_SNAPSHOT
 
 def ensure_trash_storage_dir(env) -> str:
     env.ensure_trash_dir()
@@ -796,6 +797,16 @@ def delete_images(env, relative_paths: list[str]) -> dict:
 
 
 def batch_update_images(env, relative_paths: list[str], updates: dict) -> dict:
+    # One fresh configuration snapshot for this batch. Each target still runs
+    # path containment and file-existence checks before the single state save.
+    token = SOURCE_SNAPSHOT.set(env.list_gallery_sources())
+    try:
+        return _batch_update_images(env, relative_paths, updates)
+    finally:
+        SOURCE_SNAPSHOT.reset(token)
+
+
+def _batch_update_images(env, relative_paths: list[str], updates: dict) -> dict:
     touched, missing, failed = [], [], []
     for relative_path in dict.fromkeys(relative_paths):
         try:

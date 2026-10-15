@@ -27,3 +27,15 @@ class ClosingConnection(sqlite3.Connection):
             return super().__exit__(*args)
         finally:
             self.close()
+
+
+class BorrowedReadConnection:
+    """The request owns this read-only handle; nested helpers must not close it."""
+    def __init__(self, connection):
+        self.connection = connection
+
+    def __enter__(self):
+        return self.connection
+
+    def __exit__(self, *args):
+        return False

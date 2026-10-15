@@ -129,7 +129,8 @@ def _source_signature(env, sources: list[dict[str, Any]]) -> str:
     payload = [
         {
             "id": source.get("id"),
-            "path": env._real_abs(source.get("path", "")) if source.get("path") else "",
+            # list_gallery_sources already canonicalized and authorized roots.
+            "path": source.get("path", ""),
             "enabled": bool(source.get("enabled")),
             "exists": bool(source.get("exists")),
             "recursive": bool(source.get("recursive", True)),

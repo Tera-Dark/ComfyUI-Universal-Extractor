@@ -31,6 +31,10 @@ class GalleryRuntime:
         self.index_initialized = set()
         self.index_anchor = None
         self.jobs_lock = RLock()
+        self.source_snapshot_lock = RLock()
+        self.cached_sources = None
+        self.cached_sources_key = None
+        self.cached_sources_at = 0
         self.scan_sync_lock = RLock()
         self.read_slots = BoundedSemaphore(32)
         self.write_slots = BoundedSemaphore(16)
@@ -45,6 +49,22 @@ class GalleryRuntime:
             self.catalog = None
             self.catalog_error = str(error)
         self.jobs = None
+
+    def source_snapshot(self):
+        # Read requests share a short-lived validated configuration snapshot.
+        # Mutations and scans still resolve/validate sources directly.
+        try:
+            stat = os.stat(self.env.GALLERY_SOURCES_FILE)
+            config = (stat.st_mtime_ns, stat.st_size)
+        except OSError:
+            config = None
+        key = (self.env.GALLERY_SOURCES_FILE, config, self.env.get_output_dir(), self.env.get_input_dir())
+        with self.source_snapshot_lock:
+            now = time.monotonic()
+            if key != self.cached_sources_key or self.cached_sources is None or now - self.cached_sources_at >= 1:
+                self.cached_sources = self.env.list_gallery_sources()
+                self.cached_sources_key, self.cached_sources_at = key, now
+            return self.cached_sources
 
     def get_jobs(self):
         with self.jobs_lock:

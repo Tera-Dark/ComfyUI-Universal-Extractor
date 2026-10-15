@@ -148,6 +148,22 @@ def test_corrupt_authoritative_catalog_is_not_rebuilt(isolated_gallery_env):
         runtime.require_catalog()
 
 
+def test_missing_authoritative_table_is_not_silently_recreated(tmp_path):
+    import sqlite3
+    from py.gallery.catalog import Catalog, CatalogUnavailable
+    catalog = Catalog(tmp_path)
+    catalog.close()
+    db = sqlite3.connect(tmp_path / "catalog.sqlite3")
+    try:
+        db.execute("DROP TABLE assets")
+        db.commit()
+        with pytest.raises(CatalogUnavailable, match="tables are missing"):
+            Catalog(tmp_path)
+        assert db.execute("SELECT name FROM sqlite_master WHERE name='assets'").fetchone() is None
+    finally:
+        db.close()
+
+
 def test_identity_survives_move_trash_restore(isolated_gallery_env):
     env = isolated_gallery_env
     (env.output_dir / "a.png").write_bytes(b"one")
@@ -455,6 +471,23 @@ def test_shutdown_keeps_runtime_available_until_workers_finish(isolated_gallery_
     runtime.release_index_anchor = release_after_workers
     runtime.close()
     assert runtime.closed
+
+
+def test_read_source_cache_invalidates_on_configuration_change(isolated_gallery_env, monkeypatch):
+    import json
+    env = isolated_gallery_env
+    original, calls = env.service.list_gallery_sources, []
+    def counted_sources():
+        calls.append(True)
+        return original()
+    monkeypatch.setattr(env.service, "list_gallery_sources", counted_sources)
+    runtime = env.service.get_runtime()
+    assert runtime.source_snapshot()[0]["writable"] is True
+    runtime.source_snapshot()
+    assert len(calls) == 1
+    Path(env.service.GALLERY_SOURCES_FILE).write_text(json.dumps([{"id": "default_output", "writable": False}]))
+    assert runtime.source_snapshot()[0]["writable"] is False
+    assert len(calls) == 2
 
 
 @pytest.mark.anyio

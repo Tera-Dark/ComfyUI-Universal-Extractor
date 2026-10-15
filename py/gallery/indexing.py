@@ -14,7 +14,8 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from typing import Any
 from pathlib import Path
-from .execution import QUERY_ONLY, DEFER_INDEX_REFRESH
+from .execution import QUERY_ONLY, DEFER_INDEX_REFRESH, READ_CONNECTIONS
+from .sqlite_batch import BorrowedReadConnection
 from .jobs import checkpoint, CURRENT_JOB
 
 def _is_gallery_index_corruption(env, error: BaseException) -> bool:
@@ -243,10 +244,16 @@ def _initialize_gallery_index_db(env, connection: sqlite3.Connection):
 
 def _connect_gallery_index_db(env) -> sqlite3.Connection:
     if QUERY_ONLY.get():
-        connection = sqlite3.connect(Path(env.GALLERY_INDEX_DB_FILE).resolve().as_uri() + "?mode=ro", uri=True,
+        connections = READ_CONNECTIONS.get()
+        if connections is not None and env.GALLERY_INDEX_DB_FILE in connections:
+            return BorrowedReadConnection(connections[env.GALLERY_INDEX_DB_FILE])
+        connection = sqlite3.connect(Path(env.GALLERY_INDEX_DB_FILE).absolute().as_uri() + "?mode=ro", uri=True,
             timeout=env.GALLERY_INDEX_BUSY_TIMEOUT_MS / 1000, factory=env.ClosingConnection)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA query_only=ON")
+        if connections is not None:
+            connections[env.GALLERY_INDEX_DB_FILE] = connection
+            return BorrowedReadConnection(connection)
         return connection
     env.ensure_data_dir()
     runtime = env.get_runtime()

@@ -33,6 +33,12 @@ class Catalog:
                 version = db.execute("PRAGMA user_version").fetchone()[0]
                 if version > self.VERSION:
                     raise CatalogUnavailable("Catalog is newer than this plugin; restore matching code.")
+                if version:
+                    tables = {row[0] for row in db.execute("SELECT name FROM sqlite_master WHERE type='table'")}
+                    if not {"assets", "jobs", "catalog_meta", "catalog_migrations"} <= tables:
+                        raise CatalogUnavailable(f"Catalog tables are missing; preserve {self.path} and restore a consistent backup.")
+                    if db.execute("PRAGMA quick_check").fetchone()[0] != "ok":
+                        raise CatalogUnavailable(f"Catalog integrity check failed; preserve {self.path} and its WAL files.")
                 if version and version < self.VERSION:
                     backup = sqlite3.connect(str(self.path) + f".bak-{time.time_ns()}")
                     try:
