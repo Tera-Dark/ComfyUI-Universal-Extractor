@@ -44,7 +44,8 @@ def main():
     spec.loader.exec_module(fixtures)
     report = {"python": sys.version, "platform": platform.platform(), "real_sources": "not measured", "samples": 30, "warmups": 5, "datasets": {}}
     with tempfile.TemporaryDirectory(prefix="ue-benchmark-") as temporary, pytest.MonkeyPatch.context() as patch:
-        env = fixtures.isolated_gallery_env.__wrapped__(Path(temporary), patch)
+        fixture = fixtures.isolated_gallery_env.__wrapped__(Path(temporary), patch)
+        env = next(fixture) if hasattr(fixture, "__next__") else fixture
         service = env.service
         for number in range(20):
             Image.new("RGB", (64, 48), (number, 90, 120)).save(env.output_dir / f"sample_{number}.png")
@@ -70,6 +71,8 @@ def main():
         else:
             for executor in (service.COLOR_INDEX_EXECUTOR, service.DIMENSION_BACKFILL_EXECUTOR, service.THUMB_PREWARM_EXECUTOR):
                 executor.shutdown(wait=True)
+        if hasattr(fixture, "__next__"):
+            next(fixture, None)
         db.close()
         gc.collect()  # sqlite3's transaction context does not close old connections.
     if args.compare:

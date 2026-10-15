@@ -63,6 +63,35 @@ def test_batch_saves_once_and_noop_does_not_save(isolated_gallery_env, monkeypat
     assert len(calls) == 1
 
 
+def test_asset_identity_survives_rebuilt_index_and_tracks_content(isolated_gallery_env):
+    env = isolated_gallery_env
+    (env.output_dir / "a.png").write_bytes(b"one")
+    (env.output_dir / "copy.png").write_bytes(b"one")
+    first = env.service.list_images_page()["images"]
+    ids = {row["filename"]: row["asset_id"] for row in first}
+    assert ids["a.png"] and ids["a.png"] != ids["copy.png"]
+    Path(env.service.GALLERY_INDEX_DB_FILE).unlink()
+    rebuilt = env.service.list_images_page()["images"]
+    assert {row["filename"]: row["asset_id"] for row in rebuilt} == ids
+    (env.output_dir / "a.png").write_bytes(b"changed contents")
+    changed = env.service.list_images_page(force_refresh=True)["images"]
+    row = next(row for row in changed if row["filename"] == "a.png")
+    assert row["asset_id"] == ids["a.png"]
+    assert row["content_revision"] == 2
+
+
+def test_corrupt_authoritative_catalog_is_not_rebuilt(isolated_gallery_env):
+    env = isolated_gallery_env
+    path = env.data_dir / "catalog.sqlite3"
+    path.write_bytes(b"broken authoritative data")
+    runtime = env.service.get_runtime()
+    assert runtime.catalog is None
+    assert path.read_bytes() == b"broken authoritative data"
+    from py.gallery.catalog import CatalogUnavailable
+    with pytest.raises(CatalogUnavailable):
+        runtime.require_catalog()
+
+
 @pytest.mark.anyio
 async def test_interrupted_upload_leaves_no_partial(isolated_gallery_env):
     from py.gallery import routes

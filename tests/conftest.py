@@ -60,6 +60,7 @@ def isolated_gallery_env(tmp_path, monkeypatch):
     monkeypatch.setattr(service, "GALLERY_INDEX_DB_FILE", str(data_dir / "gallery_index.sqlite3"))
     monkeypatch.setattr(service, "LIBRARY_SUMMARY_CACHE_FILE", str(data_dir / "library_summary_cache.json"))
 
+    monkeypatch.setattr(service, "_runtime", None)
     service.LIBRARY_CACHE.clear()
     service.LIBRARY_SUMMARY_CACHE.clear()
     service.LIBRARY_SUMMARY_CACHE_LOADED = False
@@ -77,7 +78,7 @@ def isolated_gallery_env(tmp_path, monkeypatch):
         }
     )
 
-    return SimpleNamespace(
+    result = SimpleNamespace(
         data_dir=data_dir,
         output_dir=output_dir,
         input_dir=input_dir,
@@ -85,3 +86,11 @@ def isolated_gallery_env(tmp_path, monkeypatch):
         state_store=state_store,
         extractor=extractor_node,
     )
+
+    yield result
+    if service._runtime:
+        service._runtime.close()
+    # Existing background providers are replaced by runtime jobs below; until
+    # then drain them before monkeypatch restores a different data directory.
+    for executor in {service.COLOR_INDEX_EXECUTOR, service.DIMENSION_BACKFILL_EXECUTOR, service.THUMB_PREWARM_EXECUTOR}:
+        executor.submit(lambda: None).result()

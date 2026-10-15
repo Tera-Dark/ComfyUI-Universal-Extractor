@@ -110,7 +110,7 @@ def _env_positive_int(name: str, default: int) -> int:
 
 THUMB_SIZE = 480
 GALLERY_INDEX_DB_FILE = os.path.join(DATA_DIR, "gallery_index.sqlite3")
-GALLERY_INDEX_SCHEMA_VERSION = 7
+GALLERY_INDEX_SCHEMA_VERSION = 8
 COLOR_INDEX_VERSION = "3"
 DIMENSION_INDEX_VERSION = "1"
 COLOR_FAMILY_MIN_RATIO = 0.25
@@ -363,3 +363,30 @@ update_gallery_board = _partial(indexing.update_gallery_board, _environment)
 delete_gallery_board = _partial(indexing.delete_gallery_board, _environment)
 update_board_images = _partial(indexing.update_board_images, _environment)
 get_gallery_context = _partial(indexing.get_gallery_context, _environment)
+
+
+_runtime = None
+
+
+def get_runtime():
+    global _runtime
+    if _runtime is None or _runtime.closed:
+        from .runtime import GalleryRuntime
+        _runtime = GalleryRuntime(_environment)
+    return _runtime
+
+
+def get_asset_identity(relative_path, register=True):
+    runtime = get_runtime()
+    if runtime.catalog is None:
+        if register:
+            runtime.require_catalog()
+        return {}
+    source_id, source_relative = parse_image_ref(relative_path)
+    source = get_gallery_source(source_id)
+    identity = runtime.catalog.find(source, source_relative)
+    if identity is None and register:
+        _, full_path = resolve_image_path(relative_path)
+        stat = os.stat(full_path)
+        identity = runtime.catalog.observe_many(source, [(source_relative, stat.st_size, stat.st_mtime_ns)])[0]
+    return identity or {}

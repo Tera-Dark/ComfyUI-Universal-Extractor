@@ -133,6 +133,8 @@ def _initialize_gallery_index_db(env, connection: sqlite3.Connection):
     )
     columns = {row["name"] for row in connection.execute("PRAGMA table_info(gallery_images)").fetchall()}
     for column_name, column_definition in {
+        "asset_id": "TEXT NOT NULL DEFAULT ''",
+        "content_revision": "INTEGER NOT NULL DEFAULT 1",
         "title": "TEXT NOT NULL DEFAULT ''",
         "category": "TEXT NOT NULL DEFAULT ''",
         "notes": "TEXT NOT NULL DEFAULT ''",
@@ -261,6 +263,9 @@ def _image_row_to_payload(env, row: sqlite3.Row, source: dict[str, Any]) -> dict
     original_url, resolved_subfolder = env.build_view_url(relative_path)
     relative_dir = str(row["relative_dir"])
     return {
+        "asset_id": str(row["asset_id"]) if "asset_id" in row.keys() else "",
+        "content_revision": int(row["content_revision"]) if "content_revision" in row.keys() else 1,
+        "media_type": "image",
         "filename": str(row["filename"]),
         "relative_path": relative_path,
         "source_id": source["id"],
@@ -702,6 +707,10 @@ def _save_image_index_to_db(env, index: dict[str, Any]):
         env._index_meta_set(connection, "color_index_version", env.COLOR_INDEX_VERSION if index.get("color_index_complete") else "")
         env._index_meta_set(connection, "dimension_index_version", env.DIMENSION_INDEX_VERSION)
         env._index_meta_set(connection, "built_at", str(index.get("built_at") or scanned_at))
+        runtime = env.get_runtime()
+        if runtime.catalog:
+            runtime.sync_identities(connection, index.get("sources", []))
+            env._index_meta_set(connection, "asset_identity_version", "1")
         connection.commit()
 
 
@@ -1073,6 +1082,13 @@ def ensure_image_index_db_current(env, force_refresh: bool = False, scope: str =
                     "dirty": False,
                 }
             )
+        with env._connect_gallery_index_db() as connection:
+            if should_sync or env._index_meta_get(connection, "asset_identity_version") != "1":
+                runtime = env.get_runtime()
+                if runtime.catalog:
+                    runtime.sync_identities(connection, sources)
+                    env._index_meta_set(connection, "asset_identity_version", "1")
+                connection.commit()
     return sources, signature
 
 
@@ -1408,7 +1424,7 @@ def list_images_page(env,
             )
             rows = connection.execute(
                 f"""
-                SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
+                SELECT asset_id, content_revision, relative_path, source_id, source_relative_path, filename, relative_dir,
                        subfolder, display_subfolder, size, image_width, image_height, created_at, modified_at,
                        title, category, notes, pinned, boards_text,
                        dominant_color, color_family, color_families_text,
@@ -1434,7 +1450,7 @@ def list_images_page(env,
             )
             rows = connection.execute(
                 f"""
-                SELECT relative_path, source_id, source_relative_path, filename, relative_dir,
+                SELECT asset_id, content_revision, relative_path, source_id, source_relative_path, filename, relative_dir,
                        subfolder, display_subfolder, size, image_width, image_height, created_at, modified_at,
                        title, category, notes, pinned, boards_text,
                        dominant_color, color_family, color_families_text,
@@ -1543,7 +1559,7 @@ def _build_image_filter_sql(env,
 
 def _image_row_select_sql(env) -> str:
     return """
-        relative_path, source_id, source_relative_path, filename, relative_dir,
+        asset_id, content_revision, relative_path, source_id, source_relative_path, filename, relative_dir,
         subfolder, display_subfolder, size, image_width, image_height, created_at, modified_at,
         title, category, notes, pinned, boards_text,
         dominant_color, color_family, color_families_text,

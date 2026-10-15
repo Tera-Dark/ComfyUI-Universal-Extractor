@@ -535,7 +535,7 @@ def _sync_fingerprints_for_rows(env,
             continue
         full_path = env._full_path_for_index_row(row, source)
         try:
-            fingerprint = env.build_image_fingerprint(full_path, str(row["filename"]))
+            fingerprint = env.get_runtime().processor.build_fingerprints(full_path, str(row["filename"]))
         except Exception as error:
             fingerprint = {
                 "visual_hash": "",
@@ -957,9 +957,10 @@ def get_image_metadata(env, relative_path: str) -> dict:
     source_id, source_relative_path = env.parse_image_ref(relative_path)
     normalized = env.make_image_ref(source_id, source_relative_path)
     _, full_path = env.resolve_image_path(normalized)
-    metadata = env.read_image_metadata(full_path)
+    metadata = env.get_runtime().processor.extract_metadata(full_path)
     workflow = metadata.get("workflow")
     return {
+        "asset_id": env.get_asset_identity(relative_path, register=False).get("asset_id", ""),
         "filename": os.path.basename(source_relative_path),
         "relative_path": normalized,
         "source_id": source_id,
@@ -1009,10 +1010,7 @@ def get_thumbnail_path(env, relative_path: str, size: int = 480) -> tuple[str, s
                     if not os.path.exists(thumb_path):
                         temp_path = f"{thumb_path}.{uuid.uuid4().hex}.tmp"
                         try:
-                            with env.guarded_image_open(full_path) as image:
-                                image = image.convert("RGB")
-                                image.thumbnail((size, size))
-                                image.save(temp_path, format="WEBP", quality=80, method=2)
+                            env.get_runtime().processor.build_preview(full_path, temp_path, size)
                             os.replace(temp_path, thumb_path)
                         except env.DecompressionBombError as error:
                             raise ValueError(f"image exceeds configured pixel limit: {relative_path}") from error

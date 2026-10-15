@@ -46,6 +46,9 @@ py/**/__pycache__/
 
 data/operation_journal/
 data/gallery_sources.json
+data/catalog.sqlite3*
+data/upload_journal/
+.ue-uploads/
 
 # Local browser evidence
 artifacts/
