@@ -15,6 +15,26 @@ from aiohttp import web
 
 _EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="ue-gallery-service")
 _SLOTS = BoundedSemaphore(16)
+_UPLOAD_EXECUTOR = ThreadPoolExecutor(max_workers=2, thread_name_prefix="ue-upload")
+_UPLOAD_SLOTS = BoundedSemaphore(16)
+
+
+async def run_upload_task(function, *args):
+    if not _UPLOAD_SLOTS.acquire(blocking=False):
+        raise web.HTTPServiceUnavailable(headers={"Retry-After": "2"})
+    try:
+        future = _UPLOAD_EXECUTOR.submit(function, *args)
+    except BaseException:
+        _UPLOAD_SLOTS.release()
+        raise
+    future.add_done_callback(lambda _: _UPLOAD_SLOTS.release())
+    wrapped = asyncio.wrap_future(future)
+    try:
+        return await asyncio.shield(wrapped)
+    except asyncio.CancelledError:
+        # Cleanup must not race a write/commit that is still touching the file.
+        await asyncio.shield(wrapped)
+        raise
 
 
 async def run_gallery_task(function, *args, **kwargs):

@@ -169,34 +169,51 @@ def migrate_missing_image_states(
         }
 
 
-def update_image_state(relative_path: str, updates: dict) -> tuple[dict, list[str]]:
+def _updated_image_state(current: dict, updates: dict) -> dict:
+    has_board_update = "boards" in updates
+    has_pin_update = "pinned" in updates or "favorite" in updates
+    pinned = bool(updates.get("pinned", updates.get("favorite", current["pinned"])))
+    next_boards = normalize_board_ids(updates.get("boards", current["boards"]))
+    if has_pin_update and not pinned and not has_board_update:
+        next_boards = []
+    if next_boards:
+        pinned = True
+    current.update(
+        {
+            "favorite": pinned,
+            "pinned": pinned,
+            "boards": next_boards,
+            "category": str(updates.get("category", current["category"])).strip(),
+            "title": str(updates.get("title", current["title"])).strip(),
+            "notes": str(updates.get("notes", current["notes"])).strip(),
+            "updated_at": int(time.time()),
+        }
+    )
+    return current
+
+
+def update_image_states(relative_paths: list[str], updates: dict) -> tuple[dict | None, list[str]]:
+    """One atomic save for a batch; unchanged values do not churn timestamps."""
     with GALLERY_STATE_LOCK:
         state = ensure_gallery_state_shape()
         images = state.setdefault("images", {})
-        relative_path = normalize_relative_path(relative_path)
-        current = normalize_image_state(images.get(relative_path, {}))
-        has_board_update = "boards" in updates
-        has_pin_update = "pinned" in updates or "favorite" in updates
-        pinned = bool(updates.get("pinned", updates.get("favorite", current["pinned"])))
-        next_boards = normalize_board_ids(updates.get("boards", current["boards"]))
-        if has_pin_update and not pinned and not has_board_update:
-            next_boards = []
-        if next_boards:
-            pinned = True
-        current.update(
-            {
-                "favorite": pinned,
-                "pinned": pinned,
-                "boards": next_boards,
-                "category": str(updates.get("category", current["category"])).strip(),
-                "title": str(updates.get("title", current["title"])).strip(),
-                "notes": str(updates.get("notes", current["notes"])).strip(),
-                "updated_at": int(time.time()),
-            }
-        )
-        images[relative_path] = current
-        save_gallery_state(state)
-        return current, collect_categories(state)
+        changed, last = False, None
+        for relative_path in dict.fromkeys(map(normalize_relative_path, relative_paths)):
+            current = normalize_image_state(images.get(relative_path, {}))
+            next_state = _updated_image_state(dict(current), updates)
+            if any(next_state[key] != current[key] for key in current if key != "updated_at"):
+                images[relative_path] = next_state
+                changed = True
+                last = next_state
+            else:
+                last = current
+        if changed:
+            save_gallery_state(state)
+        return last, collect_categories(state)
+
+
+def update_image_state(relative_path: str, updates: dict) -> tuple[dict, list[str]]:
+    return update_image_states([relative_path], updates)
 
 
 def remove_image_states(relative_paths: list[str]) -> list[str]:

@@ -4705,16 +4705,18 @@ def delete_images(relative_paths: list[str]) -> dict:
 
 
 def batch_update_images(relative_paths: list[str], updates: dict) -> dict:
-    touched = []
-    last_state = None
-    categories = collect_categories()
-
-    for relative_path in relative_paths:
-        normalized = normalize_relative_path(relative_path)
-        _, full_path = resolve_image_path(normalized)
-        if not os.path.exists(full_path):
-            continue
-        last_state, categories = update_image_state(normalized, updates)
-        touched.append(normalized)
-
-    return {"ok": True, "updated": touched, "last_state": last_state, "categories": categories}
+    touched, missing, failed = [], [], []
+    for relative_path in dict.fromkeys(relative_paths):
+        try:
+            source_id, source_relative = parse_image_ref(relative_path)
+            normalized = make_image_ref(source_id, source_relative)
+            _, full_path = resolve_image_path(normalized)
+            if not os.path.exists(full_path):
+                missing.append(normalized)
+                continue
+            touched.append(normalized)
+        except (ValueError, FileNotFoundError) as error:
+            failed.append({"path": relative_path, "error": str(error)})
+    last_state, categories = _state_store.update_image_states(touched, updates)
+    return {"ok": True, "updated": touched, "missing": missing, "failed": failed,
+            "last_state": last_state, "categories": categories}

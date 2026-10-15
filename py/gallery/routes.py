@@ -11,7 +11,9 @@ from aiohttp import web
 from ..constants import GALLERY_INDEX_FILE, GALLERY_UI_DIR, IMPORT_IMAGE_SUBFOLDER, TRASH_DIR
 from ..paths import build_relative_display, get_comfy_base_dir, get_output_dir
 from .update_checker import check_update_status
-from .execution import run_gallery_task
+from .execution import run_gallery_task, run_upload_task
+from .uploads import UploadSession, recover_uploads
+from . import service as gallery_service
 from .service import (
     LibraryValidationError,
     batch_update_images,
@@ -604,93 +606,75 @@ async def api_update_image_state(request: web.Request) -> web.Response:
     return web.json_response(await run_gallery_task(persist_image_state, relative_path, updates))
 
 
+def _validate_upload_destination(path, kind):
+    if kind == "library":
+        gallery_service._ensure_within_directory(gallery_service.DATA_DIR, path, "library")
+        if not path.lower().endswith(".json"):
+            raise ValueError("invalid library upload")
+        return
+    ref = image_ref_for_full_path(path)
+    source_id, _ = gallery_service.parse_image_ref(ref)
+    source = gallery_service.get_gallery_source(source_id)
+    if not source.get("enabled") or not source.get("writable"):
+        raise ValueError("upload source is unavailable or read-only")
+    gallery_service.resolve_image_path(ref)
+
+
 async def api_import_files(request: web.Request) -> web.Response:
     if request.content_length and request.content_length > MAX_IMPORT_TOTAL_BYTES:
         return _payload_too_large("import payload too large")
-
+    session = UploadSession(gallery_service.DATA_DIR, _validate_upload_destination)
     reader = await request.multipart()
-    imported_images = []
-    imported_libraries = []
     skipped = []
-    target_source_id = ""
-    target_subfolder = IMPORT_IMAGE_SUBFOLDER
-    file_count = 0
-    total_bytes = 0
-    written_targets: list[str] = []
-
-    def cleanup_written_targets():
-        for target in written_targets:
-            try:
-                if os.path.exists(target):
-                    os.remove(target)
-            except OSError:
-                pass
-
-    while True:
-        part = await reader.next()
-        if part is None:
-            break
-        if getattr(part, "filename", None):
+    target_source_id, target_subfolder = "", IMPORT_IMAGE_SUBFOLDER
+    file_count, total_bytes = 0, 0
+    try:
+        while True:
+            part = await reader.next()
+            if part is None:
+                break
+            if not getattr(part, "filename", None):
+                field_value = (await part.text()).strip()
+                if part.name == "target_source_id":
+                    target_source_id = field_value
+                elif part.name == "target_subfolder":
+                    target_subfolder = field_value or IMPORT_IMAGE_SUBFOLDER
+                continue
             file_count += 1
             if file_count > MAX_IMPORT_FILE_COUNT:
-                cleanup_written_targets()
-                return _payload_too_large("too many files in import request")
-
-            try:
-                kind, target_path, skipped_item = await run_gallery_task(get_import_target_for_filename, part.filename, target_source_id, target_subfolder)
-            except (FileNotFoundError, ValueError) as error:
-                cleanup_written_targets()
-                return _bad_request(str(error))
-            if skipped_item:
-                while True:
-                    chunk = await part.read_chunk()
-                    if not chunk:
-                        break
-                    total_bytes += len(chunk)
-                    if total_bytes > MAX_IMPORT_TOTAL_BYTES:
-                        cleanup_written_targets()
-                        return _payload_too_large("import payload too large")
-                skipped.append(skipped_item)
-                continue
-
+                raise web.HTTPRequestEntityTooLarge(max_size=MAX_IMPORT_FILE_COUNT, actual_size=file_count)
+            kind, target_path, skipped_item = await run_gallery_task(
+                get_import_target_for_filename, part.filename, target_source_id, target_subfolder)
+            index = None if skipped_item else await run_upload_task(session.add, target_path, kind)
             file_bytes = 0
-            with open(target_path, "wb") as file:
-                while True:
-                    chunk = await part.read_chunk()
-                    if not chunk:
-                        break
-                    chunk_size = len(chunk)
-                    file_bytes += chunk_size
-                    total_bytes += chunk_size
-                    if file_bytes > MAX_IMPORT_FILE_BYTES or total_bytes > MAX_IMPORT_TOTAL_BYTES:
-                        file.close()
-                        try:
-                            os.remove(target_path)
-                        except OSError:
-                            pass
-                        cleanup_written_targets()
-                        return _payload_too_large("import file too large")
-                    file.write(chunk)
-            written_targets.append(target_path)
-
-            if kind == "image":
-                imported_images.append(
-                    {
-                        "filename": os.path.basename(target_path),
-                        "relative_path": await run_gallery_task(image_ref_for_full_path, target_path),
-                    }
-                )
+            while True:
+                chunk = await part.read_chunk()
+                if not chunk:
+                    break
+                file_bytes += len(chunk)
+                total_bytes += len(chunk)
+                if total_bytes > MAX_IMPORT_TOTAL_BYTES or (not skipped_item and file_bytes > MAX_IMPORT_FILE_BYTES):
+                    raise web.HTTPRequestEntityTooLarge(max_size=MAX_IMPORT_FILE_BYTES, actual_size=file_bytes)
+                if index is not None:
+                    await run_upload_task(session.write, index, chunk)
+            if skipped_item:
+                skipped.append(skipped_item)
+        entries = await run_upload_task(session.commit)
+        images, libraries = [], []
+        for entry in entries:
+            target = entry["target"]
+            if entry["kind"] == "image":
+                images.append({"filename": os.path.basename(target), "relative_path": await run_gallery_task(image_ref_for_full_path, target)})
             else:
-                imported_libraries.append({"filename": os.path.basename(target_path)})
-            continue
-
-        field_value = (await part.text()).strip()
-        if part.name == "target_source_id":
-            target_source_id = field_value
-        elif part.name == "target_subfolder":
-            target_subfolder = field_value or IMPORT_IMAGE_SUBFOLDER
-
-    return web.json_response(await run_gallery_task(build_import_result, imported_images, imported_libraries, skipped))
+                libraries.append({"filename": os.path.basename(target)})
+        return web.json_response(await run_gallery_task(build_import_result, images, libraries, skipped))
+    except BaseException as error:
+        await run_upload_task(session.abort)
+        if isinstance(error, web.HTTPRequestEntityTooLarge):
+            return _payload_too_large("import size or count limit exceeded")
+        if isinstance(error, (FileNotFoundError, ValueError)):
+            return _bad_request(str(error))
+        raise
 
 
 async def api_delete_images(request: web.Request) -> web.Response:
@@ -1150,7 +1134,16 @@ async def api_update_status(request: web.Request) -> web.Response:
     return web.json_response(await check_update_status(force=force))
 
 
+async def _recover_upload_sessions(_app):
+    errors = await run_upload_task(recover_uploads, gallery_service.DATA_DIR, _validate_upload_destination)
+    for error in errors:
+        print(f"[Universal Extractor] Upload recovery required: {error}")
+
+
 def register_routes(app):
+    if not app.get("ue_upload_recovery_registered"):
+        app["ue_upload_recovery_registered"] = True
+        app.on_startup.append(_recover_upload_sessions)
     _safe_add_route(app.router, "get", "/universal_gallery/api/context", api_gallery_context)
     _safe_add_route(app.router, "get", "/universal_gallery/api/update-status", api_update_status)
     _safe_add_route(app.router, "get", "/universal_gallery/api/images", api_list_images)

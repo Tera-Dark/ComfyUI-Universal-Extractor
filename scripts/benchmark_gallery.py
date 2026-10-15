@@ -7,6 +7,7 @@ Synthetic index timings are NOT measurements of a real file traversal.
 from __future__ import annotations
 
 import argparse
+import gc
 import importlib.util
 import json
 import platform
@@ -66,6 +67,11 @@ def main():
         runtime = getattr(env, "runtime", None)
         if runtime:
             runtime.close()
+        else:
+            for executor in (service.COLOR_INDEX_EXECUTOR, service.DIMENSION_BACKFILL_EXECUTOR, service.THUMB_PREWARM_EXECUTOR):
+                executor.shutdown(wait=True)
+        db.close()
+        gc.collect()  # sqlite3's transaction context does not close old connections.
     if args.compare:
         baseline = json.loads(args.compare.read_text())
         report["ratios"] = {f"{size}/{kind}": report["datasets"][size][kind]["p95_ms"] / max(.001, baseline["datasets"][size][kind]["p95_ms"]) for size in report["datasets"] for kind in ("list", "context")}
