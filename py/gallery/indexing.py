@@ -810,7 +810,7 @@ def _build_image_index(env, sources: list[dict[str, Any]], include_color_profile
 
             for entry in entries:
                 if entry.is_dir(follow_symlinks=False):
-                    if entry.name == ".ue-uploads":
+                    if entry.name == ".ue-uploads" or entry.name.startswith(".ue-move-"):
                         continue
                     if source.get("recursive", True):
                         stack.append(entry.path)
@@ -959,7 +959,7 @@ def _scan_index_records_for_scope(env, sources: list[dict[str, Any]], scope: str
             for entry in entries:
                 try:
                     if entry.is_dir(follow_symlinks=False):
-                        if entry.name == ".ue-uploads":
+                        if entry.name == ".ue-uploads" or entry.name.startswith(".ue-move-"):
                             continue
                         if source.get("recursive", True):
                             stack.append(entry.path)
@@ -1419,7 +1419,7 @@ def _scan_image_freshness(env, sources: list[dict[str, Any]], subfolder: str) ->
             for entry in entries:
                 try:
                     if entry.is_dir(follow_symlinks=False):
-                        if entry.name == ".ue-uploads":
+                        if entry.name == ".ue-uploads" or entry.name.startswith(".ue-move-"):
                             continue
                         if source.get("recursive", True):
                             stack.append(entry.path)

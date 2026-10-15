@@ -366,6 +366,9 @@ async def test_hot_context_uses_folder_snapshot_without_traversal(isolated_galle
     env = isolated_gallery_env
     (env.output_dir / "empty-folder").mkdir()
     (env.output_dir / ".ue-uploads" / "session").mkdir(parents=True)
+    private_move = env.output_dir / ".ue-move-interrupted.tmp"
+    private_move.mkdir()
+    (private_move / "private.png").write_bytes(b"staged image")
     runtime = env.service.get_runtime()
     await runtime.prepare_index()
     def forbidden_scan(path):
@@ -374,6 +377,8 @@ async def test_hot_context_uses_folder_snapshot_without_traversal(isolated_galle
     context = await execute(runtime, env.service.get_gallery_context)
     assert "default_output::empty-folder" in context["subfolders"]
     assert not any(".ue-uploads" in folder for folder in context["subfolders"])
+    assert not any(".ue-move-" in folder for folder in context["subfolders"])
+    assert (await execute(runtime, env.service.list_images_page))["total"] == 0
 
 
 def test_persistent_jobs_recover_and_deduplicate(tmp_path):
@@ -513,6 +518,40 @@ async def test_interrupted_upload_leaves_no_partial(isolated_gallery_env, failur
         await routes.api_import_files(Request())
     assert not list(isolated_gallery_env.output_dir.rglob("*.part"))
     assert not list(isolated_gallery_env.output_dir.rglob("broken.png"))
+
+
+@pytest.mark.anyio
+async def test_startup_recovers_uploads_before_resuming_jobs(isolated_gallery_env, monkeypatch):
+    import os
+    from aiohttp import web
+    from aiohttp.test_utils import TestClient, TestServer
+    from py.gallery import routes
+    from py.gallery.uploads import _identity
+    env = isolated_gallery_env
+    runtime = env.service.get_runtime()
+    target = env.output_dir / "interrupted.png"
+    session = UploadSession(env.data_dir, routes._validate_upload_destination)
+    session.write(session.add(str(target), "image"), b"partial")
+    session.entries[0]["identity"] = _identity(session.entries[0]["stage"])
+    session.status = "committing"
+    session.save()
+    os.link(session.entries[0]["stage"], target)
+    original = runtime.get_jobs
+    def start_jobs_after_recovery():
+        assert not target.exists(), "scheduler started before upload recovery"
+        return original()
+    monkeypatch.setattr(runtime, "get_jobs", start_jobs_after_recovery)
+    app = web.Application()
+    routes.register_routes(app)
+    client = TestClient(TestServer(app))
+    await client.start_server()
+    try:
+        response = await client.get("/universal_gallery/api/images")
+        assert response.status == 200
+        assert (await response.json())["total"] == 0
+        assert not session.journal.exists()
+    finally:
+        await client.close()
 
 
 @pytest.fixture

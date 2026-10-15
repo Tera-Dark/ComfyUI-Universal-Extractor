@@ -1198,7 +1198,14 @@ async def _recover_upload_sessions(_app):
     if gallery_service.get_runtime().catalog is None:
         print(f"[Universal Extractor] Read-only mode: {gallery_service.get_runtime().catalog_error}")
         return
-    errors = await run_upload_task(recover_uploads, gallery_service.DATA_DIR, _validate_upload_destination)
+    def recover_before_jobs():
+        pending = any((Path(gallery_service.DATA_DIR) / "upload_journal").glob("*.json"))
+        errors = recover_uploads(gallery_service.DATA_DIR, _validate_upload_destination)
+        if pending:
+            gallery_service.invalidate_image_index_cache()
+            gallery_service.get_runtime().require_catalog().apply([])
+        return errors
+    errors = await run_upload_task(recover_before_jobs)
     for error in errors:
         print(f"[Universal Extractor] Upload recovery required: {error}")
 
@@ -1210,9 +1217,10 @@ _RUNTIME = web.AppKey("ue_gallery_runtime", object)
 async def _gallery_lifecycle(app):
     runtime = gallery_service.get_runtime()
     app[_RUNTIME] = runtime
-    if runtime.catalog:
-        runtime.get_jobs()
     try:
+        await _recover_upload_sessions(app)
+        if runtime.catalog:
+            runtime.get_jobs()
         yield
     finally:
         await asyncio.to_thread(runtime.close)
@@ -1222,7 +1230,6 @@ def register_routes(app):
     if not app.get(_LIFECYCLE):
         app[_LIFECYCLE] = True
         app.cleanup_ctx.append(_gallery_lifecycle)
-        app.on_startup.append(_recover_upload_sessions)
     from .job_routes import handlers
     create_job, list_jobs, get_job, cancel_job = handlers(gallery_service)
     _safe_add_route(app.router, "post", "/universal_gallery/api/jobs", create_job)
