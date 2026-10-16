@@ -76,12 +76,10 @@ async def main() -> None:
             print("PASS image detail: lazy chunk fetched only on demand")
 
             requests.clear()
-            await page.locator('summary[aria-label="更多操作"]').click()
-            await page.get_by_role("button", name="开启双栏目录整理").click()
+            await page.get_by_role("combobox", name="图库模式").select_option("organize")
             await expect(page.locator(".ue-dual-workspace")).to_be_visible()
             assert any("/DualFolderWorkspace-" in url for url in requests), requests
-            await page.locator('summary[aria-label="更多操作"]').click()
-            await page.get_by_role("button", name="关闭双栏目录整理").click()
+            await page.get_by_role("combobox", name="图库模式").select_option("browse")
             await expect(page.locator(".ue-gallery-card").first).to_be_visible()
             print("PASS dual-folder mode: lazy chunk fetched, return restores gallery")
 

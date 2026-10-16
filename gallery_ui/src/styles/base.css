@@ -9,7 +9,11 @@
   --ue-surface-alt: #f4f4f5;
   --ue-surface-dim: #e4e4e7;
 
-  --ue-line: #e4e4e7;
+  --ue-border: #e4e4e7;
+  --ue-line: var(--ue-border);
+  --ue-gallery-gap: 14px;
+  --ue-card-body-height: 48px;
+  --ue-card-body-padding: 6px;
   --ue-line-soft: #f0f0f2;
 
   --ue-accent: #18181b;
@@ -86,7 +90,7 @@ body {
   color: var(--ue-ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.6;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
@@ -460,7 +464,7 @@ textarea::placeholder {
 .ue-operation-status-center {
   position: fixed;
   right: 18px;
-  bottom: 18px;
+  bottom: 72px;
   z-index: 120;
   display: flex;
   width: min(390px, calc(100vw - 24px));
@@ -715,3 +719,20 @@ textarea::placeholder {
     padding-left: clamp(36px, 4vw, 72px);
   }
 }
+
+/* The task center owns feedback layout; cards never grow beyond three floats. */
+.ue-task-center-toggle { align-self: flex-end; display: flex; align-items: center; gap: 8px; padding: 9px 12px; border: 1px solid var(--ue-border); border-radius: 12px; background: var(--ue-surface); box-shadow: 0 4px 18px #0f172a12; color: var(--ue-ink); font-size: 13px; pointer-events: auto; cursor: pointer; }
+.ue-task-error-count { color: var(--ue-red); }
+.ue-task-panel { padding: 12px; border: 1px solid var(--ue-border); border-radius: 14px; background: var(--ue-surface); box-shadow: 0 12px 40px #0f172a20; pointer-events: auto; min-height: 160px; overflow: hidden; }
+.ue-task-panel header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.ue-task-panel header button { background: transparent; border: 0; color: var(--ue-ink-soft); cursor: pointer; }
+.ue-task-panel nav { display: flex; gap: 6px; margin-bottom: 10px; }
+.ue-task-panel nav button { padding: 6px 10px; background: var(--ue-surface-alt); border: 1px solid transparent; border-radius: 8px; font-size: 13px; cursor: pointer; }
+.ue-task-panel nav button[aria-pressed="true"] { border-color: var(--ue-border); background: var(--ue-surface); color: var(--ue-ink); }
+.ue-task-history { max-height: min(380px, 50vh); overflow: auto; display: grid; gap: 8px; }
+.ue-task-history .ue-operation-card { box-shadow: none; }
+
+.ue-app-shell[data-density="compact"] { --ue-gallery-gap: 10px; --ue-card-body-height: 42px; --ue-card-body-padding: 3px; }
+.ue-density-setting { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; font-size: 13px; }
+.ue-density-setting select { padding: 7px 10px; border: 1px solid var(--ue-line); border-radius: 8px; background: var(--ue-canvas); }
+.ue-density-setting small { color: var(--ue-ink-muted); font-size: 12px; }

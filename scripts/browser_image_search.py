@@ -44,8 +44,9 @@ with sync_playwright() as playwright:
     page.screenshot(path=str(shots / "compressed-desktop.png"), animations="disabled")
     dialog.locator(".ue-image-search-result").first.get_by_role("button", name="定位文件夹").click()
     expect(dialog).not_to_be_visible()
-    expect(page.locator(".ue-gallery-card")).to_have_count(1)
-    expect(page.locator(".ue-gallery-search-input")).to_have_value("Study_001.png")
+    expect(page.locator(".ue-gallery-card")).to_have_count(6)
+    expect(page.locator(".ue-gallery-search-input")).to_have_value("")
+    expect(page.get_by_role("button", name="返回搜图结果与原浏览位置")).to_be_visible()
     # Real clipboard image -> global Ctrl+V -> search, never import.
     page.evaluate("""async url => {
       const blob = await (await fetch(url)).blob();

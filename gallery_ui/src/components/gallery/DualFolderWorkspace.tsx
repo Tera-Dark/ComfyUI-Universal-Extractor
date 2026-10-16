@@ -1,3 +1,4 @@
+import { confirmedBatchRetry } from "../../utils/batchRetry";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRightLeft,
@@ -382,6 +383,7 @@ export const DualFolderWorkspace = ({
   const pages = useRef({left:1,right:1});
   const messageTimer = useRef<number | undefined>(undefined);
   useEffect(()=>()=>{requestIds.current.left++;requestIds.current.right++;window.clearTimeout(messageTimer.current);},[]);
+  const [syncPending, setSyncPending] = useState(false);
   const [contextMenu, setContextMenu] = useState<ImageContextMenuState | null>(null);
   const [boardPickerPaths, setBoardPickerPaths] = useState<string[]>([]);
   const [metadataViewerImage, setMetadataViewerImage] = useState<ImageRecord | null>(null);
@@ -491,6 +493,18 @@ export const DualFolderWorkspace = ({
   }, [leftFolder, loadPane, rightFolder]);
 
   useEffect(() => {
+    const dirty = () => setSyncPending(true);
+    window.addEventListener("universal-gallery:index-synced", dirty);
+    return () => window.removeEventListener("universal-gallery:index-synced", dirty);
+  }, []);
+
+  useEffect(() => {
+    const update = () => { void reloadBothPanes(false); };
+    window.addEventListener("universal-gallery:files-changed", update);
+    return () => window.removeEventListener("universal-gallery:files-changed", update);
+  }, [reloadBothPanes]);
+
+  useEffect(() => {
     void loadPane("left", leftFolder);
   }, [leftFolder, loadPane]);
 
@@ -590,6 +604,11 @@ export const DualFolderWorkspace = ({
           ].filter(Boolean).join(" ");
         },
         successTone: value => getMoveOutcome(relativePaths, value).complete ? "success" : "error",
+        successRetry: value => confirmedBatchRetry({ paths: getMoveOutcome(relativePaths, value).failedPaths, confirm,
+          confirmation: count => ({ title: text.moveConfirmTitle, message: t("qolMoveConfirm", { count, source: getFolderLabel(sourceFolder, context, t), target: getFolderLabel(targetFolder, context, t) }), tone: "warning", confirmLabel: t("commonMove"), cancelLabel: t("libraryCancel") }),
+          execute: paths => onMoveImages(paths, targetSubfolder, targetSourceId), failed: (paths, result) => getMoveOutcome(paths, result).failedPaths,
+          summary: (_paths, result) => t("qolMoveResult", { moved: result.moved.length, missing: result.missing.length, blocked: result.blocked?.length ?? 0 }), run: runOperation, pending: t("operationMoveImages"),
+        }),
         successDetail: value => {
           const { failedPaths } = getMoveOutcome(relativePaths, value);
           return failedPaths.length ? t("operationUnprocessedPaths", { target:describeFailedPaths(failedPaths) }) : "";
@@ -1164,6 +1183,7 @@ export const DualFolderWorkspace = ({
 
   return (
     <div className="ue-dual-workspace">
+      {syncPending && <button className="ue-live-refresh-pill ue-dual-sync-pending" onClick={() => { void reloadBothPanes(false).then(() => setSyncPending(false)); }}>{t("galleryLiveRefreshPending")}</button>}
       <div className="ue-dual-intro">
         <div>
           <ArrowRightLeft size={18} />

@@ -23,7 +23,7 @@ describe("persistent tasks", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(500); });
     expect(mocks.syncTask).toHaveBeenCalledTimes(1);
     await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
-    expect(mocks.syncTask.mock.calls[1][0]).toBe(job.id);
+    expect(mocks.syncTask.mock.calls[1][0]).toBe(`refresh:${job.payload.subfolder}`);
     await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
     expect(mocks.listJobs).toHaveBeenCalledTimes(2);
     const signal = mocks.listJobs.mock.calls[1][0] as AbortSignal;
@@ -52,5 +52,14 @@ describe("persistent tasks", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(6000); });
     expect(mocks.listJobs).toHaveBeenCalledTimes(2);
     unmount();
+  });
+  it("restores many old refresh failures as a single scope record", async () => {
+    vi.useFakeTimers();
+    const jobs = Array.from({ length: 50 }, (_, index) => ({ ...contract.job, id: `old-${index}`, state: "failed", error: "source changed", created_at: index, updated_at: Date.now() / 1000 }));
+    mocks.listJobs.mockResolvedValue({ jobs });
+    renderHook(() => useGalleryJobs(true));
+    await act(async () => { await vi.advanceTimersByTimeAsync(500); });
+    expect(mocks.syncTask).toHaveBeenCalledTimes(1);
+    expect(mocks.syncTask.mock.calls[0][0]).toBe(`refresh:${contract.job.payload.subfolder}`);
   });
 });

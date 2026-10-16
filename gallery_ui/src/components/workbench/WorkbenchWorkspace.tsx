@@ -574,7 +574,7 @@ export const WorkbenchWorkspace = ({
                     <span>01</span>
                     <strong>{t("workbenchRecipeSection")}</strong>
                   </div>
-                  <div className="ue-tool-grid ue-tool-grid--wide">
+                  <div className="ue-tool-grid ue-tool-grid--wide ue-tool-grid--recipe">
                     <label>
                       <span>{t("artistLibrarySource")}</span>
                       <select value={selectedLibrary} onChange={(event) => setSelectedLibrary(event.target.value)}>
@@ -721,7 +721,7 @@ export const WorkbenchWorkspace = ({
                     />
                   </label>
 
-                  <details className="ue-qol-disclosure"><summary>{t("qolFormatDetails")}</summary>
+                  <details className="ue-qol-disclosure"><summary>{t("qolFormatDetails")} · {t("workbenchFormatTool")}: {t(formatToolMode === "anima" ? "workbenchFormatToolAnima" : "workbenchFormatToolCustom")} · {t("workbenchCustomFormat")}: {t(enableCustomFormat ? "commonEnabled" : "commonDisabled")}</summary>
 
                   <div className="ue-tool-subsection">
                     <span>03</span>

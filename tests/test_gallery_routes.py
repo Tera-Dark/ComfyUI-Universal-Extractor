@@ -7,6 +7,41 @@ from aiohttp import FormData, web
 from aiohttp.test_utils import TestClient, TestServer
 
 
+@pytest.mark.anyio
+async def test_locate_reuses_list_order_and_validates_sources(gallery_client, isolated_gallery_env):
+    from PIL import Image
+    env = isolated_gallery_env
+    folder = env.output_dir / "old"
+    folder.mkdir()
+    for index in range(7):
+        Image.new("RGB", (16, 16), "red").save(folder / f"image_{index}.png")
+    listed = env.service.list_images_page(subfolder="default_output::old", limit=2, page=3, sort_by="filename", sort_order="asc", force_refresh=True)
+    image = listed["images"][0]
+    client, _ = gallery_client
+    response = await client.get("/universal_gallery/api/images/locate", params={"asset_id": image["asset_id"], "limit": "2", "sort_by": "filename", "sort_order": "asc"})
+    assert response.status == 200
+    located = await response.json()
+    assert located["page"] == 3 and located["index"] == 0
+    assert located["subfolder"] == "default_output::old"
+    assert located["relative_path"] == image["relative_path"]
+    for params in ({"relative_path": "../escape.png"}, {"asset_id": image["asset_id"], "limit": "0"}, {"asset_id": "x" * 201}, {}):
+        assert (await client.get("/universal_gallery/api/images/locate", params=params)).status == 400
+    assert (await client.get("/universal_gallery/api/images/locate", params={"asset_id": image["asset_id"]}, headers={"Origin": "https://evil.example"})).status == 403
+    (folder / image["filename"]).unlink()
+    assert (await client.get("/universal_gallery/api/images/locate", params={"asset_id": image["asset_id"]})).status == 404
+
+
+@pytest.mark.anyio
+async def test_release_notes_route_is_local_and_bounded(gallery_client):
+    client, _ = gallery_client
+    response = await client.get("/universal_gallery/api/release-notes?locale=en")
+    assert response.status == 200
+    notes = await response.json()
+    assert notes["releases"][0]["version"] == notes["current_version"]
+    assert 1 <= len(notes["releases"]) <= 5
+    assert "workflow completion" in notes["releases"][0]["body"]
+
+
 @pytest.fixture()
 def anyio_backend():
     return "asyncio"

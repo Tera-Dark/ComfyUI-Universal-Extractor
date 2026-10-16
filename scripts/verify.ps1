@@ -18,6 +18,8 @@ try {
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     node --test tests/comfy_lora_stack_bridge.test.mjs
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    node --test tests/comfy_gallery_refresh_bridge.test.mjs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 finally {
     Pop-Location

@@ -1,3 +1,4 @@
+import { confirmedBatchRetry } from "../../utils/batchRetry";
 import { useMemo, useState } from "react";
 import {
   Check,
@@ -16,8 +17,8 @@ import {
 import { useI18n } from "../../i18n/I18nProvider";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useOperationStatus } from "../shared/OperationStatusCenter";
-import type { BoardMutationResult, BoardSummary, DeleteImagesResult, MoveImagesResult, MoveTargetOption } from "../../types/universal-gallery";
-import { describeFailedPaths, getDeleteOutcome, getMoveOutcome } from "../../utils/galleryOperationResults";
+import type { BatchUpdateResult, BoardMutationResult, BoardSummary, DeleteImagesResult, MoveImagesResult, MoveTargetOption } from "../../types/universal-gallery";
+import { describeFailedPaths, getBatchUpdateOutcome, getDeleteOutcome, getMoveOutcome } from "../../utils/galleryOperationResults";
 import { BoardPickerModal } from "./BoardPickerModal";
 
 interface GalleryInspectorPanelProps {
@@ -28,7 +29,7 @@ interface GalleryInspectorPanelProps {
   page: number;
   targetFolderOptions: MoveTargetOption[];
   onClose: () => void;
-  onBatchUpdateImages: (relativePaths: string[], updates: Record<string, unknown>) => Promise<unknown>;
+  onBatchUpdateImages: (relativePaths: string[], updates: Record<string, unknown>) => Promise<BatchUpdateResult>;
   onCreateBoard: (name: string, description?: string) => Promise<BoardMutationResult>;
   onUpdateBoardPins: (boardId: string, relativePaths: string[], pinned?: boolean) => Promise<unknown>;
   onMoveImages: (relativePaths: string[], targetSubfolder: string, targetSourceId?: string) => Promise<MoveImagesResult>;
@@ -127,6 +128,11 @@ export const GalleryInspectorPanel = ({
           missing: getDeleteOutcome(selectedPaths, value).failedPaths.length,
         }),
         successTone: (value) => getDeleteOutcome(selectedPaths, value).complete ? "success" : "error",
+        successRetry: (value) => confirmedBatchRetry({ paths: getDeleteOutcome(selectedPaths, value).failedPaths, confirm,
+          confirmation: (count) => ({ title: t("bulkDelete"), message: t("bulkDeleteConfirm", { count }), tone: "warning", confirmLabel: t("commonDelete"), cancelLabel: t("libraryCancel") }),
+          execute: onDeleteImages, failed: (paths, result) => getDeleteOutcome(paths, result).failedPaths,
+          summary: (paths, result) => t("operationDeleteImagesResult", { count: result.deleted.length, missing: getDeleteOutcome(paths, result).failedPaths.length }), run: runOperation, pending: t("operationDeleteImages"),
+        }),
         successDetail: (value) => {
           const { failedPaths } = getDeleteOutcome(selectedPaths, value);
           return failedPaths.length ? t("operationUnprocessedPaths", { target: describeFailedPaths(failedPaths) }) : "";
@@ -196,6 +202,11 @@ export const GalleryInspectorPanel = ({
           ].filter(Boolean).join(" ");
         },
         successTone: (value) => getMoveOutcome(selectedPaths, value).complete ? "success" : "error",
+        successRetry: (value) => confirmedBatchRetry({ paths: getMoveOutcome(selectedPaths, value).failedPaths, confirm,
+          confirmation: (count) => ({ title: t("bulkMoveTo"), message: t("bulkMoveConfirm", { count, target: target?.label || bulkTargetSubfolder }), tone: "warning", confirmLabel: t("folderMove"), cancelLabel: t("libraryCancel") }),
+          execute: (paths) => onMoveImages(paths, bulkTargetSubfolder, target?.source_id), failed: (paths, result) => getMoveOutcome(paths, result).failedPaths,
+          summary: (_paths, result) => t("qolMoveResult", { moved: result.moved.length, missing: result.missing.length, blocked: result.blocked?.length ?? 0 }), run: runOperation, pending: t("operationMoveImages"),
+        }),
         successDetail: (value) => {
           const { failedPaths } = getMoveOutcome(selectedPaths, value);
           return failedPaths.length ? t("operationUnprocessedPaths", { target: describeFailedPaths(failedPaths) }) : "";
@@ -241,6 +252,18 @@ export const GalleryInspectorPanel = ({
     }
   };
 
+  const batchStateOptions = (updates: Record<string, unknown>) => ({
+    pending: t("operationUpdateImages"),
+    success: (value: BatchUpdateResult) => t("operationBatchResult", { updated: value.updated.length, count: 0, missing: getBatchUpdateOutcome(selectedPaths, value).failedPaths.length }),
+    successTone: (value: BatchUpdateResult) => getBatchUpdateOutcome(selectedPaths, value).complete ? "success" as const : "error" as const,
+    successDetail: (value: BatchUpdateResult) => getBatchUpdateOutcome(selectedPaths, value).failedPaths.join("; "),
+    successRetry: (value: BatchUpdateResult) => confirmedBatchRetry({ paths: getBatchUpdateOutcome(selectedPaths, value).failedPaths, confirm,
+      confirmation: (count) => ({ title: t("operationUpdateImages"), message: t("operationRetryBatchConfirm", { count, target: typeof updates.pinned === "boolean" ? t(updates.pinned ? "bulkPin" : "bulkUnpin") : `${t("bulkSetCategory")}: ${String(updates.category || "")}` }), tone: "warning", confirmLabel: t("commonConfirm"), cancelLabel: t("libraryCancel") }),
+      execute: (paths) => onBatchUpdateImages(paths, updates), failed: (paths, result) => getBatchUpdateOutcome(paths, result).failedPaths,
+      summary: (paths, result) => t("operationBatchResult", { updated: result.updated.length, count: 0, missing: getBatchUpdateOutcome(paths, result).failedPaths.length }), run: runOperation, pending: t("operationUpdateImages"),
+    }),
+  });
+
   const handleBatchPin = async (pinned: boolean) => {
     if (!selectedPaths.length) {
       return;
@@ -258,10 +281,7 @@ export const GalleryInspectorPanel = ({
       return;
     }
 
-    await runOperation(() => onBatchUpdateImages(selectedPaths, { pinned }), {
-      pending: t("operationUpdateImages"),
-      success: t("operationUpdateImagesSuccess"),
-    });
+    await runOperation(() => onBatchUpdateImages(selectedPaths, { pinned }), batchStateOptions({ pinned })).catch(() => undefined);
   };
 
   const handleBatchCategory = async () => {
@@ -283,10 +303,7 @@ export const GalleryInspectorPanel = ({
       return;
     }
 
-    await runOperation(() => onBatchUpdateImages(selectedPaths, { category }), {
-      pending: t("operationUpdateImages"),
-      success: t("operationUpdateImagesSuccess"),
-    });
+    await runOperation(() => onBatchUpdateImages(selectedPaths, { category }), batchStateOptions({ category })).catch(() => undefined);
   };
 
   return (

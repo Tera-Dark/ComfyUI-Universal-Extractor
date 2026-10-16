@@ -1,4 +1,10 @@
-import type { DeleteImagesResult, MoveImagesResult } from "../types/universal-gallery";
+import type { BatchUpdateResult, DeleteImagesResult, MoveImagesResult } from "../types/universal-gallery";
+
+export const getBatchUpdateOutcome = (paths: string[], result: BatchUpdateResult) => {
+  const updated = new Set(result.updated);
+  const failedPaths = [...new Set(paths)].filter((path) => !updated.has(path));
+  return { failedPaths, complete: failedPaths.length === 0 };
+};
 
 /** Account for every requested source path; destinations alone cannot identify which selection to clear. */
 export const getMoveOutcome = (paths: string[], result: MoveImagesResult) => {

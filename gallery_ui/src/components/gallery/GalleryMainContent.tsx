@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CornerDownRight,
   Eye,
+  MoreHorizontal,
   FolderPlus,
   Image as ImageIcon,
   Pin,
@@ -29,6 +30,7 @@ interface MasonryLayout {
 }
 
 interface GalleryMainContentProps {
+  highlightPath?: string;
   images: ImageRecord[];
   emptyState?: { title: string; description: string; actionLabel?: string; onAction?: () => void };
   galleryViewMode: ContentViewMode;
@@ -79,6 +81,7 @@ const SelectionBoxOverlay = ({ selectionEnabled, selectionBox }: { selectionEnab
 
 export const GalleryMainContent = ({
   images,
+  highlightPath,
   emptyState,
   galleryViewMode,
   selectionMode,
@@ -153,7 +156,7 @@ export const GalleryMainContent = ({
                   ref={(element) => {
                     cardRefs.current[image.relative_path] = element;
                   }}
-                  className={`ue-gallery-list-row ${selected ? "is-selected" : ""}`}
+                  className={`ue-gallery-list-row ${selected ? "is-selected" : ""} ${highlightPath === image.relative_path ? "is-located" : ""}`}
                   onContextMenu={(event) => onOpenContextMenu(event, image)}
                   onClick={(event) => {
                     if (selectionMode) {
@@ -267,7 +270,7 @@ export const GalleryMainContent = ({
             className="ue-gallery-grid ue-gallery-grid--virtual"
             style={{ height: `${masonryLayout.totalHeight}px` }}
           >
-            {masonryLayout.items.map(({ image, index, top, left, width, lane }) => {
+            {masonryLayout.items.map(({ image, index, top, left, width, lane, height, mediaRatio }) => {
               const selected = pageSelectedPaths.includes(image.relative_path);
 
                 const imgWidth = Number(image.width ?? 0);
@@ -276,16 +279,16 @@ export const GalleryMainContent = ({
                 // Reserve the media height before a lazy thumbnail decodes. In
                 // particular, files without width/height must not grow as the
                 // user scrolls toward the last masonry lane.
-                const mediaAspectStyle = { aspectRatio: `1 / ${getMasonryImageHeightRatio(image)}` };
+                const mediaAspectStyle = { aspectRatio: `1 / ${mediaRatio ?? getMasonryImageHeightRatio(image)}` };
 
                 return (
                   <article
                     key={image.relative_path}
-                    className={`ue-gallery-card ${selected ? "is-selected" : ""}`}
+                    className={`ue-gallery-card ${selected ? "is-selected" : ""} ${highlightPath === image.relative_path ? "is-located" : ""}`}
                     data-tour-id={index === 0 ? "gallery-card" : undefined}
                     data-index={index}
                     data-lane={lane}
-                    style={{ top: `${top}px`, left: `${left}px`, width: `${width}px` }}
+                    style={{ top: `${top}px`, left: `${left}px`, width: `${width}px`, height: height === undefined ? undefined : `${height}px` }}
                     onContextMenu={(event) => onOpenContextMenu(event, image)}
                     ref={(element) => {
                       cardRefs.current[image.relative_path] = element;
@@ -308,7 +311,7 @@ export const GalleryMainContent = ({
                         }}
                       />
 
-                      <div className="ue-gallery-actions">
+                      <div className={`ue-gallery-actions ${selectionMode ? "is-selecting" : ""}`}>
                         <button
                           className="ue-send-btn"
                           data-tour-id={index === 0 ? "gallery-workflow" : undefined}
@@ -333,17 +336,7 @@ export const GalleryMainContent = ({
                           {selected ? <CheckSquare size={13} /> : <Square size={13} />}
                         </button>
 
-                        <button
-                          className="ue-board-btn"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openBoardPickerForImage(image, selected);
-                          }}
-                          aria-label={t("bulkAddToBoard")}
-                          title={t("bulkAddToBoard")}
-                        >
-                          <FolderPlus size={13} />
-                        </button>
+                        <button className="ue-board-btn" onClick={(event) => { event.stopPropagation(); onOpenContextMenu(event, image); }} aria-label={t("moreActions")} title={t("moreActions")}><MoreHorizontal size={13} /></button>
 
                         <button
                           className={`ue-pin-btn ${image.pinned ? "active" : ""}`}
@@ -358,23 +351,7 @@ export const GalleryMainContent = ({
                         </button>
                       </div>
 
-                      <button
-                        className="ue-gallery-open ue-gallery-open--icon"
-                        onClick={(event) => {
-                          if (selectionMode) {
-                            onImageSelectionClick(image.relative_path, event);
-                            return;
-                          }
-                          if (isDraggingSelectionRef.current) {
-                            return;
-                          }
-                          onOpenDetail(image);
-                        }}
-                        aria-label={t("galleryInspect")}
-                        title={t("galleryInspect")}
-                      >
-                        <Eye size={14} />
-                      </button>
+
                     </div>
 
                     <button

@@ -8,13 +8,14 @@ import { useOperationStatus } from "../shared/OperationStatusCenter";
 import "./imageSearch.css";
 
 interface Props {
+  suspended?: boolean;
   initialFile?: File | null;
   onClose: () => void;
   onOpenDetail: (image: ImageRecord, scope?: ImageRecord[]) => void;
   onLocate: (image: ImageRecord) => void;
 }
 
-export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate }: Props) => {
+export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate, suspended = false }: Props) => {
   const { t } = useI18n();
   const { notify } = useOperationStatus();
   const [file, setFile] = useState<File | null>(initialFile ?? null);
@@ -27,7 +28,9 @@ export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate 
   const [attempt, setAttempt] = useState(0);
   const input = useRef<HTMLInputElement>(null);
   const dialog = useRef<HTMLElement>(null);
-  useDismissableLayer(true, onClose, { closeOnResize: false });
+  useDismissableLayer(!suspended, onClose, { closeOnResize: false });
+
+  useEffect(() => { if (initialFile) setFile(initialFile); }, [initialFile]);
 
   const accept = useCallback((candidate?: File | null) => {
     if (!candidate) return;
@@ -40,6 +43,7 @@ export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate 
   }, [t]);
 
   useEffect(() => {
+    if (suspended) return;
     const previous = document.activeElement;
     dialog.current?.focus();
     const paste = (event: ClipboardEvent) => {
@@ -61,7 +65,7 @@ export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate 
       window.removeEventListener("keydown", focus);
       if (previous instanceof HTMLElement && previous.isConnected) previous.focus({ preventScroll: true });
     };
-  }, [accept]);
+  }, [accept, suspended]);
 
   useEffect(() => {
     if (!file) return;
@@ -72,7 +76,7 @@ export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate 
   }, [file, t]);
 
   useEffect(() => {
-    if (!file) return;
+    if (!file || suspended) return;
     if (file.size > 20 * 1024 * 1024) return;
     const controller = new AbortController();
     let timer: number | undefined;
@@ -82,7 +86,7 @@ export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate 
       timer = window.setTimeout(() => { controller.signal.removeEventListener("abort", abort); resolve(); }, 2000);
     });
     const run = async () => {
-      setBusy(true); setError(""); setResult(null); setProgress(t("imageSearchSearching"));
+      setBusy(true); setError(""); setProgress(t("imageSearchSearching"));
       try {
         const response = await galleryApi.searchByImage(file, broad ? 55 : 70, controller.signal);
         if (controller.signal.aborted) return;
@@ -107,7 +111,7 @@ export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate 
     };
     void run();
     return () => { controller.abort(); window.clearTimeout(timer); };
-  }, [file, broad, attempt, t]);
+  }, [file, broad, attempt, t, suspended]);
 
   const copy = async (path: string) => {
     try { await navigator.clipboard.writeText(path); notify(t("imageSearchCopied"), "success"); }
@@ -115,13 +119,13 @@ export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate 
   };
 
   return <FloatingLayerPortal>
-    <div className="ue-modal-backdrop ue-image-search-backdrop" onClick={(event) => { event.stopPropagation(); onClose(); }}
+    <div className="ue-modal-backdrop ue-image-search-backdrop" style={suspended ? { display: "none" } : undefined} aria-hidden={suspended || undefined} onClick={(event) => { event.stopPropagation(); onClose(); }}
       onDragOver={(event) => { event.preventDefault(); event.stopPropagation(); }}
       onDrop={(event) => { event.preventDefault(); event.stopPropagation(); accept(event.dataTransfer.files[0]); }}>
-      <section ref={dialog} tabIndex={-1} className="ue-image-search" role="dialog" aria-modal="true" aria-labelledby="image-search-title"
+      <section ref={dialog} tabIndex={-1} className="ue-image-search" role="dialog" aria-modal={!suspended || undefined} aria-labelledby="image-search-title"
         onClick={(event) => event.stopPropagation()}>
         <header><div><h2 id="image-search-title"><FolderSearch size={20} />{t("imageSearchTitle")}</h2><p>{t("imageSearchIntro")}</p></div>
-          <button type="button" className="ue-icon-action" aria-label={t("modalClose")} onClick={onClose}><X size={18} /></button></header>
+          <button type="button" className="ue-icon-action" aria-label={t("imageSearchClose")} onClick={onClose}><X size={18} /></button></header>
         <div className="ue-image-search-body">
           <aside>
             <button type="button" className="ue-image-search-drop" onClick={() => input.current?.click()}>
@@ -144,11 +148,11 @@ export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate 
             {result && !busy && !result.matches.length ? <p className="ue-image-search-empty">{t("imageSearchEmpty")}</p> : null}
             <div className="ue-image-search-results">
               {result?.matches.map((match) => <article key={match.image.relative_path} className="ue-image-search-result">
-                <button type="button" className="ue-image-search-thumb" onClick={() => { onClose(); onOpenDetail(match.image, result.matches.map((item) => item.image)); }} aria-label={`${t("imageSearchView")} ${match.image.filename}`}>
+                <button type="button" className="ue-image-search-thumb" onClick={() => { onOpenDetail(match.image, result.matches.map((item) => item.image)); }} aria-label={`${t("imageSearchView")} ${match.image.filename}`}>
                   <img src={match.image.thumb_url} alt={match.image.filename} loading="lazy" /></button>
                 <div className="ue-image-search-result-info"><span className={`ue-image-search-match ${match.match_type === "exact" ? "is-exact" : ""}`}>{match.match_type === "exact" ? t("imageSearchExact") : t("imageSearchScore", { count: match.score })}</span>
                   <strong title={match.image.filename}>{match.image.filename}</strong><code title={match.full_path}>{match.full_path}</code>
-                  <div className="ue-image-search-actions"><button type="button" className="ue-secondary-action" onClick={() => { onClose(); onLocate(match.image); }}><FolderSearch size={13} />{t("imageSearchLocate")}</button>
+                  <div className="ue-image-search-actions"><button type="button" className="ue-secondary-action" onClick={() => onLocate(match.image)}><FolderSearch size={13} />{t("imageSearchLocate")}</button>
                     <button type="button" className="ue-secondary-action" onClick={() => void copy(match.full_path)}><ClipboardCopy size={13} />{t("imageSearchCopyPath")}</button></div>
                 </div>
               </article>)}

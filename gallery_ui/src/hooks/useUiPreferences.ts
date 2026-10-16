@@ -6,6 +6,7 @@ import { readStorageItem, writeStorageItem } from "../utils/safeStorage";
 const STORAGE_KEY = "universal-extractor:ui-preferences";
 
 export const DEFAULT_UI_PREFERENCES: UiPreferences = {
+  interfaceDensity: "standard",
   defaultSelectionMode: false,
   collapseSidebarOnLaunch: false,
   enableImagePrefetch: true,
@@ -17,6 +18,7 @@ export const readStoredUiPreferences = (): UiPreferences => {
   try {
     const parsed = JSON.parse(readStorageItem(STORAGE_KEY) || "{}") as Partial<UiPreferences>;
     return {
+      interfaceDensity: parsed.interfaceDensity === "compact" ? "compact" : "standard",
       defaultSelectionMode: typeof parsed.defaultSelectionMode === "boolean" ? parsed.defaultSelectionMode : DEFAULT_UI_PREFERENCES.defaultSelectionMode,
       collapseSidebarOnLaunch: typeof parsed.collapseSidebarOnLaunch === "boolean" ? parsed.collapseSidebarOnLaunch : DEFAULT_UI_PREFERENCES.collapseSidebarOnLaunch,
       enableImagePrefetch: typeof parsed.enableImagePrefetch === "boolean" ? parsed.enableImagePrefetch : DEFAULT_UI_PREFERENCES.enableImagePrefetch,

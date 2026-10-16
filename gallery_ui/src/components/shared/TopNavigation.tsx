@@ -1,3 +1,5 @@
+import { SafeReleaseNotes, safeExternalHref } from "./SafeReleaseNotes";
+import { consumeReleaseNotice } from "../../utils/releaseNotice";
 import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   Bell,
@@ -18,7 +20,7 @@ import { DisclosureMenu } from "./DisclosureMenu";
 import { useI18n } from "../../i18n/I18nProvider";
 import { galleryApi } from "../../services/galleryApi";
 import type { Locale } from "../../i18n/translations";
-import type { UpdateStatus, WorkspaceTab } from "../../types/universal-gallery";
+import type { ReleaseNotesResponse, UpdateStatus, WorkspaceTab } from "../../types/universal-gallery";
 import { FloatingLayerPortal, useDismissableLayer, type FloatingMenuPosition } from "../../utils/interaction";
 
 interface TopNavigationProps {
@@ -45,6 +47,8 @@ export const TopNavigation = ({
   const [inputValue, setInputValue] = useState(searchValue);
   const [isComposing, setIsComposing] = useState(false);
   const [updateStatus, setUpdateStatus] = useState<UpdateStatus | null>(null);
+  const [localNotes, setLocalNotes] = useState<ReleaseNotesResponse | null>(null);
+  const [releaseNotice, setReleaseNotice] = useState(false);
   const [updateError, setUpdateError] = useState("");
   const [updateLoading, setUpdateLoading] = useState(false);
   const [updatesOpen, setUpdatesOpen] = useState(false);
@@ -76,6 +80,17 @@ export const TopNavigation = ({
   useEffect(() => {
     void loadUpdateStatus(false);
   }, [loadUpdateStatus]);
+
+  useEffect(() => {
+    let disposed = false;
+    if (typeof galleryApi.getReleaseNotes !== "function") return;
+    void galleryApi.getReleaseNotes(locale).then((notes) => {
+      if (disposed) return;
+      setLocalNotes(notes);
+      if (consumeReleaseNotice(notes.current_version)) setReleaseNotice(true);
+    }).catch(() => undefined);
+    return () => { disposed = true; };
+  }, [locale]);
 
   useEffect(() => {
     if (!isComposing) {
@@ -110,6 +125,7 @@ export const TopNavigation = ({
       setUpdatesPosition({ x, y });
     }
     setUpdatesOpen((current) => !current);
+    setReleaseNotice(false);
   };
 
   const formatReleaseDate = (value: string) => {
@@ -236,6 +252,9 @@ export const TopNavigation = ({
           <RefreshCw size={16} />
         </button>
 
+        {releaseNotice && <button className="ue-release-notice" onClick={toggleUpdates}>
+          {t("updatesInstalledNotes", { version: localNotes?.current_version || "" })}
+        </button>}
         <button
           ref={updatesButtonRef}
           className={`ue-topbar-icon-btn ue-update-bell ${updatesOpen ? "is-open" : ""} ${updateAvailable ? "has-update" : ""}`}
@@ -260,7 +279,10 @@ export const TopNavigation = ({
             <header className="ue-update-popover-head">
               <div>
                 <strong>{t("updatesTitle")}</strong>
-                <span>{updateStatus ? t(updateAvailable ? "updatesAvailable" : "updatesCurrent") : t("updatesChecking")}</span>
+                <span>{t(updateLoading ? "updatesChecking" : updateError ? "updatesCheckFailed" :
+                  updateStatus?.check_status === "preview" ? "updatesPreview" :
+                  updateAvailable ? "updatesAvailable" : updateStatus?.check_status === "cached" ? "updatesCached" :
+                  updateStatus ? "updatesCurrent" : "updatesLocalOnly")}</span>
               </div>
               <button
                 type="button"
@@ -277,7 +299,7 @@ export const TopNavigation = ({
             <div className="ue-update-version-box">
               <div>
                 <span>{t("updatesCurrentVersion")}</span>
-                <strong>{updateStatus?.current_version || "-"}</strong>
+                <strong>{localNotes?.current_version || updateStatus?.current_version || "-"}</strong>
               </div>
               <div>
                 <span>{t("updatesLatestVersion")}</span>
@@ -285,7 +307,7 @@ export const TopNavigation = ({
               </div>
               <a
                 className="ue-secondary-btn"
-                href={updateStatus?.release_url || updateStatus?.repository_url || "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor"}
+                href={safeExternalHref(updateStatus?.release_url || updateStatus?.repository_url || "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor")}
                 target="_blank"
                 rel="noreferrer"
               >
@@ -298,19 +320,25 @@ export const TopNavigation = ({
 
             <div className="ue-update-log">
               <h2>{t("updatesChangelog")}</h2>
-              {updateStatus?.releases?.length ? (
-                updateStatus.releases.map((release) => (
-                  <article key={`${release.tag_name}-${release.published_at}`} className="ue-update-release">
-                    <div className="ue-update-release-title">
-                      <strong>{release.name || release.version}</strong>
+              {updateStatus?.last_success_at ? <small>{t("updatesLastSuccess")}: {new Date(updateStatus.last_success_at * 1000).toLocaleString(locale)}</small> : null}
+              {(() => {
+                const installed = localNotes?.current_version || updateStatus?.current_version;
+                const releases = [...(localNotes?.releases || [])];
+                for (const remote of updateStatus?.releases || []) {
+                  if (!releases.some((note) => note.version === remote.version)) releases.push(remote);
+                }
+                releases.sort((a, b) => Number(b.version === installed) - Number(a.version === installed));
+                return releases.length ? releases.map((release) => (
+                  <details key={release.version} className="ue-update-release" open={release.version === installed || undefined}>
+                    <summary className="ue-update-release-title">
+                      <strong>{release.version === installed ? t("updatesInstalled") : t(updateAvailable && release.version === updateStatus?.latest_version ? "updatesAvailable" : "updatesHistory")} · {release.name || release.version}</strong>
                       <span>{formatReleaseDate(release.published_at)}</span>
-                    </div>
-                    <p>{release.body || t("updatesNoChangelog")}</p>
-                  </article>
-                ))
-              ) : (
-                <p className="ue-update-empty">{updateLoading ? t("updatesChecking") : t("updatesNoChangelog")}</p>
-              )}
+                    </summary>
+                    <SafeReleaseNotes body={release.body || t("updatesNoChangelog")} />
+                  </details>
+                )) : <p className="ue-update-empty">{updateLoading ? t("updatesChecking") : t("updatesNoChangelog")}</p>;
+              })()}
+
             </div>
           </section>
         </FloatingLayerPortal>

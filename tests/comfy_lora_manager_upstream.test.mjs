@@ -138,14 +138,15 @@ async function createHarness(type, initial, initialText, options = {}) {
     assert.equal(node.inputWidget, text, "Upstream bound the actual text widget");
 
     const bridgeCode = readFileSync(process.env.BRIDGE_SOURCE || path.join(root, "web/comfyui/top_menu_extension.js"), "utf8")
-        .replace('import { app } from "../../scripts/app.js";', "const app = globalThis.__app;");
+        .replace('import { app } from "../../scripts/app.js";', "const app = globalThis.__app;")
+        .replace('import { api } from "../../scripts/api.js";', "const api = { addEventListener() {} };");
     vm.runInContext(bridgeCode, context, { filename: "top_menu_extension.js" });
     await new Promise((resolve) => setImmediate(resolve));
     const bridge = extensions.find((value) => value.name.includes("Universal"));
     assert.ok(bridge, "Bridge extension registered");
     await bridge.setup();
-    assert.equal(channels.length, 1);
-    const channel = channels[0];
+    assert.equal(channels.length, 2);
+    const channel = channels[1];
     const send = (mode, loras, id = `test-${Math.random()}`) => new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error(`No delivery acknowledgement for ${id}`)), 2400);
         const listener = (message) => {

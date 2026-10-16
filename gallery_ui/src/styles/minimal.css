@@ -69,8 +69,8 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
 .ue-filter-active-chip { background: #f6f6f6; border-color: #e7e7e7; border-radius: 8px; }
 .ue-primary-action, .ue-primary-btn { background: #212121; border-radius: 20px; box-shadow: none; }
 .ue-secondary-action, .ue-secondary-btn { border-radius: 10px; box-shadow: none; }
-.ue-gallery-card { border-radius: 12px; box-shadow: none; }
-.ue-gallery-card:hover { box-shadow: 0 2px 12px #0000000a; }
+.ue-gallery-card { border-radius: 12px; box-shadow: none; border-color: transparent; background: transparent; padding: 0; }
+.ue-gallery-card:hover { border-color: transparent; box-shadow: none; }
 .ue-disclosure-menu { position: relative; flex-shrink: 0; }
 .ue-disclosure-menu > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 9px; height: 36px; min-width: 36px; padding: 0 10px; border-radius: 10px; user-select: none; color: #414141; }
 .ue-disclosure-menu > summary::-webkit-details-marker { display: none; }
@@ -113,8 +113,6 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
   .ue-workspace-switcher > summary { font-size: 14px; padding: 0 8px; }
   .ue-main-shell { padding: 22px 16px; }
   .ue-filter-kicker { font-size: 21px; }
-  .ue-gallery-search-box { flex-basis: 100%; max-width: none; }
-  .ue-filter-controls--gallery { width: 100%; justify-content: space-between; }
   .ue-select-field--menu > span { display: none; }
   .ue-filter-trigger, .ue-chip-toggle, .ue-disclosure-menu > summary { min-height: 40px; }
   .ue-topbar-search-wrap.is-open .ue-topbar-search { width: 110px; }
@@ -139,9 +137,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
 .ue-tree-item.active::before, .ue-tree-row.active .ue-tree-label::before, .ue-library-list-item.active::before, .ue-board-list-item.active::before { display: none; }
 .ue-tree-item.is-pinned, .ue-tree-label.is-pinned { color: #343434; }
 .ue-sidebar-folder-toolbar { padding-left: 4px; gap: 5px; }
-.ue-gallery-card { border-color: transparent; background: transparent; padding: 0; }
-.ue-gallery-card:hover { border-color: transparent; box-shadow: none; }
-.ue-sidebar-group-header--folders .ue-sidebar-group-icon { display: none; }
+ .ue-sidebar-group-header--folders .ue-sidebar-group-icon { display: none; }
 .ue-sidebar-group-title { gap: 5px; }
 .ue-sidebar-group-chevron { width: 16px; }
 .ue-sidebar-quick .ue-tree-item:not(.active) { background: transparent; }
@@ -158,17 +154,23 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
 .ue-gallery-image-shell img:focus-visible { outline: 3px solid #777; outline-offset: -4px; }
 .ue-filter-copy .ue-filter-kicker { font-size: 23px; font-weight: 550; color: #212121; }
 @media (max-width: 720px) {
-  .ue-filter-bar--gallery { flex-direction: row; align-items: center; }
+  .ue-filter-bar--gallery { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px 8px; }
+  .ue-filter-bar--gallery .ue-filter-copy { grid-column: 1 / -1; }
   .ue-filter-copy .ue-filter-kicker { font-size: 21px; }
-  .ue-gallery-search-box { min-height: 42px; height: 42px; flex: 1 0 100%; }
-  .ue-filter-controls--gallery { flex-wrap: nowrap; gap: 4px; }
-  .ue-filter-controls--gallery > .ue-toolbar-group--browse { width: auto; flex: 1 1 auto; flex-wrap: nowrap; gap: 3px; }
+  .ue-gallery-search-box { grid-column: 1; min-width: 0; width: 100%; max-width: none; min-height: 42px; height: 42px; }
+  .ue-filter-bar--gallery > .ue-filter-trigger { grid-column: 2; flex: 0 0 auto; justify-content: center; min-width: 0; padding: 0 9px; white-space: nowrap; }
+  .ue-filter-controls--gallery { grid-column: 1 / -1; display: flex; width: 100%; flex-wrap: wrap; justify-content: flex-start; gap: 6px; }
+  .ue-filter-controls--gallery > .ue-toolbar-group--browse { width: 100%; flex: 1 0 100%; flex-wrap: nowrap; justify-content: space-between; gap: 4px; }
   .ue-filter-controls--gallery .ue-filter-trigger { flex: 0 0 auto; min-width: 0; justify-content: center; padding: 0 8px; }
+  .ue-filter-controls--gallery .ue-gallery-mode-control { flex: 1 1 auto; width: auto; max-width: 180px; min-width: 0; }
+  .ue-gallery-mode-control > span { display: none; }
   .ue-filter-controls--gallery .ue-select-field--menu { flex: 0 0 auto; width: auto; max-width: 48px; padding: 0; }
   .ue-filter-controls--gallery .ue-select-field--menu > span { display: none; }
   .ue-filter-controls--gallery [data-tour-id="gallery-selection"] { flex: 0 0 auto; padding: 0 10px; }
-  .ue-filter-controls--gallery [data-tour-id="gallery-selection"] span { display: none; }
+  .ue-filter-controls--gallery [data-tour-id="gallery-selection"] span { display: inline; }
+  .ue-filter-controls--gallery > .ue-toolbar-more { margin-left: auto; }
 }
+
 /* Lazy-loaded workspaces share the same surfaces (specificity survives chunk order). */
 .ue-app-shell .ue-settings-hero, .ue-app-shell .ue-workbench-hero { background: #fafafa; border: 1px solid #ededed; box-shadow: none; border-radius: 14px; }
 .ue-app-shell .ue-workbench-hero::before { display: none; }

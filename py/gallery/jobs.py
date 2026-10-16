@@ -21,6 +21,13 @@ class QueueFull(RuntimeError):
     pass
 
 
+def _dedupe_key(kind, payload, version):
+    # A scan validates the generation captured at execution, not enqueue time.
+    relevant = {k: v for k, v in payload.items() if kind != "refresh_index" or k != "_generation"}
+    encoded = json.dumps(relevant, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(f"{kind}|{version}|{encoded}".encode()).hexdigest()
+
+
 class JobContext:
     def __init__(self, scheduler, job_id):
         self.scheduler, self.id = scheduler, job_id
@@ -48,6 +55,23 @@ class JobScheduler:
         self.stopping = False
         with catalog.connect() as db:
             db.execute("UPDATE jobs SET state=CASE WHEN cancel_requested=1 THEN 'cancelled' ELSE 'queued' END,updated_at=? WHERE state IN ('running','cancelling')", (time.time(),))
+            # Older clients could persist one refresh per file mutation. Keep
+            # their records as superseded evidence, but replay only the newest
+            # equivalent request after restart. File-operation journals and
+            # versioned analysis jobs are never consolidated here.
+            keepers = {}
+            for row in db.execute("SELECT * FROM jobs WHERE kind='refresh_index' AND state='queued' ORDER BY created_at DESC,id DESC").fetchall():
+                try:
+                    payload = json.loads(row["payload"])
+                    key = _dedupe_key("refresh_index", payload, payload.get("_processor_version", "1"))
+                except (ValueError, TypeError, AttributeError):
+                    continue  # The normal dispatcher reports malformed stored work.
+                if key in keepers:
+                    db.execute("UPDATE jobs SET state='cancelled',error='',result=?,updated_at=? WHERE id=?", (json.dumps({"superseded_by": keepers[key]}), time.time(), row["id"]))
+                else:
+                    keepers[key] = row["id"]
+            for key, job_id in keepers.items():
+                db.execute("UPDATE jobs SET dedupe_key=? WHERE id=?", (key, job_id))
         self.thread = Thread(target=self._dispatch, daemon=True, name="ue-job-dispatch")
         self.thread.start()
 
@@ -56,7 +80,10 @@ class JobScheduler:
             raise ValueError("unsupported job kind")
         payload = {**(payload or {}), "_processor_version": str(version)}
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        key = hashlib.sha256(f"{kind}|{version}|{encoded}".encode()).hexdigest()
+        # A scan takes its generation when it starts and validates at commit.
+        # File mutations must not turn identical refresh requests into hundreds
+        # of queued scans. Analysis still deduplicates by resource version.
+        key = _dedupe_key(kind, payload, version)
         now = time.time()
         with self.condition, self.catalog.lock, self.catalog.connect() as db:
             if self.stopping:

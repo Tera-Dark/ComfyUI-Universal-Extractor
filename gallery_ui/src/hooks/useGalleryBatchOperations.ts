@@ -93,7 +93,7 @@ export const useGalleryBatchOperations = ({ selectedImage, setImages, setSelecte
     if (stateFiltersActive) {
       refresh();
     }
-    return response;
+    return { ...response, updated: normalizedUpdatedPaths };
   };
 
   const moveImages = async (relativePaths: string[], targetSubfolder: string, targetSourceId = "") => {

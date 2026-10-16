@@ -87,3 +87,42 @@ async def test_update_checker_includes_local_notes_when_current_version_is_ahead
     assert status["update_available"] is False
     assert status["releases"][0]["version"] == "1.2.8"
     assert status["releases"][0]["body"] == "- Local 1.2.8 notes"
+
+
+@pytest.mark.anyio
+async def test_remote_failures_keep_last_success_and_local_notes(monkeypatch):
+    monkeypatch.setattr(update_checker, "_UPDATE_CACHE", None)
+    monkeypatch.setattr(update_checker, "_UPDATE_CACHE_TS", 0)
+    monkeypatch.setattr(update_checker, "_fetch_releases_from_github", lambda: [])
+    success = await update_checker.check_update_status(force=True)
+    assert success["last_success_at"]
+    assert success["releases"]
+    def offline():
+        raise OSError("offline")
+    monkeypatch.setattr(update_checker, "_fetch_releases_from_github", offline)
+    failed = await update_checker.check_update_status(force=True)
+    assert failed["check_status"] == "failed"
+    assert failed["last_success_at"] == success["last_success_at"]
+    assert failed["releases"] == success["releases"]
+
+
+@pytest.mark.anyio
+async def test_simultaneous_forced_checks_share_network_call(monkeypatch):
+    import asyncio
+    import time
+    calls = []
+    def fetch():
+        calls.append(1)
+        time.sleep(0.05)
+        return []
+    monkeypatch.setattr(update_checker, "_fetch_releases_from_github", fetch)
+    await asyncio.gather(*(update_checker.check_update_status(force=True) for _ in range(5)))
+    assert calls == [1]
+
+
+def test_installed_notes_have_current_and_bounded_history():
+    from py.gallery.release_notes import installed_release_notes
+    notes = installed_release_notes("1.7.0", "en")
+    assert notes["releases"][0]["version"] == "1.7.0"
+    assert "workflow completion" in notes["releases"][0]["body"]
+    assert 1 <= len(notes["releases"]) <= 5

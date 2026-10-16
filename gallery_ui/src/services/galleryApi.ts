@@ -81,6 +81,14 @@ const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Pro
 };
 
 export const galleryApi = {
+  async locateImage(image: import("../types/universal-gallery").ImageRecord, limit: number, sortBy: string, sortOrder: string, signal?: AbortSignal) {
+    const params = new URLSearchParams({ limit: String(limit), sort_by: sortBy, sort_order: sortOrder });
+    params.set(image.asset_id ? "asset_id" : "relative_path", image.asset_id || image.relative_path);
+    return requestJson<{ asset_id?: string; relative_path: string; subfolder: string; page: number; index: number }>(`/universal_gallery/api/images/locate?${params}`, { signal });
+  },
+  async getReleaseNotes(locale = "zh-CN") {
+    return requestJson<import("../types/universal-gallery").ReleaseNotesResponse>(`/universal_gallery/api/release-notes?locale=${encodeURIComponent(locale)}`);
+  },
   async searchByImage(file: File, minimum = 70, signal?: AbortSignal) {
     const body = new FormData();
     body.append("image", file);

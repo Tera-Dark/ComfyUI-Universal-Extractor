@@ -11,6 +11,8 @@ from aiohttp import web
 from ..constants import GALLERY_INDEX_FILE, GALLERY_UI_DIR, IMPORT_IMAGE_SUBFOLDER, TRASH_DIR
 from ..paths import build_relative_display, get_comfy_base_dir, get_output_dir
 from .update_checker import check_update_status
+from .update_checker import _read_current_version
+from .release_notes import installed_release_notes
 from .execution import await_task, execute, run_upload_task as _run_upload_task
 from .catalog import CatalogUnavailable
 from .jobs import QueueFull
@@ -47,6 +49,7 @@ from .service import (
     import_library_data,
     list_images,
     list_images_page,
+    locate_image,
     list_variant_groups,
     list_boards,
     list_gallery_sources,
@@ -398,6 +401,16 @@ async def api_list_images(request: web.Request) -> web.Response:
         return web.json_response(await run_gallery_task(_fallback_image_page, page, limit, error))
 
     return web.json_response(page_result)
+
+
+async def api_locate_image(request: web.Request) -> web.Response:
+    try:
+        limit = int(request.query.get("limit", "60"))
+    except ValueError:
+        raise ValueError("invalid locate limit") from None
+    return web.json_response(await run_gallery_task(locate_image,
+        asset_id=request.query.get("asset_id", ""), relative_path=request.query.get("relative_path", ""),
+        limit=limit, sort_by=request.query.get("sort_by", "created_at"), sort_order=request.query.get("sort_order", "desc")))
 
 
 async def api_image_freshness(request: web.Request) -> web.Response:
@@ -1194,6 +1207,10 @@ async def api_update_status(request: web.Request) -> web.Response:
     return web.json_response(await check_update_status(force=force))
 
 
+async def api_release_notes(request: web.Request) -> web.Response:
+    return web.json_response(installed_release_notes(_read_current_version(), request.query.get("locale", "zh-CN")))
+
+
 async def _recover_upload_sessions(_app):
     if gallery_service.get_runtime().catalog is None:
         print(f"[Universal Extractor] Read-only mode: {gallery_service.get_runtime().catalog_error}")
@@ -1240,8 +1257,10 @@ def register_routes(app):
     _safe_add_route(app.router, "post", "/universal_gallery/api/jobs/{id}/cancel", cancel_job)
     _safe_add_route(app.router, "get", "/universal_gallery/api/context", api_gallery_context)
     _safe_add_route(app.router, "get", "/universal_gallery/api/update-status", api_update_status)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/release-notes", api_release_notes)
     _safe_add_route(app.router, "get", "/universal_gallery/api/images", api_list_images)
     _safe_add_route(app.router, "get", "/universal_gallery/api/images/freshness", api_image_freshness)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/images/locate", api_locate_image)
     _safe_add_route(app.router, "get", "/universal_gallery/api/images/variant-groups", api_variant_groups)
     _safe_add_route(app.router, "get", "/universal_gallery/api/images/variant-group", api_variant_group_images)
     _safe_add_route(app.router, "post", "/universal_gallery/api/images/fingerprints/prewarm", api_fingerprint_prewarm)

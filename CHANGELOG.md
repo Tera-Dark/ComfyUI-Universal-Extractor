@@ -1,6 +1,44 @@
 # Changelog
 
-All notable changes to the ComfyUI Universal Extractor project will be documented in this file.
+## 1.7.0 - 2026-10-16
+
+### 主要变化
+- 工作流完成后自动同步图库，低频检查兜底；整理图片时保留浏览位置。
+- 右上角可离线查看版本说明，右下角任务中心统一进度、失败与最近记录。
+- 增加标准与紧凑密度，改善卡片、空状态及工作区操作。
+- 以图搜图保留搜索会话，支持返回结果和定位原图所在分页。
+
+### 修复
+- 修复首次 freshness 基线遗漏新图、滚动后目录统计不更新的问题。
+- 修复示例更新日志为空、检查失败仍显示最新及任务提示重复的问题。
+- 修复以图搜图关闭后再次点击无法打开，以及定位后重开时仍隐藏的问题。
+- 批量清理垃圾箱只保留一条操作提示，整批结束后更新一次列表；失败保留未完成项。
+- 合并相同范围刷新任务，扫描冲突有限重试；终止失败后暂停自动重试，避免刷新失败循环。
+- 稳固瀑布流滚动坐标、固定卡片高度及浏览锚点，避免尺寸回填、缩略图加载和垃圾箱多列重排引起闪烁。
+
+### 升级注意
+- 停止 ComfyUI 后完整替换插件和 dist，重启并刷新 ComfyUI 页面以加载完成事件桥接。
+- 用户 JSON、图源、资源身份和文件事务保持兼容；关闭自动同步的偏好继续生效。
+- GitHub Release 与 Registry 审核独立；以 Registry 的实际版本状态确认是否可通过 Manager 更新。
+
+### Changes
+- Synchronize the gallery after workflow completion, with low-frequency fallback checks and stable browsing positions.
+- Read installed release notes offline and track progress, failures and recent results in the task center.
+- Choose standard or compact density with clearer cards, empty states and workspace actions.
+- Keep image-search sessions when viewing details and locate originals on their folder page.
+
+### Fixes
+- Reconcile the first freshness baseline and update folder statistics while browsing older images.
+- Fix missing preview notes, misleading offline update status and duplicate task messages.
+- Fix reopening image search after closing it or locating a result.
+- Use one operation record and one list reload for bulk trash cleanup, retaining unfinished items on failure.
+- Coalesce refresh tasks and bound scan-conflict retries. Pause automatic retries after terminal failure.
+- Stabilize masonry scroll coordinates, card geometry and browse anchors; avoid flashing during dimension backfill, thumbnail loading and trash column layout.
+
+### Upgrade notes
+- Stop ComfyUI, replace the complete plugin and dist, then restart and refresh ComfyUI to load the execution bridge.
+- User JSON, sources, resource identity and file transactions remain compatible. Disabled auto-sync stays disabled.
+- GitHub releases and Registry review are independent. Check the Registry version status for Manager update availability.
 
 ## Unreleased
 

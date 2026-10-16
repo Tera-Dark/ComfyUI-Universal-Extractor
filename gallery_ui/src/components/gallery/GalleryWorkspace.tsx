@@ -1,3 +1,6 @@
+import { confirmedBatchRetry } from "../../utils/batchRetry";
+import { galleryDensityMetrics, type InterfaceDensity } from "./galleryDensity";
+import type { CSSProperties } from "react";
 import { useVariantRequests } from "../../hooks/useVariantRequests";
 import { useGallerySelection } from "./useGallerySelection";
 import { preferredScrollBehavior } from "../../utils/imageLoading";
@@ -39,10 +42,10 @@ import type {
   VariantGroup,
   VariantGroupType,
 } from "../../types/universal-gallery";
-import { formatFileSize } from "../../utils/formatters";
+import { PAGE_SIZE, formatFileSize } from "../../utils/formatters";
 import { describeFailedPaths, getDeleteOutcome } from "../../utils/galleryOperationResults";
 import { getPositivePromptText } from "../../utils/metadata";
-import { galleryApi } from "../../services/galleryApi";
+import { ApiRequestError, galleryApi } from "../../services/galleryApi";
 import { BoardPickerModal } from "./BoardPickerModal";
 import { CategoryPickerModal } from "./CategoryPickerModal";
 import { GalleryMainContent } from "./GalleryMainContent";
@@ -51,7 +54,7 @@ import { prefetchGalleryImage } from "./galleryImagePrefetch";
 import { dedupeVisibleSelection, getIntersectingSelectionKeys, type RectLike, type SelectionBoxState } from "./gallerySelectionModel";
 import { getActiveFilterControlCount, getStoredViewMode, type ContentViewMode } from "./galleryWorkspaceModel";
 import { TrashWorkspaceView } from "./TrashWorkspaceView";
-import { estimateMasonryCardHeight, useVirtualMasonry } from "./useVirtualMasonry";
+import { useVirtualMasonry } from "./useVirtualMasonry";
 import { FloatingLayerPortal, isEditableTarget, placeMenuForEvent, useDismissableLayer } from "../../utils/interaction";
 // Keep the first Gallery screen immediate; organizer, variants, sharing and
 // metadata are downloaded only when someone opens those optional surfaces.
@@ -61,13 +64,14 @@ const BoardShareModal = lazy(() => import("./BoardShareModal").then((m) => ({ de
 const MetadataViewerModal = lazy(() => import("./MetadataViewerModal").then((m) => ({ default: m.MetadataViewerModal })));
 const ImageSearchModal = lazy(() => import("./ImageSearchModal").then((m) => ({ default: m.ImageSearchModal })));
 
-const MASONRY_GAP = 14;
 const SELECTION_AUTO_SCROLL_EDGE_PX = 72;
 const SELECTION_AUTO_SCROLL_MAX_STEP_PX = 30;
 const GALLERY_VIEW_MODE_STORAGE_KEY = "universal-extractor:gallery-view-mode";
 const MOBILE_DENSITY_STORAGE_KEY = "universal-extractor:mobile-density";
 
 interface GalleryWorkspaceProps {
+  interfaceDensity?: InterfaceDensity;
+  imageDetailOpen?: boolean;
   images: ImageRecord[];
   context: GalleryContext | null;
   total: number;
@@ -127,9 +131,10 @@ interface GalleryWorkspaceProps {
   searchValue?: string;
   onSearchChange?: (value: string) => void;
   onRestoreTrashItem: (id: string) => Promise<void>;
-  onRestoreTrashItems: (ids: string[]) => Promise<void>;
+  onRestoreTrashItems: (ids: string[]) => Promise<void | { completed: string[] }>;
   onPurgeTrashItem: (id: string) => Promise<void>;
-  onPurgeTrashItems: (ids: string[]) => Promise<void>;
+  onPurgeTrashItems: (ids: string[]) => Promise<void | { completed: string[] }>;
+  trashBusy?: boolean;
 }
 
 interface ImageContextMenuState {
@@ -174,6 +179,8 @@ export const GalleryWorkspace = ({
   boards,
   defaultSelectionMode,
   enableImagePrefetch,
+  interfaceDensity = "standard",
+  imageDetailOpen = false,
   onSelectionDragChange,
   onSelectionModeActiveChange,
   onOpenDetail,
@@ -207,11 +214,14 @@ export const GalleryWorkspace = ({
   onRestoreTrashItems,
   onPurgeTrashItem,
   onPurgeTrashItems,
+  trashBusy = false,
 }: GalleryWorkspaceProps) => {
   const { t } = useI18n();
+  const densityMetrics = galleryDensityMetrics(interfaceDensity);
+  const masonryGap = densityMetrics.gap;
   const { confirm } = useConfirm();
   const { pushToast } = useToast();
-  const { runOperation } = useOperationStatus();
+  const { runOperation, notify } = useOperationStatus();
   const [dragActive, setDragActive] = useState(false);
   const [importTargetSourceId, setImportTargetSourceId] = useState("");
   const [boardPickerPaths, setBoardPickerPaths] = useState<string[]>([]);
@@ -235,13 +245,21 @@ export const GalleryWorkspace = ({
   const [variantMode, setVariantMode] = useState(false);
   const [showImageSearch, setShowImageSearch] = useState(false);
   const [imageSearchFile, setImageSearchFile] = useState<File | null>(null);
-  const closeImageSearch = useCallback(() => { setShowImageSearch(false); setImageSearchFile(null); }, []);
+  const [searchLocated, setSearchLocated] = useState(false);
+  const [locateTarget, setLocateTarget] = useState<{ path: string; index: number } | null>(null);
+  const [returnScroll, setReturnScroll] = useState<{ folder: string; page: number; query: string; top: number } | null>(null);
+  const returnFromLocate = useRef<(() => void) | null>(null);
+  const locateController = useRef<AbortController | null>(null);
+  const closeImageSearch = useCallback(() => {
+    locateController.current?.abort(); setShowImageSearch(false); setImageSearchFile(null); setSearchLocated(false); returnFromLocate.current = null;
+  }, []);
+  useEffect(() => () => locateController.current?.abort(), []);
   useEffect(() => {
     if (isTrashView) return;
     const paste = (event: ClipboardEvent) => {
       if (isEditableTarget(event.target) || document.querySelector('[aria-modal="true"]')) return;
       const file = [...(event.clipboardData?.files ?? [])].find((item) => item.type.startsWith("image/"));
-      if (file) { event.preventDefault(); setImageSearchFile(file); setShowImageSearch(true); }
+      if (file) { event.preventDefault(); setImageSearchFile(file); setSearchLocated(false); setShowImageSearch(true); }
     };
     window.addEventListener("paste", paste);
     return () => window.removeEventListener("paste", paste);
@@ -259,6 +277,7 @@ export const GalleryWorkspace = ({
   const [variantPage, setVariantPage] = useState(1);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [gridWidth, setGridWidth] = useState(0);
+  const [gridScrollMargin, setGridScrollMargin] = useState(0);
   const [selectionFrozenGridWidth, setSelectionFrozenGridWidth] = useState(0);
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const dragDepthRef = useRef(0);
@@ -410,7 +429,7 @@ export const GalleryWorkspace = ({
     }
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scrollContainer = gridRef.current?.closest(".ue-main-shell") as HTMLElement | null;
     scrollContainerRef.current = scrollContainer;
     setScrollElement(scrollContainer);
@@ -433,18 +452,18 @@ export const GalleryWorkspace = ({
       setGridWidth(0);
       return;
     }
-    if (typeof ResizeObserver === "undefined") {
-      setGridWidth(gridElement?.clientWidth ?? 0);
-      return;
-    }
-
     const updateMetrics = () => {
       const gridRect = gridElement.getBoundingClientRect();
-      setGridWidth(gridRect.width);
+      setGridWidth((previous) => Math.abs(previous - gridRect.width) > 0.5 ? gridRect.width : previous);
+      const viewport = gridElement.closest<HTMLElement>(".ue-main-shell");
+      const margin = viewport ? gridRect.top - viewport.getBoundingClientRect().top + viewport.scrollTop - viewport.clientTop : 0;
+      setGridScrollMargin((previous) => Math.abs(previous - margin) > 0.5 ? margin : previous);
     };
+    updateMetrics();
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(updateMetrics);
     observer.observe(gridElement);
-    updateMetrics();
+    if (galleryWorkspaceRef.current) observer.observe(galleryWorkspaceRef.current);
     return () => observer.disconnect();
   }, [dualFolderMode, galleryViewMode, activeImages.length, isTrashView, trashItems.length]);
   const masonryLayout = useVirtualMasonry({
@@ -453,9 +472,33 @@ export const GalleryWorkspace = ({
     gridWidth: selectionLayoutLocked && selectionFrozenGridWidth > 0 ? selectionFrozenGridWidth : gridWidth,
     viewportWidth,
     scrollElement,
-    gap: MASONRY_GAP,
+    gap: masonryGap,
+    density: interfaceDensity,
+    scrollMargin: gridScrollMargin,
   });
+  const scrollToLocatedIndex = masonryLayout.scrollToIndex;
+  useEffect(() => {
+    if (!locateTarget || isLoading || !images.some((image) => image.relative_path === locateTarget.path)) return;
+    scrollToLocatedIndex(locateTarget.index, { align: "center" });
+    const frame = window.requestAnimationFrame(() => cardRefs.current[locateTarget.path]?.scrollIntoView?.({ block: "center" }));
+    return () => window.cancelAnimationFrame(frame);
+  }, [locateTarget, isLoading, images, scrollToLocatedIndex]);
+  useEffect(() => {
+    if (!locateTarget) return;
+    const timer = window.setTimeout(() => setLocateTarget(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [locateTarget]);
+  useEffect(() => {
+    if (!returnScroll || isLoading || selectedSubfolder !== returnScroll.folder || page !== returnScroll.page || (searchValue || "") !== returnScroll.query) return;
+    const frame = window.requestAnimationFrame(() => {
+      const shell = document.querySelector<HTMLElement>(".ue-main-shell");
+      if (shell) shell.scrollTop = returnScroll.top;
+      setReturnScroll(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [returnScroll, isLoading, selectedSubfolder, page, searchValue, images]);
   const effectiveColumns = masonryLayout.columnCount;
+  const getMasonryItemLayout = masonryLayout.getItemLayout;
 
   const getEstimatedGridCardRect = useCallback((relativePath: string): RectLike | null => {
     if (isTrashView || galleryViewMode !== "grid") {
@@ -466,22 +509,19 @@ export const GalleryWorkspace = ({
       return null;
     }
 
-    const columnCount = Math.max(1, masonryLayout.columnCount);
-    const lane = index % columnCount;
-    const row = Math.floor(index / columnCount);
-    const columnWidth = masonryLayout.columnWidth;
-    const cardHeight = estimateMasonryCardHeight(columnWidth);
+    const layout = getMasonryItemLayout(index);
+    if (!layout) return null;
     const gridRect = gridRef.current.getBoundingClientRect();
-    const left = gridRect.left + lane * (columnWidth + MASONRY_GAP);
-    const top = gridRect.top + row * (cardHeight + MASONRY_GAP);
+    const left = gridRect.left + layout.left;
+    const top = gridRect.top + layout.top;
 
     return {
       left,
-      right: left + columnWidth,
+      right: left + layout.width,
       top,
-      bottom: top + cardHeight,
+      bottom: top + layout.height,
     };
-  }, [galleryViewMode, imageIndexByPath, isTrashView, masonryLayout.columnCount, masonryLayout.columnWidth]);
+  }, [galleryViewMode, imageIndexByPath, isTrashView, getMasonryItemLayout]);
 
   useEffect(() => {
     if (!enableImagePrefetch || !activeImages.length || isTrashView || typeof IntersectionObserver === "undefined") {
@@ -726,6 +766,13 @@ export const GalleryWorkspace = ({
           missing: getDeleteOutcome(pageSelectedPaths, result).failedPaths.length,
         }),
         successTone: (result) => getDeleteOutcome(pageSelectedPaths, result).complete ? "success" : "error",
+        successRetry: (result) => confirmedBatchRetry({
+          paths: getDeleteOutcome(pageSelectedPaths, result).failedPaths, confirm,
+          confirmation: (count) => ({ title: t("bulkDelete"), message: t("bulkDeleteConfirm", { count }), tone: "warning", confirmLabel: t("commonDelete"), cancelLabel: t("libraryCancel") }),
+          execute: onDeleteImages, failed: (paths, value) => getDeleteOutcome(paths, value).failedPaths,
+          summary: (paths, value) => t("operationDeleteImagesResult", { count: value.deleted.length, missing: getDeleteOutcome(paths, value).failedPaths.length }),
+          run: runOperation, pending: t("operationDeleteImages"),
+        }),
         successDetail: (result) => {
           const { failedPaths } = getDeleteOutcome(pageSelectedPaths, result);
           return failedPaths.length ? t("operationUnprocessedPaths", { target: describeFailedPaths(failedPaths) }) : "";
@@ -832,8 +879,8 @@ export const GalleryWorkspace = ({
       return;
     }
 
-    await onRestoreTrashItems(selectedTrashItems.map((item) => item.id));
-    clearSelection();
+    const result = await onRestoreTrashItems(selectedTrashItems.map((item) => item.id));
+    if (!result) clearSelection();
   };
 
   const handlePurgeSelectedTrash = async () => {
@@ -852,8 +899,8 @@ export const GalleryWorkspace = ({
       return;
     }
 
-    await onPurgeTrashItems(selectedTrashItems.map((item) => item.id));
-    clearSelection();
+    const result = await onPurgeTrashItems(selectedTrashItems.map((item) => item.id));
+    if (!result) clearSelection();
   };
 
   const changePage = (nextPage: number) => {
@@ -1251,13 +1298,20 @@ export const GalleryWorkspace = ({
     >
       <section
         ref={galleryWorkspaceRef}
+        data-gallery-interacting={selectionLayoutLocked ? "true" : undefined}
+        style={{ "--ue-gallery-gap": `${densityMetrics.gap}px`, "--ue-card-body-height": `${densityMetrics.bodyHeight}px`, "--ue-card-body-padding": `${densityMetrics.padding}px` } as CSSProperties}
         className="ue-workspace ue-workspace--gallery ue-animate-in"
         onPointerDown={handleSelectionPointerDown}
         onPointerMove={handleSelectionPointerMove}
         onPointerUp={handleSelectionPointerEnd}
         onPointerCancel={handleSelectionPointerEnd}
       >
+        {searchLocated && <button className="ue-secondary-action ue-search-return" onClick={(event) => {
+          event.stopPropagation();
+          returnFromLocate.current?.(); returnFromLocate.current = null; setSearchLocated(false); setLocateTarget(null);
+        }}>{t("imageSearchReturn")}</button>}
         <GalleryToolbar
+          onFolderNavigate={onOpenImportFolder}
           isTrashView={isTrashView}
           selectedBoard={selectedBoard}
           selectedSubfolder={selectedSubfolder}
@@ -1292,7 +1346,7 @@ export const GalleryWorkspace = ({
           sortOrder={sortOrder}
           searchValue={searchValue}
           onSearchChange={onSearchChange}
-          onImageSearch={() => { setImageSearchFile(null); setShowImageSearch(true); }}
+          onImageSearch={() => { setImageSearchFile(null); setSearchLocated(false); setShowImageSearch(true); }}
           onApplyPendingLiveRefresh={onApplyPendingLiveRefresh}
           onToggleFiltersMenu={() => setShowFiltersMenu((current) => !current)}
           onCloseFiltersMenu={() => setShowFiltersMenu(false)}
@@ -1415,6 +1469,7 @@ export const GalleryWorkspace = ({
                 totalPages={activeTotalPages}
                 total={activeTotal}
                 effectiveColumns={effectiveColumns}
+                highlightPath={locateTarget?.path}
                 masonryLayout={masonryLayout}
                 gridRef={gridRef}
                 cardRefs={cardRefs}
@@ -1441,6 +1496,7 @@ export const GalleryWorkspace = ({
           </div>
         ) : isTrashView ? (
           <TrashWorkspaceView
+            busy={trashBusy}
             trashItems={trashItems}
             selectedCount={selectedCount}
             selectedTrashCount={selectedTrashItems.length}
@@ -1477,6 +1533,7 @@ export const GalleryWorkspace = ({
             totalPages={activeTotalPages}
             total={activeTotal}
             effectiveColumns={effectiveColumns}
+            highlightPath={locateTarget?.path}
             masonryLayout={masonryLayout}
             gridRef={gridRef}
             cardRefs={cardRefs}
@@ -1746,13 +1803,41 @@ export const GalleryWorkspace = ({
       ) : null}
 
       {showImageSearch && !isTrashView ? <Suspense fallback={null}><ImageSearchModal initialFile={imageSearchFile} onClose={closeImageSearch} onOpenDetail={onOpenDetail}
+        suspended={imageDetailOpen || searchLocated}
         onLocate={(image) => {
-          setDualFolderMode(false); setVariantMode(false); clearSelection();
-          onCategoryChange(""); onDateFromChange(""); onDateToChange(""); onColorFamilyChange("");
-          const relative = image.source_relative_path || image.relative_path.replace(/^[^:]+::/, "");
-          const folder = relative.includes("/") ? relative.slice(0, relative.lastIndexOf("/")) : "";
-          onOpenImportFolder?.(`${image.source_id || "default_output"}::${folder}`);
-          onSearchChange?.(image.filename);
+          locateController.current?.abort();
+          const controller = new AbortController(); locateController.current = controller;
+          void (async () => {
+            try {
+              let target;
+              let legacy = false;
+              try { target = await galleryApi.locateImage(image, PAGE_SIZE, sortBy, sortOrder, controller.signal); }
+              catch (error) {
+                if (!(error instanceof ApiRequestError) || ![404, 405].includes(error.status)) throw error;
+                // A missing route has no JSON gallery error. An unavailable
+                // resource on a new server must not be disguised as success.
+                if (error.details && typeof error.details === "object") throw error;
+                const relative = image.source_relative_path || image.relative_path.replace(/^[^:]+::/, "");
+                target = { subfolder: `${image.source_id || "default_output"}::${relative.includes("/") ? relative.slice(0, relative.lastIndexOf("/")) : ""}`, page: 1, index: 0, relative_path: image.relative_path };
+                legacy = true;
+                notify(t("imageSearchLegacyLocate"), "info");
+              }
+              if (controller.signal.aborted) return;
+              const previousScroll = document.querySelector<HTMLElement>(".ue-main-shell")?.scrollTop ?? 0;
+              returnFromLocate.current = () => {
+                onOpenImportFolder?.(selectedSubfolder); onPageChange(page);
+                onCategoryChange(selectedCategory); onBoardChange(selectedBoardId); onFavoritesOnlyChange(favoritesOnly);
+                onDateFromChange(dateFrom); onDateToChange(dateTo); onColorFamilyChange(selectedColorFamily); onSearchChange?.(searchValue || "");
+                onSortByChange(sortBy); onSortOrderChange(sortOrder); setDualFolderMode(dualFolderMode); setVariantMode(variantMode);
+                setReturnScroll({ folder: selectedSubfolder, page, query: searchValue || "", top: previousScroll });
+              };
+              setDualFolderMode(false); setVariantMode(false); clearSelection();
+              onCategoryChange(""); onBoardChange(""); onFavoritesOnlyChange(false);
+              onDateFromChange(""); onDateToChange(""); onColorFamilyChange(""); onSearchChange?.(legacy ? image.filename : "");
+              onOpenImportFolder?.(target.subfolder); onPageChange(target.page);
+              setLocateTarget({ path: target.relative_path, index: target.index }); setSearchLocated(true);
+            } catch (error) { if (!controller.signal.aborted) notify(error instanceof Error ? error.message : t("imageSearchLocateFailed"), "error"); }
+          })();
         }} /></Suspense> : null}
       {showBackToTop ? (
         <button

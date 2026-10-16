@@ -2,9 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Calendar,
   CheckSquare,
-  Columns2,
   LayoutGrid,
-  Layers3,
   List,
   MoreHorizontal,
   Palette,
@@ -86,6 +84,7 @@ interface GalleryToolbarProps {
   onColorFamilyChange: (value: string) => void;
   onSortByChange: (value: string) => void;
   onSortOrderChange: (value: string) => void;
+  onFolderNavigate?: (folder: string) => void;
   onPageChange: (page: number) => void;
 }
 
@@ -148,6 +147,7 @@ export const GalleryToolbar = ({
   onSortByChange,
   onSortOrderChange,
   onPageChange,
+  onFolderNavigate,
 }: GalleryToolbarProps) => {
   const { t } = useI18n();
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -230,6 +230,10 @@ export const GalleryToolbar = ({
         <p className="ue-filter-kicker">
           {isTrashView ? t("trashTitle") : dualFolderMode ? t("dual_title") : selectedBoard ? selectedBoard.name : favoritesOnly ? t("galleryPinnedOnly") : folderLabel}
         </p>
+        {!isTrashView && relativePath && onFolderNavigate && <nav className="ue-gallery-breadcrumbs" aria-label={t("galleryFolderPath")}>
+          <button onClick={() => onFolderNavigate(`${sourceId}::`)}>{sourceLabel}</button>
+          {relativePath.split("/").filter(Boolean).map((part, index, parts) => <span key={index}> / <button title={part} onClick={() => onFolderNavigate(`${sourceId}::${parts.slice(0, index + 1).join("/")}`)}>{part}</button></span>)}
+        </nav>}
         <div className="ue-filter-summary">
           <strong>{resultCount}</strong>
           <span>{t(isTrashView ? "trashItemCount" : "galleryFilterResult", { count: resultCount })}</span>
@@ -287,7 +291,7 @@ export const GalleryToolbar = ({
             </div>
           ) : null}
 
-          {onImageSearch ? <button type="button" className="ue-filter-trigger" onClick={onImageSearch} title={t("imageSearchPaste")}><FolderSearch size={15} /><span>{t("imageSearchTitle")}</span></button> : null}
+          {onImageSearch ? <button type="button" className="ue-filter-trigger" onClick={(event) => { event.stopPropagation(); onImageSearch(); }} title={t("imageSearchPaste")}><FolderSearch size={15} /><span>{t("imageSearchTitle")}</span></button> : null}
           <div className="ue-filter-controls ue-filter-controls--gallery">
             <div className="ue-toolbar-group ue-toolbar-group--browse">
               <div className="ue-filter-popover">
@@ -355,34 +359,16 @@ export const GalleryToolbar = ({
               >
                 <CheckSquare size={15} /><span>{t("bulkSelectMode")}</span>
               </button>
+            <label className="ue-select-field ue-select-field--compact ue-gallery-mode-control"><span>{t("galleryMode")}</span>
+              <select aria-label={t("galleryMode")} value={dualFolderMode ? "organize" : variantMode ? "variants" : "browse"}
+                onChange={(event) => {
+                  onDualFolderModeChange(event.target.value === "organize"); onVariantModeChange?.(event.target.value === "variants"); onClearSelection();
+                }}>
+                <option value="browse">{t("galleryModeBrowse")}</option><option value="organize">{t("organizeFolders")}</option><option value="variants">{t("variantToolbar")}</option>
+              </select>
+            </label>
             <DisclosureMenu label={t("moreActions")} icon={<MoreHorizontal size={18} />} className="ue-toolbar-more">
             <div className="ue-toolbar-group ue-toolbar-group--state">
-              <button
-                className={`ue-chip-toggle ue-chip-toggle--icon ${dualFolderMode ? "active" : ""}`}
-                title={t(dualFolderMode ? "organizeFoldersClose" : "organizeFoldersOpen")}
-                aria-label={t(dualFolderMode ? "organizeFoldersClose" : "organizeFoldersOpen")}
-                onClick={() => {
-                  onDualFolderModeChange(!dualFolderMode);
-                  onVariantModeChange?.(false);
-                  onClearSelection();
-                }}
-                type="button"
-              >
-                <Columns2 size={15} /><span>{t("organizeFolders")}</span>
-              </button>
-              <button
-                className={`ue-chip-toggle ue-chip-toggle--icon ${variantMode ? "active" : ""}`}
-                title={t("variantToolbar")}
-                aria-label={t("variantToolbar")}
-                onClick={() => {
-                  onVariantModeChange?.(!variantMode);
-                  onDualFolderModeChange(false);
-                  onClearSelection();
-                }}
-                type="button"
-              >
-                <Layers3 size={15} /><span>{t("variantToolbar")}</span>
-              </button>
               {selectedBoard ? (
                 <>
                   <button

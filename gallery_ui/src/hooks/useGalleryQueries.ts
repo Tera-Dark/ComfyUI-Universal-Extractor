@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18nProvider";
 import { galleryApi } from "../services/galleryApi";
+import { synchronizeGalleryIndex } from "../services/gallerySync";
 import type { ColorIndexStatus, GalleryContext, ImageRecord, TrashItem } from "../types/universal-gallery";
 import { PAGE_SIZE } from "../utils/formatters";
 
@@ -17,6 +18,7 @@ interface GalleryQueryOptions {
   sortBy: string;
   sortOrder: string;
   refreshKey: number;
+  refreshIndex?: boolean;
   isTrashView: boolean;
   isActive: boolean;
   liveRefreshViewKey: string;
@@ -27,7 +29,7 @@ interface GalleryQueryOptions {
 /** Owns scoped query results, request cancellation and refresh completion. */
 export const useGalleryQueries = (options: GalleryQueryOptions) => {
   const { t } = useI18n();
-  const { page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, isTrashView, isActive, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart } = options;
+  const { page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, refreshIndex = true, isTrashView, isActive, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart } = options;
   const [images, setImages] = useState<ImageRecord[]>([]);
   const [context, setContext] = useState<GalleryContext | null>(null);
   const [colorIndexStatus, setColorIndexStatus] = useState<ColorIndexStatus | null>(null);
@@ -54,7 +56,9 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
     const loadContext = async () => {
       let requestError: Error | undefined;
       try {
-        const contextResponse = await galleryApi.getContext(shouldForceRefresh, controller.signal);
+        const legacyRefresh = shouldForceRefresh && refreshIndex ? await synchronizeGalleryIndex("", controller.signal) : false;
+        if (isCancelled) return;
+        const contextResponse = await galleryApi.getContext(legacyRefresh, controller.signal);
         if (isCancelled) {
           return;
         }
@@ -82,7 +86,7 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
       controller.abort();
       if (shouldForceRefresh) completeRefreshPart(refreshKey, "context", new Error(t("galleryRefreshInterrupted")));
     };
-  }, [completeRefreshPart, refreshKey, t]);
+  }, [completeRefreshPart, refreshKey, refreshIndex, t]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -119,6 +123,8 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
           return;
         }
 
+        const legacyRefresh = shouldForceRefresh && refreshIndex ? await synchronizeGalleryIndex(selectedSubfolder, controller.signal) : false;
+        if (isCancelled) return;
         const imageResponse = await galleryApi.listImages(
           page,
           PAGE_SIZE,
@@ -132,7 +138,7 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
           selectedColorFamily,
           sortBy,
           sortOrder,
-          shouldForceRefresh,
+          legacyRefresh,
           controller.signal,
         );
 
@@ -194,7 +200,7 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
       controller.abort();
       if (shouldForceRefresh) completeRefreshPart(refreshKey, "images", new Error(t("galleryRefreshInterrupted")));
     };
-  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, t, isTrashView, isActive, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart]);
+  }, [page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, refreshIndex, t, isTrashView, isActive, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart]);
 
   return { images, setImages, context, setContext, colorIndexStatus, setColorIndexStatus, total, setTotal, isLoading, isRefreshing, error, trashItems, setTrashItems, hasLoadedImagesRef, loadedViewKey };
 };

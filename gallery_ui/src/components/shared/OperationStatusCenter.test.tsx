@@ -64,6 +64,18 @@ const OverflowHarness = () => {
 };
 
 describe("OperationStatusProvider", () => {
+  it("caps ten concurrent tasks at three floating cards and keeps dismissed tasks in the center", async () => {
+    const Harness = () => {
+      const { syncTask } = useOperationStatus();
+      return <button onClick={() => { for (let index = 0; index < 10; index++) syncTask(`job-${index}`, `Task ${index}`, "pending", "1 / 10"); }}>Start ten</button>;
+    };
+    const { container } = renderWithStatus(<Harness />);
+    await userEvent.click(screen.getByRole("button", { name: "Start ten" }));
+    expect(container.querySelectorAll(".ue-operation-card")).toHaveLength(3);
+    await userEvent.click(screen.getAllByRole("button", { name: "关闭提醒" })[0]);
+    await userEvent.click(screen.getByRole("button", { name: /任务中心/ }));
+    expect(container.querySelectorAll(".ue-task-history .ue-operation-card")).toHaveLength(10);
+  });
   afterEach(() => {
     vi.useRealTimers();
   });
@@ -125,14 +137,17 @@ describe("OperationStatusProvider", () => {
 
     expect(screen.getByText("Still working")).toBeInTheDocument();
     expect(screen.queryByText("Done 1")).toBeNull();
-    expect(screen.getAllByRole("status")).toHaveLength(5);
+    expect(screen.getAllByRole("status")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: /任务中心/ }));
+    await userEvent.click(screen.getByRole("button", { name: "最近完成" }));
+    expect(screen.getByText("Done 1")).toBeInTheDocument();
   });
 
   it("does not evict an error when later success notifications exceed the cap", () => {
     renderWithStatus(<ErrorOverflowHarness />);
     fireEvent.click(screen.getByRole("button", { name: "Fill after error" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Delete failed");
-    expect(screen.getAllByRole("status")).toHaveLength(4);
+    expect(screen.getAllByRole("status")).toHaveLength(2);
   });
 
   it("clears dismiss timers on unmount", async () => {

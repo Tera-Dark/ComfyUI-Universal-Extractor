@@ -26,7 +26,7 @@ with sync_playwright() as playwright:
         page.screenshot(path=str(args.screenshots / "desktop.png"))
 
     page.locator('summary[aria-label="更多操作"]').click()
-    expect(page.get_by_role("button", name="开启双栏目录整理")).to_be_visible()
+    expect(page.get_by_role("combobox", name="图库模式")).to_have_value("browse")
     page.keyboard.press("Escape")
     expect(page.locator(".ue-toolbar-more")).not_to_have_attribute("open", "")
 

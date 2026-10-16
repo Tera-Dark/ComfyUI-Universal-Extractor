@@ -20,7 +20,13 @@ import types
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--host", default="127.0.0.1")
 parser.add_argument("--port", type=int, default=8189)
+parser.add_argument("--trash-items", type=int, default=0, help="Seed up to 500 disposable trash fixtures for bulk-action QA")
+parser.add_argument("--image-count", type=int, default=18, help="Number of procedural images for scrolling QA (1–500)")
 args = parser.parse_args()
+if not 0 <= args.trash_items <= 500:
+    parser.error("--trash-items must be between 0 and 500")
+if not 1 <= args.image_count <= 500:
+    parser.error("--image-count must be between 1 and 500")
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
 temporary = tempfile.TemporaryDirectory(prefix="universal-preview-")
@@ -47,7 +53,7 @@ palettes = [
 folders = ["01 · Landscapes", "02 · Color studies", "03 · Architecture"]
 for folder in folders:
     (base / "output" / folder).mkdir()
-for index in range(18):
+for index in range(args.image_count):
     width, height = [(600, 760), (600, 600), (600, 460)][index % 3]
     colors = palettes[index % len(palettes)]
     image = Image.new("RGB", (width, height), colors[0])
@@ -79,11 +85,16 @@ for index in range(18):
     {"name": "Quiet landscapes", "tags": ["landscape", "muted colors"]},
 ], ensure_ascii=False))
 
+if args.trash_items:
+    from py.gallery import service
+    fixture_names = [f"QA_Disposable_{index:04}.png" for index in range(args.trash_items)]
+    for name in fixture_names:
+        Image.new("RGB", (16, 16), "#c3c6b3").save(base / "output" / name)
+    service.delete_images(fixture_names)
+
 async def preview_updates(force=False):
-    version = re.search(r'^version\s*=\s*"([^"]+)"', (root / "pyproject.toml").read_text(), re.M)[1]
-    return {"current_version": version, "latest_version": version, "update_available": False,
-            "published_at": None, "release_notes": "", "has_remote_check": False,
-            "checked_at": int(time.time()), "error": None, "repository_url": "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor", "release_url": ""}
+    from py.gallery.update_checker import _build_status
+    return {**_build_status([]), "check_status": "preview", "last_success_at": None}
 routes.check_update_status = preview_updates
 app = web.Application()
 routes.register_routes(app)
