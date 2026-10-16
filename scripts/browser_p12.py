@@ -49,8 +49,7 @@ async def switch_tab(page, index):
 
 
 async def open_mode(page, name):
-    await page.locator(".ue-toolbar-more > summary").click()
-    await page.get_by_role("button", name=name, exact=True).click()
+    await page.get_by_role("combobox", name="图库模式").select_option("organize" if name == "开启双栏目录整理" else "variants")
 
 
 async def slow_source_and_empty(browser, errors):

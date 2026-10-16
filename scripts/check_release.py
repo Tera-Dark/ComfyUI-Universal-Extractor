@@ -1,6 +1,8 @@
 """Portable release metadata check. No ComfyUI or optional modules required."""
 import json
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 root = Path(__file__).resolve().parents[1]
@@ -9,6 +11,8 @@ package = json.loads((root / "gallery_ui/package.json").read_text())
 lock = json.loads((root / "gallery_ui/package-lock.json").read_text())
 assert version == package["version"] == lock["version"] == lock["packages"][""]["version"], "Version mismatch"
 assert f"## {version}" in (root / "CHANGELOG.md").read_text(encoding="utf-8-sig"), "Missing changelog"
+subprocess.run([sys.executable, str(root / "scripts/release_notes.py"), "--check"], check=True)
+assert json.loads((root / "gallery_ui/dist/release-version.json").read_text())["version"] == version, "Rebuild dist for this version"
 index = (root / "gallery_ui/dist/index.html").read_text()
 assets = re.findall(r'(?:src|href)="/gallery/([^"?#]+)"', index)
 assert assets, "Missing built assets"
