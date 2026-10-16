@@ -1,4 +1,11 @@
 const en = {
+  updatesInstalledNotes: "What’s new in v{version}",
+  updatesPreview: "Local preview · remote not checked",
+  updatesCached: "Using verified cache",
+  updatesLocalOnly: "Installed release notes",
+  updatesLastSuccess: "Last successful check",
+  updatesInstalled: "Installed release",
+  updatesHistory: "History",
   imageSearchTitle: "Search by image",
   imageSearchIntro: "Find the original of an old social media image and its folder. Searches all enabled sources, independent of current filters.",
   imageSearchChoose: "Choose reference image",

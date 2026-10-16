@@ -1,0 +1,16 @@
+{
+  "version": "1.7.0",
+  "date": "2026-10-16",
+  "locales": {
+    "zh-CN": [
+      {"title": "主要变化", "items": ["工作流完成后自动同步图库，低频检查兜底；整理图片时保留浏览位置。", "右上角可离线查看版本说明，右下角任务中心统一进度、失败与最近记录。", "增加标准与紧凑密度，改善卡片、空状态及工作区操作。", "以图搜图保留搜索会话，支持返回结果和定位原图所在分页。"]},
+      {"title": "修复", "items": ["修复首次 freshness 基线遗漏新图、滚动后目录统计不更新的问题。", "修复示例更新日志为空、检查失败仍显示最新及任务提示重复的问题。"]},
+      {"title": "升级注意", "items": ["停止 ComfyUI 后完整替换插件和 dist，重启并刷新 ComfyUI 页面以加载完成事件桥接。", "用户 JSON、图源、资源身份和文件事务保持兼容；关闭自动同步的偏好继续生效。", "本地候选版尚需真实 ComfyUI 工作流验证；GitHub 版本信息不代表 Registry 已审核。"]}
+    ],
+    "en": [
+      {"title": "Changes", "items": ["Synchronize the gallery after workflow completion, with low-frequency fallback checks and stable browsing positions.", "Read installed release notes offline and track progress, failures and recent results in the task center.", "Choose standard or compact density with clearer cards, empty states and workspace actions.", "Keep image-search sessions when viewing details and locate originals on their folder page."]},
+      {"title": "Fixes", "items": ["Reconcile the first freshness baseline and update folder statistics while browsing older images.", "Fix missing preview notes, misleading offline update status and duplicate task messages."]},
+      {"title": "Upgrade notes", "items": ["Stop ComfyUI, replace the complete plugin and dist, then restart and refresh ComfyUI to load the execution bridge.", "User JSON, sources, resource identity and file transactions remain compatible. Disabled auto-sync stays disabled.", "This local candidate still requires real ComfyUI workflow validation. GitHub availability does not imply Registry approval."]}
+    ]
+  }
+}

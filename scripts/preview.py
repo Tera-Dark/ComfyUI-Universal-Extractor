@@ -80,10 +80,8 @@ for index in range(18):
 ], ensure_ascii=False))
 
 async def preview_updates(force=False):
-    version = re.search(r'^version\s*=\s*"([^"]+)"', (root / "pyproject.toml").read_text(), re.M)[1]
-    return {"current_version": version, "latest_version": version, "update_available": False,
-            "published_at": None, "release_notes": "", "has_remote_check": False,
-            "checked_at": int(time.time()), "error": None, "repository_url": "https://github.com/Tera-Dark/ComfyUI-Universal-Extractor", "release_url": ""}
+    from py.gallery.update_checker import _build_status
+    return {**_build_status([]), "check_status": "preview", "last_success_at": None}
 routes.check_update_status = preview_updates
 app = web.Application()
 routes.register_routes(app)

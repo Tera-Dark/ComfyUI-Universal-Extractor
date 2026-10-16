@@ -10,6 +10,7 @@ from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
 from ..constants import PLUGIN_DIR
+from .release_notes import installed_release_notes
 
 
 GITHUB_REPO = "Tera-Dark/ComfyUI-Universal-Extractor"
@@ -20,6 +21,7 @@ CHANGELOG_PATH = Path(PLUGIN_DIR) / "CHANGELOG.md"
 
 _UPDATE_CACHE: dict[str, Any] | None = None
 _UPDATE_CACHE_TS = 0.0
+_UPDATE_INFLIGHT = None
 
 
 def _read_current_version() -> str:
@@ -94,6 +96,10 @@ def _read_local_changelog_body(version: str) -> str:
 
 
 def _local_release(version: str) -> dict[str, Any] | None:
+    structured = next((release for release in installed_release_notes(version)["releases"]
+                       if release["version"] == version and release["source"] == "local"), None)
+    if structured:
+        return structured
     body = _read_local_changelog_body(version)
     if not body:
         return None
@@ -166,15 +172,28 @@ def _build_status(releases: list[dict[str, Any]], *, error: str = "") -> dict[st
         "checked_at": int(time.time()),
         "error": error,
         "releases": normalized,
+        "check_status": "failed" if error else "checked",
+        "notes_source": "local",
+        "last_success_at": None if error else int(time.time()),
     }
 
 
 async def check_update_status(*, force: bool = False) -> dict[str, Any]:
-    global _UPDATE_CACHE, _UPDATE_CACHE_TS
+    global _UPDATE_INFLIGHT
 
     now = time.time()
     if not force and _UPDATE_CACHE and now - _UPDATE_CACHE_TS < UPDATE_CACHE_SECONDS:
-        return _UPDATE_CACHE
+        return {**_UPDATE_CACHE, "check_status": "cached"}
+
+    # All callers share one network check, including simultaneous forced ones.
+    if _UPDATE_INFLIGHT is None or _UPDATE_INFLIGHT.done():
+        _UPDATE_INFLIGHT = asyncio.create_task(_check_remote())
+    return await asyncio.shield(_UPDATE_INFLIGHT)
+
+
+async def _check_remote():
+    global _UPDATE_CACHE, _UPDATE_CACHE_TS
+    now = time.time()
 
     try:
         releases = await asyncio.to_thread(_fetch_releases_from_github)
@@ -185,5 +204,5 @@ async def check_update_status(*, force: bool = False) -> dict[str, Any]:
     except (HTTPError, URLError, TimeoutError, OSError, ValueError, json.JSONDecodeError) as error:
         fallback = _build_status([], error=str(error))
         if _UPDATE_CACHE:
-            return {**_UPDATE_CACHE, "checked_at": int(now), "error": str(error)}
+            return {**_UPDATE_CACHE, "checked_at": int(now), "error": str(error), "check_status": "failed"}
         return fallback

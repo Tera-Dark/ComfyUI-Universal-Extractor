@@ -81,6 +81,9 @@ const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Pro
 };
 
 export const galleryApi = {
+  async getReleaseNotes(locale = "zh-CN") {
+    return requestJson<import("../types/universal-gallery").ReleaseNotesResponse>(`/universal_gallery/api/release-notes?locale=${encodeURIComponent(locale)}`);
+  },
   async searchByImage(file: File, minimum = 70, signal?: AbortSignal) {
     const body = new FormData();
     body.append("image", file);

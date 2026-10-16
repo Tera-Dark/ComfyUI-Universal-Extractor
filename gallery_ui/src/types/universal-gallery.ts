@@ -232,6 +232,9 @@ export interface UpdateRelease {
 }
 
 export interface UpdateStatus {
+  check_status?: "checked" | "cached" | "failed" | "preview";
+  notes_source?: string;
+  last_success_at?: number | null;
   current_version: string;
   latest_version: string;
   update_available: boolean;
@@ -239,6 +242,12 @@ export interface UpdateStatus {
   repository_url: string;
   checked_at: number;
   error: string;
+  releases: UpdateRelease[];
+}
+
+export interface ReleaseNotesResponse {
+  current_version: string;
+  source: string;
   releases: UpdateRelease[];
 }
 

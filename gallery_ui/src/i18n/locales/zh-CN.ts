@@ -1,4 +1,11 @@
 const zhCN = {
+  updatesInstalledNotes: "v{version} 更新说明",
+  updatesPreview: "本地示例 · 未检查远端",
+  updatesCached: "使用已核验缓存",
+  updatesLocalOnly: "当前安装版本说明",
+  updatesLastSuccess: "上次检查成功",
+  updatesInstalled: "当前版本说明",
+  updatesHistory: "历史版本",
   imageSearchTitle: "以图搜图",
   imageSearchIntro: "用社交平台上的老图，找回图库中的原图和所在文件夹。搜索全部已启用图源，不受当前筛选限制。",
   imageSearchChoose: "选择参考图片",

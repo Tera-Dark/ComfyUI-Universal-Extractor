@@ -4,6 +4,7 @@ import type { WorkspaceTab } from "../types/universal-gallery";
 import { translations, type Locale } from "./translations";
 
 interface TranslateOptions {
+  version?: string;
   source?: string;
   moved?: number;
   missing?: number;
