@@ -1,4 +1,5 @@
 from concurrent.futures import ThreadPoolExecutor
+import json
 from threading import Event
 
 import pytest
@@ -103,6 +104,27 @@ def test_continuous_conflict_fails_after_three_attempts_without_forking_jobs(tmp
             assert len(calls) == 3
             assert scheduler.list()["total"] == 1
             assert scheduler.get(job["id"])["state"] == "failed"
+        finally:
+            scheduler.close()
+    catalog.close()
+
+
+def test_restart_consolidates_legacy_refresh_backlog_without_removing_history(tmp_path):
+    catalog = Catalog(tmp_path)
+    with catalog.connect() as db:
+        for generation in range(385):
+            db.execute("INSERT INTO jobs(id,kind,dedupe_key,payload,state,created_at,updated_at) VALUES(?, 'refresh_index', ?, ?, 'queued', ?, 0)",
+                       (str(generation), f"legacy-{generation}", json.dumps({"subfolder": "", "force": True, "_generation": generation, "_processor_version": "1"}), generation))
+    calls = []
+    with ThreadPoolExecutor(1) as scans, ThreadPoolExecutor(2) as analysis:
+        scheduler = JobScheduler(catalog, scans, analysis, {"refresh_index": ("scan", lambda context, payload: calls.append(payload["_generation"]))})
+        try:
+            scheduler.future("384").result(5)
+            assert calls == [384]
+            with catalog.connect() as db:
+                assert db.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 385
+                assert db.execute("SELECT COUNT(*) FROM jobs WHERE state='cancelled'").fetchone()[0] == 384
+            assert scheduler.get("0")["result"] == {"superseded_by": "384"}
         finally:
             scheduler.close()
     catalog.close()
