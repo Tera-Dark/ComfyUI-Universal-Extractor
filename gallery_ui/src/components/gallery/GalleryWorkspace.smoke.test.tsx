@@ -148,6 +148,26 @@ const renderWorkspace = (overrides: Partial<Parameters<typeof GalleryWorkspace>[
 };
 
 describe("GalleryWorkspace smoke", () => {
+  it("retains the image-search session through locate and does not dismiss it on the return click", async () => {
+    const NativeURL = URL;
+    vi.stubGlobal("URL", class extends NativeURL { static createObjectURL() { return "blob:reference"; } static revokeObjectURL() {} });
+    const search = vi.spyOn(galleryApi, "searchByImage").mockResolvedValue({ matches: [{ image: galleryImage, score: 99, match_type: "similar", full_path: "D:/output/image.png" }], indexed: 1, total: 1, pending: 0, failed: 0 });
+    const locate = vi.spyOn(galleryApi, "locateImage").mockResolvedValue({ relative_path: galleryImage.relative_path, subfolder: "default_output::", page: 1, index: 0 });
+    try {
+      renderWorkspace({ isTrashView: false, selectedSubfolder: "default_output::", images: [galleryImage], total: 1 });
+      fireEvent.click(screen.getByRole("button", { name: "以图搜图" }));
+      const dialog = await screen.findByRole("dialog", { name: "以图搜图" });
+      fireEvent.change(dialog.querySelector('input[type="file"]')!, { target: { files: [new File(["ref"], "social.png", { type: "image/png" })] } });
+      await screen.findByText("social.png");
+      await screen.findByRole("button", { name: "定位文件夹" });
+      fireEvent.click(screen.getByRole("button", { name: "定位文件夹" }));
+      const back = await screen.findByRole("button", { name: "返回搜图结果与原浏览位置" });
+      expect(screen.queryByRole("dialog", { name: "以图搜图" })).toBeNull();
+      fireEvent.click(back);
+      expect(await screen.findByRole("dialog", { name: "以图搜图" })).toBeVisible();
+      expect(screen.getByText("social.png")).toBeVisible();
+    } finally { search.mockRestore(); locate.mockRestore(); vi.unstubAllGlobals(); }
+  });
   it("renders trash grid cards with long names kept inside the card copy area", () => {
     const { container } = renderWorkspace();
 

@@ -38,11 +38,7 @@
  .ue-density-trigger { padding:0 7px; min-height:40px; }
  .ue-app-shell .ue-workspace-switcher .ue-topbar-tab { justify-content:flex-start; }
 }
-@media (max-width:480px) {
- .ue-filter-controls--gallery { flex-wrap:wrap; justify-content:flex-start; gap:6px; }
- .ue-filter-controls--gallery > .ue-toolbar-group--browse { flex:1 0 100%; flex-wrap:wrap; justify-content:space-between; gap:6px; }
- .ue-filter-controls--gallery [data-tour-id="gallery-selection"] span { display:inline; }
-}
+
 /* Mobile density is an explicit grid preference, not the desktop 3–8-column slider. */
 .ue-density-presets--mobile > button { min-height:72px; }
 .ue-density-preview--list { grid-template-columns:1fr; }

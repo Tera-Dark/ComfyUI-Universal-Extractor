@@ -1244,7 +1244,7 @@
   flex-direction: column;
   gap: 5px;
   min-width: 0;
-  padding: 9px 4px 2px;
+  padding: var(--ue-card-body-padding) 4px;
 }
 
 .ue-dual-card-heading {
@@ -1276,7 +1276,7 @@
   border-radius: 999px;
   background: rgba(37, 99, 235, 0.08);
   color: #2563eb;
-  font-size: 10px;
+  font-size: 12px;
   font-weight: 700;
   opacity: 0.88;
   transition: opacity var(--ue-duration-fast) var(--ue-ease);
@@ -1287,7 +1287,7 @@
   align-items: center;
   gap: 6px;
   color: #7b8494;
-  font-size: 11px;
+  font-size: 12px;
   opacity: 0.86;
   transition: opacity var(--ue-duration-fast) var(--ue-ease);
 }
@@ -1427,3 +1427,5 @@
 @media (hover: none) { .ue-gallery-card .ue-gallery-actions button:not(.active) { opacity: 1; pointer-events: auto; } }
 .ue-gallery-breadcrumbs { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 12px; color: var(--ue-ink-muted); }
 .ue-gallery-breadcrumbs button { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: 0; padding: 0; color: inherit; cursor: pointer; font: inherit; }
+
+.ue-dual-sync-pending { grid-column: 1 / -1; justify-self: start; }

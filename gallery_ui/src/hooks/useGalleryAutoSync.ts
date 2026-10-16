@@ -1,3 +1,4 @@
+import { synchronizeGalleryIndex } from "../services/gallerySync";
 import { useEffect, useRef } from "react";
 import { ApiRequestError, galleryApi } from "../services/galleryApi";
 import { GALLERY_EVENTS_CHANNEL, isGalleryOutputEvent } from "../services/galleryEvents";
@@ -42,28 +43,6 @@ export const useGalleryAutoSync = (options: AutoSyncOptions) => {
     let running = false;
     let timer: number | undefined;
     let retryCount = 0;
-    const sleep = (ms: number) => new Promise<void>((resolve, reject) => {
-      if (signal.aborted) { reject(new DOMException("Aborted", "AbortError")); return; }
-      const abort = () => { window.clearTimeout(handle); reject(new DOMException("Aborted", "AbortError")); };
-      const handle = window.setTimeout(() => { signal.removeEventListener("abort", abort); resolve(); }, ms);
-      signal.addEventListener("abort", abort, { once: true });
-    });
-    const scan = async (scope: string) => {
-      try {
-        const { job } = await galleryApi.createJob("refresh_index", { subfolder: scope, force: true });
-        let current = job;
-        while (["queued", "running", "cancelling"].includes(current.state)) {
-          await sleep(250);
-          current = (await galleryApi.getJob(job.id, signal)).job;
-        }
-        if (current.state !== "succeeded") throw new Error(current.error || `Index sync: ${current.state}`);
-        return false;
-      } catch (error) {
-        // An older backend can still refresh through the original list API.
-        if (error instanceof ApiRequestError && [404, 405].includes(error.status)) return true;
-        throw error;
-      }
-    };
     const schedule = (ms: number) => {
       window.clearTimeout(timer);
       timer = window.setTimeout(() => { void check(); }, ms);
@@ -80,7 +59,7 @@ export const useGalleryAutoSync = (options: AutoSyncOptions) => {
         // The first visible snapshot must be reconciled once; an empty known
         // fingerprint says nothing about whether the committed index is fresh.
         if (eventDirty || !known || freshness.changed) {
-          const legacy = await scan(eventDirty ? "" : options.scope);
+          const legacy = await synchronizeGalleryIndex(eventDirty ? "" : options.scope, signal);
           if (signal.aborted) return;
           await callbacks.current.refresh(legacy, signal);
           if (signal.aborted) return;

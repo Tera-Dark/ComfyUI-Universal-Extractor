@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18nProvider";
 import { galleryApi } from "../services/galleryApi";
+import { synchronizeGalleryIndex } from "../services/gallerySync";
 import type { ColorIndexStatus, GalleryContext, ImageRecord, TrashItem } from "../types/universal-gallery";
 import { PAGE_SIZE } from "../utils/formatters";
 
@@ -54,7 +55,9 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
     const loadContext = async () => {
       let requestError: Error | undefined;
       try {
-        const contextResponse = await galleryApi.getContext(shouldForceRefresh, controller.signal);
+        const legacyRefresh = shouldForceRefresh ? await synchronizeGalleryIndex("", controller.signal) : false;
+        if (isCancelled) return;
+        const contextResponse = await galleryApi.getContext(legacyRefresh, controller.signal);
         if (isCancelled) {
           return;
         }
@@ -119,6 +122,8 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
           return;
         }
 
+        const legacyRefresh = shouldForceRefresh ? await synchronizeGalleryIndex(selectedSubfolder, controller.signal) : false;
+        if (isCancelled) return;
         const imageResponse = await galleryApi.listImages(
           page,
           PAGE_SIZE,
@@ -132,7 +137,7 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
           selectedColorFamily,
           sortBy,
           sortOrder,
-          shouldForceRefresh,
+          legacyRefresh,
           controller.signal,
         );
 

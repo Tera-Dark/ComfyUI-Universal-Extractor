@@ -19,6 +19,7 @@ const EMPTY_IMAGES: ImageRecord[] = [];
 const EMPTY_TRASH: TrashItem[] = [];
 
 interface UseGalleryDataOptions {
+  interactionBlocked?: boolean;
   isActive?: boolean;
   liveRefreshEnabled?: boolean;
   thumbnailPrewarmEnabled?: boolean;
@@ -162,8 +163,9 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
       setContext(nextContext);
       setColorIndexStatus(nextContext.color_index_status ?? response.color_index_status ?? null);
       setAutoSyncFailure(null);
+      window.dispatchEvent(new Event("universal-gallery:index-synced"));
       const safeToReplace = page === 1 && sortBy === "created_at" && sortOrder === "desc" &&
-        selectedImagePaths.length === 0 && !selectedImage &&
+        !options.interactionBlocked && selectedImagePaths.length === 0 && !selectedImage &&
         !document.querySelector('[data-gallery-interacting="true"]') &&
         (document.querySelector<HTMLElement>(".ue-main-shell")?.scrollTop ?? 0) <= 80;
       if (safeToReplace) {

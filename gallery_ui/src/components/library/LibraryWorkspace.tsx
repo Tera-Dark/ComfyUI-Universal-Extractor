@@ -39,6 +39,8 @@ import { FloatingLayerPortal, placeMenuForEvent, useDismissableLayer } from "../
 import { readStorageItem, writeStorageItem } from "../../utils/safeStorage";
 
 interface LibraryWorkspaceProps {
+  onSelectLibrary?: (name: string) => void;
+  onCreateLibrary?: () => void;
   libraries: LibraryInfo[];
   activeLibraryName: string | null;
   entries: LibraryPagedEntry[];
@@ -108,6 +110,8 @@ const joinLabelArray = (value: string[] | string | undefined) => {
 
 export const LibraryWorkspace = ({
   libraries,
+  onSelectLibrary,
+  onCreateLibrary,
   activeLibraryName,
   entries,
   page,
@@ -399,18 +403,18 @@ export const LibraryWorkspace = ({
         <div className="ue-pane-header">
           <div className="ue-pane-copy">
             <p className="ue-pane-kicker">{t("sidebarLibraries")}</p>
-            <h2>{activeLibraryName || t("librarySelectTitle")}</h2>
+            <h2>{activeLibraryName || t("sidebarLibraries")}</h2>
             <p>
               {activeLibraryName
                 ? t("libraryWorkspaceSubtitle", {
                     count: totalEntries,
                     name: activeLibraryName,
                   })
-                : t("librarySelectText")}
+                : t("libraryWorkspaceIntro")}
             </p>
           </div>
 
-          <div className="ue-library-actions" data-tour-id="library-actions">
+          <div className={`ue-library-actions ${!activeLibraryName ? "is-empty" : ""}`} data-tour-id="library-actions">
             <div className="ue-segmented-control ue-segmented-control--compact ue-view-toggle" aria-label={t("viewMode")}>
               <button
                 className={libraryViewMode === "grid" ? "active" : ""}
@@ -446,7 +450,7 @@ export const LibraryWorkspace = ({
               aria-label={t("libraryAddFile")}
               title={t("libraryAddFile")}
             >
-              <FileUp size={14} />
+              <FileUp size={14} /><span>{t("libraryAddFile")}</span>
             </button>
             <button
               className="ue-icon-action"
@@ -487,7 +491,7 @@ export const LibraryWorkspace = ({
               aria-label={t("libraryAddEntry")}
               title={t("libraryAddEntry")}
             >
-              <FilePlus2 size={14} />
+              <FilePlus2 size={14} /><span>{t("libraryAddEntry")}</span>
             </button>
 
             {isEditing && canUseRawEditor ? (
@@ -507,7 +511,7 @@ export const LibraryWorkspace = ({
                   aria-label={t("librarySave")}
                   title={t("librarySave")}
                 >
-                  <Save size={14} />
+                  <Save size={14} /><span>{t("librarySave")}</span>
                 </button>
                 <button
                   className="ue-icon-action"
@@ -564,7 +568,15 @@ export const LibraryWorkspace = ({
             <FileJson size={38} strokeWidth={1.1} />
             <div>
               <h3>{t("librarySelectTitle")}</h3>
-              <p>{t("librarySelectText")}</p>
+              <p>{t("librarySelectInlineHint")}</p>
+              <div className="ue-library-empty-actions">
+                <label>{t("librarySelectTitle")}<select aria-label={t("librarySelectTitle")} disabled={!libraries.length} value="" onChange={(event) => onSelectLibrary?.(event.target.value)}>
+                  <option value="" disabled>{t("librarySelectTitle")}</option>
+                  {libraries.map((item) => <option key={item.filename} value={item.filename}>{item.filename}</option>)}
+                </select></label>
+                {onCreateLibrary && <button className="ue-secondary-action" onClick={onCreateLibrary}><FilePlus2 size={15} />{t("libraryCreateInline")}</button>}
+                <button className="ue-secondary-action" onClick={() => fileInputRef.current?.click()}><FileUp size={15} />{t("libraryImport")}</button>
+              </div>
             </div>
           </div>
         ) : (

@@ -1,4 +1,8 @@
 const en = {
+  libraryWorkspaceIntro: "Manage prompt and tag libraries with JSON import and editing.",
+  imageSearchClose: "Close image search",
+  operationBatchResult: "{updated} succeeded · {count} skipped · {missing} unfinished",
+  operationRetryBatchConfirm: "Retry only {count} unfinished items. Changes: {target}",
   galleryMode: "Gallery mode",
   galleryModeBrowse: "Browse",
   galleryFolderPath: "Folder path",
@@ -880,7 +884,7 @@ const en = {
   settingsPrefImagePrefetch: "Preload nearby images",
   settingsPrefImagePrefetchHint: "Preloads nearby thumbnails while scrolling; turn off to reduce background network and disk reads.",
   settingsPrefLiveRefresh: "Keep gallery live",
-  settingsPrefLiveRefreshHint: "Automatically rescans when the gallery opens, then quietly checks for new ComfyUI outputs while the page is visible.",
+  settingsPrefLiveRefreshHint: "Sync after each workflow; check for missed changes every 15 seconds while visible. Preserve browsing positions. Turn off for manual refresh only.",
   settingsPrefFolderTree: "Use folder tree by default",
   settingsPrefFolderTreeHint: "When off, output folders default to a flat list, useful for shallow folder sets.",
   tourWelcomeTitle: "Welcome to Universal Gallery",

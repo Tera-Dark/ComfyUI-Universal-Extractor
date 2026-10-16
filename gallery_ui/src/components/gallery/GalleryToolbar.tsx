@@ -291,7 +291,7 @@ export const GalleryToolbar = ({
             </div>
           ) : null}
 
-          {onImageSearch ? <button type="button" className="ue-filter-trigger" onClick={onImageSearch} title={t("imageSearchPaste")}><FolderSearch size={15} /><span>{t("imageSearchTitle")}</span></button> : null}
+          {onImageSearch ? <button type="button" className="ue-filter-trigger" onClick={(event) => { event.stopPropagation(); onImageSearch(); }} title={t("imageSearchPaste")}><FolderSearch size={15} /><span>{t("imageSearchTitle")}</span></button> : null}
           <div className="ue-filter-controls ue-filter-controls--gallery">
             <div className="ue-toolbar-group ue-toolbar-group--browse">
               <div className="ue-filter-popover">

@@ -1,4 +1,8 @@
 const zhCN = {
+  libraryWorkspaceIntro: "管理词库条目与提示词，支持 JSON 导入和编辑。",
+  imageSearchClose: "关闭以图搜图",
+  operationBatchResult: "成功 {updated} · 跳过 {count} · 未完成 {missing}",
+  operationRetryBatchConfirm: "仅重试未完成的 {count} 项，修改内容：{target}",
   galleryMode: "图库模式",
   galleryModeBrowse: "浏览",
   galleryFolderPath: "目录路径",
@@ -877,7 +881,7 @@ const zhCN = {
   settingsPrefImagePrefetch: "预加载附近图片",
   settingsPrefImagePrefetchHint: "滚动图库时提前加载附近缩略图，关闭后可减少后台网络和磁盘读取。",
   settingsPrefLiveRefresh: "图库自动同步最新输出",
-  settingsPrefLiveRefreshHint: "进入图库时自动重扫一次；页面可见时静默检查 ComfyUI 新输出，减少手动刷新。",
+  settingsPrefLiveRefreshHint: "工作流完成后自动同步；可见时每 15 秒检查遗漏。整理时保持位置，关闭后仅手动刷新。",
   settingsPrefFolderTree: "目录默认树形视图",
   settingsPrefFolderTreeHint: "关闭后输出目录默认使用平铺列表，更适合目录层级很浅的图库。",
   tourWelcomeTitle: "欢迎使用 Universal Gallery",

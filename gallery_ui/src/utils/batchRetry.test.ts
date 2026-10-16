@@ -10,7 +10,7 @@ describe("partial operation retry", () => {
     const run = async <T,>(operation: () => Promise<T>, options: RunOperationOptions<T>) => {
       const value = await operation(); runs.push(options as RunOperationOptions<{ failed: string[] }>); options.successRetry?.(value)?.(); return value;
     };
-    confirmedBatchRetry({ paths: ["a", "b", "a"], confirm, confirmation: (count) => ({ title: "Retry", message: `${count} files` }), execute,
+    confirmedBatchRetry<{ failed: string[] }>({ paths: ["a", "b", "a"], confirm, confirmation: (count) => ({ title: "Retry", message: `${count} files` }), execute,
       failed: (_paths, result) => result.failed, summary: () => "Done", run, pending: "Retrying" })!();
     await vi.waitFor(() => expect(execute).toHaveBeenCalledTimes(2));
     expect(execute.mock.calls.map(([paths]) => paths)).toEqual([["a", "b"], ["b"]]);

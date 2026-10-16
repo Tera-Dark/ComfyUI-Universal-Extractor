@@ -98,3 +98,11 @@
 .ue-app-shell .ue-dual-card-resolution { background:#f1f1f1; color:#666; }
 .ue-app-shell .ue-dual-card-meta { color:#777; }
 .ue-app-shell .ue-dual-card.is-selected { border-color:#555; box-shadow:0 0 0 1px #555; }
+
+.ue-library-empty-actions { display: flex; gap: 10px; align-items: end; flex-wrap: wrap; margin-top: 18px; }
+.ue-library-empty-actions label { display: grid; gap: 6px; text-align: left; font-size: 13px; }
+.ue-library-empty-actions select { max-width: min(340px, 80vw); padding: 8px 12px; border: 1px solid var(--ue-line); border-radius: 8px; background: var(--ue-canvas); }
+.ue-library-actions.is-empty button:disabled, .ue-library-actions.is-empty .ue-view-toggle { display: none; }
+.ue-library-actions .ue-icon-action:has(span) { width: auto; gap: 6px; padding: 0 9px; }
+.ue-library-actions .ue-icon-action span { font-size: 13px; }
+@media (min-width: 601px) and (max-width: 1320px) { .ue-app-shell .ue-tool-grid--wide { grid-template-columns: repeat(2, minmax(0, 1fr)); } .ue-app-shell .ue-tool-grid--wide > label:first-child:last-child, .ue-app-shell .ue-tool-grid--recipe > label:first-child { grid-column: 1 / -1; } }

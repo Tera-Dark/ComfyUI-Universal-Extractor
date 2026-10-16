@@ -383,6 +383,7 @@ export const DualFolderWorkspace = ({
   const pages = useRef({left:1,right:1});
   const messageTimer = useRef<number | undefined>(undefined);
   useEffect(()=>()=>{requestIds.current.left++;requestIds.current.right++;window.clearTimeout(messageTimer.current);},[]);
+  const [syncPending, setSyncPending] = useState(false);
   const [contextMenu, setContextMenu] = useState<ImageContextMenuState | null>(null);
   const [boardPickerPaths, setBoardPickerPaths] = useState<string[]>([]);
   const [metadataViewerImage, setMetadataViewerImage] = useState<ImageRecord | null>(null);
@@ -490,6 +491,12 @@ export const DualFolderWorkspace = ({
       loadPane("right", rightFolder, forceRefresh),
     ]);
   }, [leftFolder, loadPane, rightFolder]);
+
+  useEffect(() => {
+    const dirty = () => setSyncPending(true);
+    window.addEventListener("universal-gallery:index-synced", dirty);
+    return () => window.removeEventListener("universal-gallery:index-synced", dirty);
+  }, []);
 
   useEffect(() => {
     const update = () => { void reloadBothPanes(false); };
@@ -1176,6 +1183,7 @@ export const DualFolderWorkspace = ({
 
   return (
     <div className="ue-dual-workspace">
+      {syncPending && <button className="ue-live-refresh-pill ue-dual-sync-pending" onClick={() => { void reloadBothPanes(false).then(() => setSyncPending(false)); }}>{t("galleryLiveRefreshPending")}</button>}
       <div className="ue-dual-intro">
         <div>
           <ArrowRightLeft size={18} />

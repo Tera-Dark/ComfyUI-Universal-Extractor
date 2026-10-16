@@ -286,11 +286,7 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
         <a href="#ue-preferences">{t("settingsPreferencesTitle")}</a><a href="#ue-sources">{t("settingsSourcesTitle")}</a><a href="#ue-diagnostics">{t("settingsDiagnostics")}</a>
       </nav>
       <div className="ue-settings-preferences" id="ue-preferences">
-        <label className="ue-density-setting"><span>{t("settingsDensity")}</span>
-          <select value={preferences.interfaceDensity || "standard"} onChange={(event) => onPreferencesChange({ interfaceDensity: event.target.value === "compact" ? "compact" : "standard" })}>
-            <option value="standard">{t("densityStandard")}</option><option value="compact">{t("densityCompact")}</option>
-          </select><small>{t("settingsDensityHint")}</small>
-        </label>
+
         <div className="ue-settings-panel-heading">
           <div>
             <h2>{t("settingsPreferencesTitle")}</h2>
@@ -299,6 +295,11 @@ export const SettingsWorkspace = ({ sources, preferences, onPreferencesChange, o
           <Settings size={18} />
         </div>
 
+        <label className="ue-density-setting"><span>{t("settingsDensity")}</span>
+          <select value={preferences.interfaceDensity || "standard"} onChange={(event) => onPreferencesChange({ interfaceDensity: event.target.value === "compact" ? "compact" : "standard" })}>
+            <option value="standard">{t("densityStandard")}</option><option value="compact">{t("densityCompact")}</option>
+          </select><small>{t("settingsDensityHint")}</small>
+        </label>
         <div className="ue-settings-onboarding-card" data-tour-id="settings-onboarding">
           <span className="ue-settings-onboarding-icon">
             <CircleHelp size={18} />

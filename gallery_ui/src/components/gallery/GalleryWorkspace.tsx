@@ -245,6 +245,7 @@ export const GalleryWorkspace = ({
   const [imageSearchFile, setImageSearchFile] = useState<File | null>(null);
   const [searchLocated, setSearchLocated] = useState(false);
   const [locateTarget, setLocateTarget] = useState<{ path: string; index: number } | null>(null);
+  const [returnScroll, setReturnScroll] = useState<{ folder: string; page: number; query: string; top: number } | null>(null);
   const returnFromLocate = useRef<(() => void) | null>(null);
   const locateController = useRef<AbortController | null>(null);
   const closeImageSearch = useCallback(() => {
@@ -476,9 +477,20 @@ export const GalleryWorkspace = ({
     if (!locateTarget || isLoading || !images.some((image) => image.relative_path === locateTarget.path)) return;
     scrollToLocatedIndex(locateTarget.index, { align: "center" });
     const frame = window.requestAnimationFrame(() => cardRefs.current[locateTarget.path]?.scrollIntoView?.({ block: "center" }));
-    const timer = window.setTimeout(() => setLocateTarget(null), 5000);
-    return () => { window.cancelAnimationFrame(frame); window.clearTimeout(timer); };
+    return () => window.cancelAnimationFrame(frame);
   }, [locateTarget, isLoading, images, scrollToLocatedIndex]);
+  useEffect(() => {
+    if (!locateTarget) return;
+    const timer = window.setTimeout(() => setLocateTarget(null), 5000);
+    return () => window.clearTimeout(timer);
+  }, [locateTarget]);
+  useEffect(() => {
+    if (!returnScroll || isLoading || selectedSubfolder !== returnScroll.folder || page !== returnScroll.page || (searchValue || "") !== returnScroll.query) return;
+    const frame = window.requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>(".ue-main-shell")?.scrollTo({ top: returnScroll.top }); setReturnScroll(null);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [returnScroll, isLoading, selectedSubfolder, page, searchValue, images]);
   const effectiveColumns = masonryLayout.columnCount;
 
   const getEstimatedGridCardRect = useCallback((relativePath: string): RectLike | null => {
@@ -1290,7 +1302,8 @@ export const GalleryWorkspace = ({
         onPointerUp={handleSelectionPointerEnd}
         onPointerCancel={handleSelectionPointerEnd}
       >
-        {searchLocated && <button className="ue-secondary-action ue-search-return" onClick={() => {
+        {searchLocated && <button className="ue-secondary-action ue-search-return" onClick={(event) => {
+          event.stopPropagation();
           returnFromLocate.current?.(); returnFromLocate.current = null; setSearchLocated(false); setLocateTarget(null);
         }}>{t("imageSearchReturn")}</button>}
         <GalleryToolbar
@@ -1810,7 +1823,8 @@ export const GalleryWorkspace = ({
                 onOpenImportFolder?.(selectedSubfolder); onPageChange(page);
                 onCategoryChange(selectedCategory); onBoardChange(selectedBoardId); onFavoritesOnlyChange(favoritesOnly);
                 onDateFromChange(dateFrom); onDateToChange(dateTo); onColorFamilyChange(selectedColorFamily); onSearchChange?.(searchValue || "");
-                window.setTimeout(() => document.querySelector<HTMLElement>(".ue-main-shell")?.scrollTo({ top: previousScroll }), 150);
+                onSortByChange(sortBy); onSortOrderChange(sortOrder); setDualFolderMode(dualFolderMode); setVariantMode(variantMode);
+                setReturnScroll({ folder: selectedSubfolder, page, query: searchValue || "", top: previousScroll });
               };
               setDualFolderMode(false); setVariantMode(false); clearSelection();
               onCategoryChange(""); onBoardChange(""); onFavoritesOnlyChange(false);

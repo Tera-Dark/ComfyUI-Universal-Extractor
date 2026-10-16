@@ -125,7 +125,7 @@ export const ImageSearchModal = ({ initialFile, onClose, onOpenDetail, onLocate,
       <section ref={dialog} tabIndex={-1} className="ue-image-search" role="dialog" aria-modal={!suspended || undefined} aria-labelledby="image-search-title"
         onClick={(event) => event.stopPropagation()}>
         <header><div><h2 id="image-search-title"><FolderSearch size={20} />{t("imageSearchTitle")}</h2><p>{t("imageSearchIntro")}</p></div>
-          <button type="button" className="ue-icon-action" aria-label={t("modalClose")} onClick={onClose}><X size={18} /></button></header>
+          <button type="button" className="ue-icon-action" aria-label={t("imageSearchClose")} onClick={onClose}><X size={18} /></button></header>
         <div className="ue-image-search-body">
           <aside>
             <button type="button" className="ue-image-search-drop" onClick={() => input.current?.click()}>

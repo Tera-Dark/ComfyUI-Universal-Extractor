@@ -64,6 +64,18 @@ const OverflowHarness = () => {
 };
 
 describe("OperationStatusProvider", () => {
+  it("caps ten concurrent tasks at three floating cards and keeps dismissed tasks in the center", async () => {
+    const Harness = () => {
+      const { syncTask } = useOperationStatus();
+      return <button onClick={() => { for (let index = 0; index < 10; index++) syncTask(`job-${index}`, `Task ${index}`, "pending", "1 / 10"); }}>Start ten</button>;
+    };
+    const { container } = renderWithStatus(<Harness />);
+    await userEvent.click(screen.getByRole("button", { name: "Start ten" }));
+    expect(container.querySelectorAll(".ue-operation-card")).toHaveLength(3);
+    await userEvent.click(screen.getAllByRole("button", { name: "关闭提醒" })[0]);
+    await userEvent.click(screen.getByRole("button", { name: /任务中心/ }));
+    expect(container.querySelectorAll(".ue-task-history .ue-operation-card")).toHaveLength(10);
+  });
   afterEach(() => {
     vi.useRealTimers();
   });

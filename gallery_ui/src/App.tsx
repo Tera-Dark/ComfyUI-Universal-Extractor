@@ -107,6 +107,7 @@ function App() {
   const [onboardingOpen, setOnboardingOpen] = useState(() => !isOnboardingTourCompleted());
 
   const gallery = useGalleryData({
+    interactionBlocked: gallerySelectionModeActive || galleryDragging,
     isActive: activeTab === "gallery",
     liveRefreshEnabled: uiPreferences.enableLiveGalleryRefresh,
     thumbnailPrewarmEnabled: uiPreferences.enableImagePrefetch,
@@ -989,6 +990,8 @@ function App() {
           ) : activeTab === "library" ? (
             <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
               <LibraryWorkspace
+                onSelectLibrary={(name) => void handleLibrarySelect(name)}
+                onCreateLibrary={() => void handleCreateLibrary()}
                 libraries={library.libraries}
                 activeLibraryName={library.activeLibraryName}
                 entries={library.entries}
