@@ -66,7 +66,10 @@ export const useGalleryJobs = (enabled: boolean) => {
           const label = t(job.kind === "refresh_index" ? "jobRefresh" : "jobFingerprints");
           const tone = active(job) ? "pending" : job.state === "failed" ? "error" : job.state === "succeeded" ? "success" : "info";
           syncTask(job.id, `${label} · ${t(active(job) ? "jobRunning" : job.state === "failed" ? "jobFailed" : job.state === "cancelled" ? "jobCancelled" : "jobCompleted")}`,
-            tone, job.error || `${job.completed} / ${job.total}`, job.state === "failed" ? () => { void retry(job); } : undefined);
+            tone, job.error || `${job.completed} / ${job.total}`, job.state === "failed" ? () => { void retry(job); } : undefined,
+            { source: "gallery", phase: job.state, completed: job.completed, total: job.total, jobId: job.id,
+              quiet: job.kind === "refresh_index",
+              cancel: active(job) && job.state !== "cancelling" ? () => { void galleryApi.cancelJob(job.id).then(() => poll()).catch((error) => notify(error instanceof Error ? error.message : t("jobFailed"), "error")); } : undefined });
         }
         pending = response.jobs.some(active) || hasObservedActive();
       } catch {

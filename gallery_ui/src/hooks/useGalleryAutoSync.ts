@@ -92,7 +92,7 @@ export const useGalleryAutoSync = (options: AutoSyncOptions) => {
         if (signal.aborted) return;
         const retryable = error instanceof TypeError || error instanceof ApiRequestError && [502, 503, 504].includes(error.status);
         if (retryable && retryCount < 2) schedule([2000, 10000][retryCount++]);
-        else callbacks.current.onError(error, () => { retryCount = 0; dirty.current++; schedule(0); });
+        else callbacks.current.onError(error, () => { retryCount = 0; dirty.current++; window.dispatchEvent(new Event("universal-gallery:outputs-dirty")); });
       } finally {
         running = false;
         if (!signal.aborted && dirty.current !== generation) schedule(1000);

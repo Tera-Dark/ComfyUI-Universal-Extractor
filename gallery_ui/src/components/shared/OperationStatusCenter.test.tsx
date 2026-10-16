@@ -125,14 +125,17 @@ describe("OperationStatusProvider", () => {
 
     expect(screen.getByText("Still working")).toBeInTheDocument();
     expect(screen.queryByText("Done 1")).toBeNull();
-    expect(screen.getAllByRole("status")).toHaveLength(5);
+    expect(screen.getAllByRole("status")).toHaveLength(2);
+    await userEvent.click(screen.getByRole("button", { name: /任务中心/ }));
+    await userEvent.click(screen.getByRole("button", { name: "最近完成" }));
+    expect(screen.getByText("Done 1")).toBeInTheDocument();
   });
 
   it("does not evict an error when later success notifications exceed the cap", () => {
     renderWithStatus(<ErrorOverflowHarness />);
     fireEvent.click(screen.getByRole("button", { name: "Fill after error" }));
     expect(screen.getByRole("alert")).toHaveTextContent("Delete failed");
-    expect(screen.getAllByRole("status")).toHaveLength(4);
+    expect(screen.getAllByRole("status")).toHaveLength(2);
   });
 
   it("clears dismiss timers on unmount", async () => {
