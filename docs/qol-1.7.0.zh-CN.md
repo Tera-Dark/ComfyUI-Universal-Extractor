@@ -1,6 +1,6 @@
-# 1.7.0 本地候选版：使用与验证说明
+# 1.7.0：使用与验证说明
 
-本版保留 React/Vite、aiohttp、SQLite、JSON 用户状态、资源身份和文件事务。没有引入搜索模型、媒体类型或数据库。候选版在本地验证；没有自动推送、创建 Release 或发布 Registry，`v1.6.0` 标签不变。
+本版保留 React/Vite、aiohttp、SQLite、JSON 用户状态、资源身份和文件事务。没有引入搜索模型、媒体类型或数据库。发布前已完成本地隔离验证；GitHub Release 与 Registry 提交使用同一版本，Registry 审核及可用状态独立确认。`v1.6.0` 标签保持不变。
 
 ## 使用变化
 

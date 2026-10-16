@@ -28,7 +28,7 @@
         "items": [
           "停止 ComfyUI 后完整替换插件和 dist，重启并刷新 ComfyUI 页面以加载完成事件桥接。",
           "用户 JSON、图源、资源身份和文件事务保持兼容；关闭自动同步的偏好继续生效。",
-          "候选版不会自动推送或发布；GitHub 版本信息不代表 Registry 已审核。"
+          "GitHub Release 与 Registry 审核独立；以 Registry 的实际版本状态确认是否可通过 Manager 更新。"
         ]
       }
     ],
@@ -58,7 +58,7 @@
         "items": [
           "Stop ComfyUI, replace the complete plugin and dist, then restart and refresh ComfyUI to load the execution bridge.",
           "User JSON, sources, resource identity and file transactions remain compatible. Disabled auto-sync stays disabled.",
-          "This candidate is not pushed or published automatically. GitHub availability does not imply Registry approval."
+          "GitHub releases and Registry review are independent. Check the Registry version status for Manager update availability."
         ]
       }
     ]
