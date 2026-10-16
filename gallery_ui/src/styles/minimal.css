@@ -69,8 +69,8 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
 .ue-filter-active-chip { background: #f6f6f6; border-color: #e7e7e7; border-radius: 8px; }
 .ue-primary-action, .ue-primary-btn { background: #212121; border-radius: 20px; box-shadow: none; }
 .ue-secondary-action, .ue-secondary-btn { border-radius: 10px; box-shadow: none; }
-.ue-gallery-card { border-radius: 12px; box-shadow: none; }
-.ue-gallery-card:hover { box-shadow: 0 2px 12px #0000000a; }
+.ue-gallery-card { border-radius: 12px; box-shadow: none; border-color: transparent; background: transparent; padding: 0; }
+.ue-gallery-card:hover { border-color: transparent; box-shadow: none; }
 .ue-disclosure-menu { position: relative; flex-shrink: 0; }
 .ue-disclosure-menu > summary { list-style: none; cursor: pointer; display: flex; align-items: center; justify-content: center; gap: 9px; height: 36px; min-width: 36px; padding: 0 10px; border-radius: 10px; user-select: none; color: #414141; }
 .ue-disclosure-menu > summary::-webkit-details-marker { display: none; }
@@ -139,9 +139,7 @@ button:focus-visible, summary:focus-visible, a:focus-visible, select:focus-visib
 .ue-tree-item.active::before, .ue-tree-row.active .ue-tree-label::before, .ue-library-list-item.active::before, .ue-board-list-item.active::before { display: none; }
 .ue-tree-item.is-pinned, .ue-tree-label.is-pinned { color: #343434; }
 .ue-sidebar-folder-toolbar { padding-left: 4px; gap: 5px; }
-.ue-gallery-card { border-color: transparent; background: transparent; padding: 0; }
-.ue-gallery-card:hover { border-color: transparent; box-shadow: none; }
-.ue-sidebar-group-header--folders .ue-sidebar-group-icon { display: none; }
+ .ue-sidebar-group-header--folders .ue-sidebar-group-icon { display: none; }
 .ue-sidebar-group-title { gap: 5px; }
 .ue-sidebar-group-chevron { width: 16px; }
 .ue-sidebar-quick .ue-tree-item:not(.active) { background: transparent; }

@@ -2,6 +2,7 @@ import { useLayoutEffect, useMemo, useRef } from "react";
 import { useVirtualizer } from "@tanstack/react-virtual";
 
 import type { ImageRecord } from "../../types/universal-gallery";
+import { galleryDensityMetrics, type InterfaceDensity } from "./galleryDensity";
 
 // Six columns fit a normal 1440px window after sidebar and gallery padding.
 // The metadata row is now single-line, so 160px cards do not grow while scrolling.
@@ -14,7 +15,6 @@ const DEFAULT_CARD_RATIO = 1.36;
 // ~43px for the caption on a single line. Wrapped metadata is RO-measured.
 const CARD_BORDER_WIDTH = 2;
 const MIN_MEDIA_HEIGHT = 100;
-const CARD_CHROME_HEIGHT = 43;
 
 // The media box and the virtualizer must agree on the size of images without
 // dimensions. Otherwise a lazy thumbnail expands the card when it finally loads
@@ -45,11 +45,11 @@ export const getEffectiveMasonryColumns = (requestedColumns: number, availableWi
 export const getMasonryColumnWidth = (availableWidth: number, columnCount: number, gap: number) =>
   Math.max(MIN_COLUMN_WIDTH, (availableWidth - gap * (columnCount - 1)) / columnCount);
 
-export const estimateMasonryCardHeight = (columnWidth: number, image?: ImageRecord) => {
+export const estimateMasonryCardHeight = (columnWidth: number, image?: ImageRecord, density: InterfaceDensity = "standard") => {
   const ratio = getMasonryImageHeightRatio(image);
   // CSS gives very wide images a 100px media minimum. Use the same aspect
   // ratio as the rendered card, including the fallback for missing metadata.
-  return Math.round(Math.max(MIN_MEDIA_HEIGHT, (columnWidth - CARD_BORDER_WIDTH) * ratio) + CARD_CHROME_HEIGHT);
+  return Math.round(Math.max(MIN_MEDIA_HEIGHT, (columnWidth - CARD_BORDER_WIDTH) * ratio) + galleryDensityMetrics(density).chrome);
 };
 
 export const mapVirtualMasonryItems = ({
@@ -87,13 +87,14 @@ export const useVirtualMasonry = ({
   viewportWidth,
   scrollElement,
   gap,
-}: {
+  density = "standard",}: {
   images: ImageRecord[];
   requestedColumns: number;
   gridWidth: number;
   viewportWidth: number;
   scrollElement: HTMLElement | null;
   gap: number;
+  density?: InterfaceDensity;
 }) => {
   const availableWidth = gridWidth > 0 ? gridWidth : Math.max(320, viewportWidth - 32);
   const columnCount = useMemo(
@@ -110,7 +111,7 @@ export const useVirtualMasonry = ({
     count: images.length,
     getScrollElement: () => scrollElement,
     getItemKey: (index) => images[index]?.relative_path ?? index,
-    estimateSize: (index) => estimateMasonryCardHeight(columnWidth, images[index]),
+    estimateSize: (index) => estimateMasonryCardHeight(columnWidth, images[index], density),
     gap,
     lanes: columnCount,
     overscan: Math.max(columnCount * 3, 8),
@@ -119,15 +120,20 @@ export const useVirtualMasonry = ({
   });
 
   const measuredColumnWidth = useRef(columnWidth);
+  const measuredDensity = useRef(density);
   useLayoutEffect(() => {
-    if (Math.abs(measuredColumnWidth.current - columnWidth) > 0.5) {
+    if (Math.abs(measuredColumnWidth.current - columnWidth) > 0.5 || measuredDensity.current !== density) {
       // Cached card heights (and their cached lanes) belong to the old width.
       // Mounted cards get ResizeObserver updates, but offscreen cards do not;
       // without invalidation they move as the user scrolls back toward the end.
       measuredColumnWidth.current = columnWidth;
+      const densityChanged = measuredDensity.current !== density;
+      measuredDensity.current = density;
+      const anchor = densityChanged ? virtualizer.getVirtualItems().find((item) => item.end >= (virtualizer.scrollOffset ?? 0)) : undefined;
       virtualizer.measure();
+      if (anchor) virtualizer.scrollToIndex(anchor.index, { align: "start" });
     }
-  }, [columnWidth, virtualizer]);
+  }, [columnWidth, density, virtualizer]);
 
   const virtualItems = virtualizer.getVirtualItems();
   const items = useMemo<VirtualMasonryItem[]>(
@@ -147,5 +153,6 @@ export const useVirtualMasonry = ({
     items,
     totalHeight: virtualizer.getTotalSize(),
     measureElement: virtualizer.measureElement,
+    scrollToIndex: virtualizer.scrollToIndex,
   };
 };

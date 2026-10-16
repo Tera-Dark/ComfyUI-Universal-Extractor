@@ -69,11 +69,11 @@ describe("useVirtualMasonry", () => {
     expect(getMasonryImageHeightRatio({ ...image, width: 0, height: 700 })).toBe(1.36);
     expect(getMasonryImageHeightRatio({ ...image, width: Number.POSITIVE_INFINITY, height: 500 })).toBe(1.36);
     expect(getMasonryImageHeightRatio({ ...image, width: Number.MIN_VALUE, height: Number.MAX_VALUE })).toBe(1.36);
-    expect(estimateMasonryCardHeight(220, image)).toBe(Math.round(218 * 1.36 + 43));
+    expect(estimateMasonryCardHeight(220, image)).toBe(Math.round(218 * 1.36 + 50));
     // Very wide media must respect the 100px CSS minimum; very tall media
     // must retain its actual height rather than an unrelated 2.2x estimate.
-    expect(estimateMasonryCardHeight(220, { ...image, width: 1100, height: 340 })).toBe(143);
-    expect(estimateMasonryCardHeight(220, { ...image, width: 200, height: 600 })).toBe(697);
+    expect(estimateMasonryCardHeight(220, { ...image, width: 1100, height: 340 })).toBe(150);
+    expect(estimateMasonryCardHeight(220, { ...image, width: 200, height: 600 })).toBe(704);
   });
 
   it("discards cached measurements when the column width changes without changing lane count", () => {

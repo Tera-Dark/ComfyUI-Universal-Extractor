@@ -1,6 +1,7 @@
 export type WorkspaceTab = "gallery" | "library" | "workbench" | "settings";
 
 export interface UiPreferences {
+  interfaceDensity?: "standard" | "compact";
   defaultSelectionMode: boolean;
   collapseSidebarOnLaunch: boolean;
   enableImagePrefetch: boolean;

@@ -4,7 +4,7 @@
 
 .ue-gallery-grid {
   display: grid;
-  gap: 14px;
+  gap: var(--ue-gallery-gap);
   align-items: start;
 }
 
@@ -53,7 +53,7 @@
     "check thumb main"
     "check thumb actions";
   align-items: center;
-  column-gap: 14px;
+  column-gap: var(--ue-gallery-gap);
   row-gap: 8px;
   min-width: 0;
   min-height: 118px;
@@ -462,7 +462,9 @@
 .ue-gallery-body {
   display: flex;
   width: 100%;
-  padding: 7px 3px 2px;
+  height: var(--ue-card-body-height);
+  padding: var(--ue-card-body-padding) 4px;
+  gap: 2px;
   flex-direction: column;
   align-items: flex-start;
   gap: 3px;
@@ -477,9 +479,9 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
-  line-height: 1.35;
+  line-height: 18px;
   color: var(--ue-ink);
   letter-spacing: -0.01em;
 }
@@ -499,8 +501,8 @@
   overflow: hidden;
   white-space: nowrap;
   color: var(--ue-ink-muted);
-  font-size: 11px;
-  line-height: 1.2;
+  font-size: 12px;
+  line-height: 16px;
 }
 
 .ue-gallery-meta i {
@@ -717,7 +719,7 @@
 .ue-dual-workspace {
   display: flex;
   flex-direction: column;
-  gap: 14px;
+  gap: var(--ue-gallery-gap);
   min-height: 0;
 }
 
@@ -1417,3 +1419,12 @@
     height: 72px;
   }
 }
+
+.ue-gallery-card.is-located, .ue-gallery-list-row.is-located { outline: 3px solid #2563eb; outline-offset: 3px; }
+.ue-gallery-card .ue-gallery-actions button:not(.active) { opacity: 0; pointer-events: none; }
+.ue-gallery-card:hover .ue-gallery-actions button, .ue-gallery-card:focus-within .ue-gallery-actions button,
+.ue-gallery-card .ue-gallery-actions.is-selecting .ue-select-btn { opacity: 1; pointer-events: auto; }
+.ue-search-return { margin-bottom: 10px; }
+@media (hover: none) { .ue-gallery-card .ue-gallery-actions button:not(.active) { opacity: 1; pointer-events: auto; } }
+.ue-gallery-breadcrumbs { display: flex; flex-wrap: wrap; gap: 5px; align-items: center; font-size: 12px; color: var(--ue-ink-muted); }
+.ue-gallery-breadcrumbs button { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: transparent; border: 0; padding: 0; color: inherit; cursor: pointer; font: inherit; }
