@@ -17,7 +17,7 @@
   will-change:auto;
 }
 .ue-app-shell .ue-gallery-card:hover .ue-gallery-media img { transform:none; filter:none; }
-.ue-app-shell .ue-gallery-image-shell img { transition:opacity 120ms linear; }
+.ue-app-shell .ue-gallery-image-shell img { transition:none; }
 .ue-disclosure-panel, .ue-density-panel, .ue-filter-menu, .ue-sidebar-action-menu, .ue-gallery-context-menu { animation:ue-fade-in 100ms ease-out; }
 .ue-primary-action:hover:not(:disabled), .ue-secondary-action:hover:not(:disabled), .ue-primary-btn:hover:not(:disabled), .ue-icon-action:hover:not(:disabled), .ue-dual-transfer-btn:hover:not(:disabled) { transform:none; }
 /* The image viewer is a neutral stage, not a blurred, moving copy of the image. */

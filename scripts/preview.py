@@ -21,9 +21,12 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--host", default="127.0.0.1")
 parser.add_argument("--port", type=int, default=8189)
 parser.add_argument("--trash-items", type=int, default=0, help="Seed up to 500 disposable trash fixtures for bulk-action QA")
+parser.add_argument("--image-count", type=int, default=18, help="Number of procedural images for scrolling QA (1–500)")
 args = parser.parse_args()
 if not 0 <= args.trash_items <= 500:
     parser.error("--trash-items must be between 0 and 500")
+if not 1 <= args.image_count <= 500:
+    parser.error("--image-count must be between 1 and 500")
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
 temporary = tempfile.TemporaryDirectory(prefix="universal-preview-")
@@ -50,7 +53,7 @@ palettes = [
 folders = ["01 · Landscapes", "02 · Color studies", "03 · Architecture"]
 for folder in folders:
     (base / "output" / folder).mkdir()
-for index in range(18):
+for index in range(args.image_count):
     width, height = [(600, 760), (600, 600), (600, 460)][index % 3]
     colors = palettes[index % len(palettes)]
     image = Image.new("RGB", (width, height), colors[0])

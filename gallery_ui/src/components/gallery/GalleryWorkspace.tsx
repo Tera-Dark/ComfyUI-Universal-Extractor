@@ -54,7 +54,7 @@ import { prefetchGalleryImage } from "./galleryImagePrefetch";
 import { dedupeVisibleSelection, getIntersectingSelectionKeys, type RectLike, type SelectionBoxState } from "./gallerySelectionModel";
 import { getActiveFilterControlCount, getStoredViewMode, type ContentViewMode } from "./galleryWorkspaceModel";
 import { TrashWorkspaceView } from "./TrashWorkspaceView";
-import { estimateMasonryCardHeight, useVirtualMasonry } from "./useVirtualMasonry";
+import { useVirtualMasonry } from "./useVirtualMasonry";
 import { FloatingLayerPortal, isEditableTarget, placeMenuForEvent, useDismissableLayer } from "../../utils/interaction";
 // Keep the first Gallery screen immediate; organizer, variants, sharing and
 // metadata are downloaded only when someone opens those optional surfaces.
@@ -277,6 +277,7 @@ export const GalleryWorkspace = ({
   const [variantPage, setVariantPage] = useState(1);
   const [showBackToTop, setShowBackToTop] = useState(false);
   const [gridWidth, setGridWidth] = useState(0);
+  const [gridScrollMargin, setGridScrollMargin] = useState(0);
   const [selectionFrozenGridWidth, setSelectionFrozenGridWidth] = useState(0);
   const [scrollElement, setScrollElement] = useState<HTMLElement | null>(null);
   const dragDepthRef = useRef(0);
@@ -428,7 +429,7 @@ export const GalleryWorkspace = ({
     }
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const scrollContainer = gridRef.current?.closest(".ue-main-shell") as HTMLElement | null;
     scrollContainerRef.current = scrollContainer;
     setScrollElement(scrollContainer);
@@ -451,18 +452,18 @@ export const GalleryWorkspace = ({
       setGridWidth(0);
       return;
     }
-    if (typeof ResizeObserver === "undefined") {
-      setGridWidth(gridElement?.clientWidth ?? 0);
-      return;
-    }
-
     const updateMetrics = () => {
       const gridRect = gridElement.getBoundingClientRect();
-      setGridWidth(gridRect.width);
+      setGridWidth((previous) => Math.abs(previous - gridRect.width) > 0.5 ? gridRect.width : previous);
+      const viewport = gridElement.closest<HTMLElement>(".ue-main-shell");
+      const margin = viewport ? gridRect.top - viewport.getBoundingClientRect().top + viewport.scrollTop - viewport.clientTop : 0;
+      setGridScrollMargin((previous) => Math.abs(previous - margin) > 0.5 ? margin : previous);
     };
+    updateMetrics();
+    if (typeof ResizeObserver === "undefined") return;
     const observer = new ResizeObserver(updateMetrics);
     observer.observe(gridElement);
-    updateMetrics();
+    if (galleryWorkspaceRef.current) observer.observe(galleryWorkspaceRef.current);
     return () => observer.disconnect();
   }, [dualFolderMode, galleryViewMode, activeImages.length, isTrashView, trashItems.length]);
   const masonryLayout = useVirtualMasonry({
@@ -473,6 +474,7 @@ export const GalleryWorkspace = ({
     scrollElement,
     gap: masonryGap,
     density: interfaceDensity,
+    scrollMargin: gridScrollMargin,
   });
   const scrollToLocatedIndex = masonryLayout.scrollToIndex;
   useEffect(() => {
@@ -496,6 +498,7 @@ export const GalleryWorkspace = ({
     return () => window.cancelAnimationFrame(frame);
   }, [returnScroll, isLoading, selectedSubfolder, page, searchValue, images]);
   const effectiveColumns = masonryLayout.columnCount;
+  const getMasonryItemLayout = masonryLayout.getItemLayout;
 
   const getEstimatedGridCardRect = useCallback((relativePath: string): RectLike | null => {
     if (isTrashView || galleryViewMode !== "grid") {
@@ -506,22 +509,19 @@ export const GalleryWorkspace = ({
       return null;
     }
 
-    const columnCount = Math.max(1, masonryLayout.columnCount);
-    const lane = index % columnCount;
-    const row = Math.floor(index / columnCount);
-    const columnWidth = masonryLayout.columnWidth;
-    const cardHeight = estimateMasonryCardHeight(columnWidth, undefined, interfaceDensity);
+    const layout = getMasonryItemLayout(index);
+    if (!layout) return null;
     const gridRect = gridRef.current.getBoundingClientRect();
-    const left = gridRect.left + lane * (columnWidth + masonryGap);
-    const top = gridRect.top + row * (cardHeight + masonryGap);
+    const left = gridRect.left + layout.left;
+    const top = gridRect.top + layout.top;
 
     return {
       left,
-      right: left + columnWidth,
+      right: left + layout.width,
       top,
-      bottom: top + cardHeight,
+      bottom: top + layout.height,
     };
-  }, [galleryViewMode, imageIndexByPath, isTrashView, masonryLayout.columnCount, masonryLayout.columnWidth, masonryGap, interfaceDensity]);
+  }, [galleryViewMode, imageIndexByPath, isTrashView, getMasonryItemLayout]);
 
   useEffect(() => {
     if (!enableImagePrefetch || !activeImages.length || isTrashView || typeof IntersectionObserver === "undefined") {

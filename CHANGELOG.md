@@ -14,6 +14,7 @@
 - 修复以图搜图关闭后再次点击无法打开，以及定位后重开时仍隐藏的问题。
 - 批量清理垃圾箱只保留一条操作提示，整批结束后更新一次列表；失败保留未完成项。
 - 合并相同范围刷新任务，扫描冲突有限重试；终止失败后暂停自动重试，避免刷新失败循环。
+- 稳固瀑布流滚动坐标、固定卡片高度及浏览锚点，避免尺寸回填、缩略图加载和垃圾箱多列重排引起闪烁。
 
 ### 升级注意
 - 停止 ComfyUI 后完整替换插件和 dist，重启并刷新 ComfyUI 页面以加载完成事件桥接。
@@ -32,6 +33,7 @@
 - Fix reopening image search after closing it or locating a result.
 - Use one operation record and one list reload for bulk trash cleanup, retaining unfinished items on failure.
 - Coalesce refresh tasks and bound scan-conflict retries. Pause automatic retries after terminal failure.
+- Stabilize masonry scroll coordinates, card geometry and browse anchors; avoid flashing during dimension backfill, thumbnail loading and trash column layout.
 
 ### Upgrade notes
 - Stop ComfyUI, replace the complete plugin and dist, then restart and refresh ComfyUI to load the execution bridge.

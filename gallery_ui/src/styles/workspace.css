@@ -963,6 +963,12 @@
   aspect-ratio: 4 / 3;
 }
 
+/* Legacy trash records have no dimensions. Reserve a quiet preview frame;
+   intrinsic thumbnail sizes must not rebalance every CSS masonry column. */
+.ue-trash-list--grid .ue-trash-card-main img {
+  aspect-ratio: 1 / 1.36;
+}
+
 .ue-trash-list--grid .ue-trash-card-actions {
   grid-column: 1 / -1;
   justify-content: flex-start;

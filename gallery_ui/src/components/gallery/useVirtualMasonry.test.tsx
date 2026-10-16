@@ -29,6 +29,46 @@ const makeImage = (index: number): ImageRecord => ({
 });
 
 describe("useVirtualMasonry", () => {
+  it("accounts for toolbar offset without adding it to the card positions or grid height", () => {
+    const images = [makeImage(0), makeImage(1)];
+    expect(mapVirtualMasonryItems({ images, virtualItems: [{ index: 0, start: 240, lane: 0 }], columnWidth: 220, gap: 14, scrollMargin: 240 })[0].top).toBe(0);
+    const scrollElement = document.createElement("div");
+    const { result, rerender } = renderHook(({ margin }) => useVirtualMasonry({ images, requestedColumns: 1, gridWidth: 220, viewportWidth: 800, scrollElement, gap: 14, scrollMargin: margin }), { initialProps: { margin: 240 } });
+    const total = result.current.totalHeight;
+    expect(result.current.getItemLayout(0)?.top).toBe(0);
+    expect(result.current.getItemLayout(1)?.top).toBe(estimateMasonryCardHeight(220) + 14);
+    rerender({ margin: 320 });
+    expect(result.current.totalHeight).toBe(total);
+    expect(result.current.getItemLayout(0)?.top).toBe(0);
+  });
+
+  it("keeps geometry while dimensions backfill, including after new images are inserted", () => {
+    const scrollElement = document.createElement("div");
+    const first = makeImage(0);
+    const { result, rerender } = renderHook(({ images }) => useVirtualMasonry({ images, requestedColumns: 1, gridWidth: 220, viewportWidth: 800, scrollElement, gap: 14 }), { initialProps: { images: [first] } });
+    const height = result.current.totalHeight;
+    const enriched = { ...first, width: 600, height: 2000, notes: "updated annotation" };
+    rerender({ images: [enriched] });
+    expect(result.current.totalHeight).toBe(height);
+    rerender({ images: [makeImage(1), enriched] });
+    expect(result.current.getItemLayout(1)?.height).toBe(height);
+    rerender({ images: [{ ...enriched, content_revision: 2 }] });
+    expect(result.current.totalHeight).toBe(estimateMasonryCardHeight(220, enriched));
+  });
+
+  it("uses the same variable-height lane geometry for mounted and offscreen cards", () => {
+    const scrollElement = document.createElement("div");
+    const images = Array.from({ length: 48 }, (_, index) => ({ ...makeImage(index), width: 200, height: index % 2 ? 100 : 700 }));
+    const { result } = renderHook(() => useVirtualMasonry({ images, requestedColumns: 2, gridWidth: 500, viewportWidth: 800, scrollElement, gap: 14, scrollMargin: 180 }));
+    for (let index = 0; index < images.length; index++) {
+      const item = result.current.getItemLayout(index)!;
+      expect(item.height).toBe(estimateMasonryCardHeight(result.current.columnWidth, images[index]));
+      for (let before = 0; before < index; before++) {
+        const other = result.current.getItemLayout(before)!;
+        if (item.left === other.left) expect(item.top).toBeGreaterThanOrEqual(other.top + other.height + 14);
+      }
+    }
+  });
   it("clamps requested columns to the available width", () => {
     expect(getEffectiveMasonryColumns(8, 360, 14)).toBe(2);
     expect(getEffectiveMasonryColumns(2, 280, 14)).toBe(1);

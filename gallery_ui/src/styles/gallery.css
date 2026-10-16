@@ -13,6 +13,8 @@
   min-height: 220px;
   cursor: default;
   user-select: none;
+  /* TanStack owns scroll correction; browser anchoring must not correct again. */
+  overflow-anchor: none;
 }
 
 .ue-gallery-grid--virtual {
@@ -24,6 +26,11 @@
 
 .ue-gallery-grid--virtual .ue-gallery-card {
   position: absolute;
+}
+
+.ue-gallery-grid--virtual .ue-gallery-media > .ue-gallery-image-shell {
+  position: absolute;
+  inset: 0;
 }
 
 .ue-gallery-list {
@@ -303,10 +310,7 @@
   pointer-events: none;
   position: absolute;
   inset: 0;
-  background: linear-gradient(90deg, rgba(240, 240, 242, 0.8), rgba(255, 255, 255, 0.9), rgba(240, 240, 242, 0.8));
-  background-size: 200% 100%;
-  animation: ue-shimmer 1.2s ease-in-out infinite;
-  transition: opacity var(--ue-duration-fast) var(--ue-ease);
+  background: rgba(244, 244, 245, 0.85);
 }
 
 .ue-gallery-image-shell.is-loaded::before {
@@ -319,10 +323,9 @@
   width: 100%;
   height: 100%;
   cursor: zoom-in;
-  opacity: 0;
+  opacity: 1;
   object-fit: contain;
   transition:
-    opacity var(--ue-duration-base) var(--ue-ease),
     transform var(--ue-duration-slow) var(--ue-ease),
     filter var(--ue-duration-slow) var(--ue-ease);
 }

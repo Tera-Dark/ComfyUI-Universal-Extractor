@@ -19,7 +19,8 @@
           "修复示例更新日志为空、检查失败仍显示最新及任务提示重复的问题。",
           "修复以图搜图关闭后再次点击无法打开，以及定位后重开时仍隐藏的问题。",
           "批量清理垃圾箱只保留一条操作提示，整批结束后更新一次列表；失败保留未完成项。",
-          "合并相同范围刷新任务，扫描冲突有限重试；终止失败后暂停自动重试，避免刷新失败循环。"
+          "合并相同范围刷新任务，扫描冲突有限重试；终止失败后暂停自动重试，避免刷新失败循环。",
+          "稳固瀑布流滚动坐标、固定卡片高度及浏览锚点，避免尺寸回填、缩略图加载和垃圾箱多列重排引起闪烁。"
         ]
       },
       {
@@ -48,7 +49,8 @@
           "Fix missing preview notes, misleading offline update status and duplicate task messages.",
           "Fix reopening image search after closing it or locating a result.",
           "Use one operation record and one list reload for bulk trash cleanup, retaining unfinished items on failure.",
-          "Coalesce refresh tasks and bound scan-conflict retries. Pause automatic retries after terminal failure."
+          "Coalesce refresh tasks and bound scan-conflict retries. Pause automatic retries after terminal failure.",
+          "Stabilize masonry scroll coordinates, card geometry and browse anchors; avoid flashing during dimension backfill, thumbnail loading and trash column layout."
         ]
       },
       {

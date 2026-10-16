@@ -48,7 +48,11 @@ const MAX_IMAGE_PREFETCH_CONCURRENCY = 4;
 const MAX_IMAGE_PREFETCH_QUEUE = 80;
 let activeImagePrefetches = 0;
 
-export const getGalleryImageUrl = (image: ImageRecord) => image.thumb_url || image.url;
+export const getGalleryImageUrl = (image: ImageRecord) => {
+  const url = image.thumb_url || image.url;
+  if (!image.asset_id) return url;
+  return `${url}${url.includes("?") ? "&" : "?"}content_version=${encodeURIComponent(`${image.asset_id}:${image.content_revision ?? 1}`)}`;
+};
 
 export const isGalleryImageLoaded = (imageUrl: string) => loadedImageUrls.has(imageUrl);
 
@@ -75,11 +79,7 @@ const pumpImagePrefetchQueue = () => {
       window.clearTimeout(timeout);
       preloadImage.onload = null;
       preloadImage.onerror = null;
-      try {
-        preloadImage.src = "";
-      } catch {
-        // Safe fallback
-      }
+      if (!loaded) preloadImage.src = "";
       if (loaded) {
         loadedImageUrls.add(imageUrl);
       } else {
@@ -89,7 +89,12 @@ const pumpImagePrefetchQueue = () => {
       pumpImagePrefetchQueue();
     };
 
-    preloadImage.onload = () => finish(true);
+    preloadImage.onload = () => {
+      // A downloaded response is not necessarily a ready bitmap. Keep the
+      // source alive through decode instead of cancelling it on load.
+      if (typeof preloadImage.decode === "function") void preloadImage.decode().then(() => finish(true), () => finish(false));
+      else finish(true);
+    };
     preloadImage.onerror = () => finish(false);
     preloadImage.src = imageUrl;
   }

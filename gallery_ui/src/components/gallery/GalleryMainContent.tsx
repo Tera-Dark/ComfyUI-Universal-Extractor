@@ -270,7 +270,7 @@ export const GalleryMainContent = ({
             className="ue-gallery-grid ue-gallery-grid--virtual"
             style={{ height: `${masonryLayout.totalHeight}px` }}
           >
-            {masonryLayout.items.map(({ image, index, top, left, width, lane }) => {
+            {masonryLayout.items.map(({ image, index, top, left, width, lane, height, mediaRatio }) => {
               const selected = pageSelectedPaths.includes(image.relative_path);
 
                 const imgWidth = Number(image.width ?? 0);
@@ -279,7 +279,7 @@ export const GalleryMainContent = ({
                 // Reserve the media height before a lazy thumbnail decodes. In
                 // particular, files without width/height must not grow as the
                 // user scrolls toward the last masonry lane.
-                const mediaAspectStyle = { aspectRatio: `1 / ${getMasonryImageHeightRatio(image)}` };
+                const mediaAspectStyle = { aspectRatio: `1 / ${mediaRatio ?? getMasonryImageHeightRatio(image)}` };
 
                 return (
                   <article
@@ -288,7 +288,7 @@ export const GalleryMainContent = ({
                     data-tour-id={index === 0 ? "gallery-card" : undefined}
                     data-index={index}
                     data-lane={lane}
-                    style={{ top: `${top}px`, left: `${left}px`, width: `${width}px` }}
+                    style={{ top: `${top}px`, left: `${left}px`, width: `${width}px`, height: height === undefined ? undefined : `${height}px` }}
                     onContextMenu={(event) => onOpenContextMenu(event, image)}
                     ref={(element) => {
                       cardRefs.current[image.relative_path] = element;
