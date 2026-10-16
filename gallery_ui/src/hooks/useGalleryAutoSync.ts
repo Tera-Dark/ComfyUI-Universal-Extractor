@@ -20,6 +20,7 @@ export const useGalleryAutoSync = (options: AutoSyncOptions) => {
   const consumed = useRef(0);
   const seen = useRef(new Set<string>());
   const fingerprints = useRef(new Map<string, string>());
+  const blockedGenerations = useRef(new Map<string, number>());
   const callbacks = useRef(options);
   useEffect(() => { callbacks.current = options; });
 
@@ -48,7 +49,7 @@ export const useGalleryAutoSync = (options: AutoSyncOptions) => {
       timer = window.setTimeout(() => { void check(); }, ms);
     };
     const check = async () => {
-      if (signal.aborted || running || document.visibilityState === "hidden") return;
+      if (signal.aborted || running || document.visibilityState === "hidden" || blockedGenerations.current.get(options.scope) === dirty.current) return;
       running = true;
       const generation = dirty.current;
       const eventDirty = generation !== consumed.current;
@@ -66,18 +67,24 @@ export const useGalleryAutoSync = (options: AutoSyncOptions) => {
           consumed.current = generation;
         }
         fingerprints.current.set(options.scope, freshness.fingerprint);
+        blockedGenerations.current.delete(options.scope);
         retryCount = 0;
       } catch (error) {
         if (signal.aborted) return;
         const retryable = error instanceof TypeError || error instanceof ApiRequestError && [502, 503, 504].includes(error.status);
         if (retryable && retryCount < 2) schedule([2000, 10000][retryCount++]);
-        else callbacks.current.onError(error, () => { retryCount = 0; dirty.current++; window.dispatchEvent(new Event("universal-gallery:outputs-dirty")); });
+        else {
+          // A terminal failure must not create a new durable scan every poll or
+          // focus event. Keep the unacknowledged change until retry/new output.
+          blockedGenerations.current.set(options.scope, generation);
+          callbacks.current.onError(error, () => { retryCount = 0; dirty.current++; window.dispatchEvent(new Event("universal-gallery:outputs-dirty")); });
+        }
       } finally {
         running = false;
         if (!signal.aborted && dirty.current !== generation) schedule(1000);
       }
     };
-    const onDirty = () => { if (!running) schedule(1000); };
+    const onDirty = () => { retryCount = 0; if (!running) schedule(1000); };
     const onVisible = () => { if (document.visibilityState === "visible") schedule(0); };
     const interval = window.setInterval(() => { void check(); }, 15000);
     window.addEventListener("universal-gallery:outputs-dirty", onDirty);

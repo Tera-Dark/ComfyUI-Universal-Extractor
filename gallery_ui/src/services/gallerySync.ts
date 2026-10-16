@@ -6,6 +6,11 @@ interface SyncRequest {
   promise: Promise<boolean>;
 }
 const requests = new Map<string, SyncRequest>();
+export class GallerySyncError extends Error {
+  readonly jobId: string;
+  readonly scope: string;
+  constructor(message: string, jobId: string, scope: string) { super(message); this.jobId = jobId; this.scope = scope; }
+}
 const aborted = () => new DOMException("Aborted", "AbortError");
 const wait = (signal: AbortSignal) => new Promise<void>((resolve, reject) => {
   if (signal.aborted) { reject(aborted()); return; }
@@ -37,7 +42,7 @@ export const synchronizeGalleryIndex = (scope: string, signal: AbortSignal): Pro
           await wait(entry.controller.signal);
           job = (await galleryApi.getJob(job.id, entry.controller.signal)).job;
         }
-        if (job.state !== "succeeded") throw new Error(job.error || `Index sync: ${job.state}`);
+        if (job.state !== "succeeded") throw new GallerySyncError(job.error || `Index sync: ${job.state}`, job.id, scope);
         return false;
       } finally {
         if (requests.get(scope) === entry) requests.delete(scope);

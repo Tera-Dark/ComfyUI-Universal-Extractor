@@ -6,6 +6,7 @@ import { I18nProvider } from "../i18n/I18nProvider";
 import type { GalleryContext, ImageListResponse } from "../types/universal-gallery";
 import { galleryApi } from "../services/galleryApi";
 import { useGalleryData } from "./useGalleryData";
+import { DEFAULT_GALLERY_SCOPE } from "../utils/workspaceLocation";
 
 vi.mock("../services/galleryApi", () => ({
   galleryApi: {
@@ -22,6 +23,8 @@ vi.mock("../services/galleryApi", () => ({
     moveImages: vi.fn(),
     deleteImages: vi.fn(),
     importFiles: vi.fn(),
+    restoreTrashItem: vi.fn(),
+    purgeTrashItem: vi.fn(),
   },
 }));
 
@@ -95,6 +98,49 @@ const deferred = <T,>() => {
 };
 
 describe("useGalleryData live refresh", () => {
+  it("purges 385 selected items with one snapshot reload and no scan jobs", async () => {
+    const ids = Array.from({ length: 385 }, (_, index) => `trash-${index}`);
+    vi.mocked(galleryApi.listTrash).mockResolvedValue([]);
+    vi.mocked(galleryApi.purgeTrashItem).mockResolvedValue({ ok: true });
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: false, initialScope: { ...DEFAULT_GALLERY_SCOPE, folder: "__trash__" } }), { wrapper });
+    await flushAsyncEffects();
+    vi.mocked(galleryApi.getContext).mockClear();
+    vi.mocked(galleryApi.listTrash).mockClear();
+    await act(async () => {
+      result.current.setSelectedImagePaths(ids);
+      const outcome = await result.current.purgeTrashItems([...ids, ids[0]]);
+      expect(outcome.completed).toEqual(ids);
+      expect(outcome.unfinished).toEqual([]);
+    });
+    await flushAsyncEffects();
+    expect(galleryApi.purgeTrashItem).toHaveBeenCalledTimes(385);
+    expect(galleryApi.createJob).not.toHaveBeenCalled();
+    expect(galleryApi.getContext).toHaveBeenCalledTimes(1);
+    expect(galleryApi.getContext).toHaveBeenCalledWith(false, expect.any(AbortSignal));
+    expect(galleryApi.listTrash).toHaveBeenCalledTimes(1);
+    expect(result.current.selectedImagePaths).toEqual([]);
+  });
+
+  it("stops a trash batch at a failed commit, retains unfinished selection and rejects overlap", async () => {
+    const held = deferred<{ ok: boolean }>();
+    vi.mocked(galleryApi.listTrash).mockResolvedValue([]);
+    vi.mocked(galleryApi.purgeTrashItem).mockImplementationOnce(() => held.promise).mockRejectedValueOnce(new Error("recovery required"));
+    const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: false, initialScope: { ...DEFAULT_GALLERY_SCOPE, folder: "__trash__" } }), { wrapper });
+    await flushAsyncEffects();
+    let batch!: ReturnType<typeof result.current.purgeTrashItems>;
+    await act(async () => {
+      result.current.setSelectedImagePaths(["a", "b", "c"]);
+      batch = result.current.purgeTrashItems(["a", "b", "c"]);
+    });
+    expect(result.current.trashBusy).toBe(true);
+    await act(async () => { await expect(result.current.purgeTrashItems(["a"])).rejects.toThrow("正在处理垃圾箱"); });
+    await act(async () => { held.resolve({ ok: true }); expect(await batch).toEqual({ completed: ["a"], unfinished: ["b", "c"], error: "recovery required" }); });
+    expect(galleryApi.purgeTrashItem).toHaveBeenCalledTimes(2);
+    expect(result.current.selectedImagePaths).toEqual(["b", "c"]);
+    expect(result.current.trashBusy).toBe(false);
+    expect(galleryApi.createJob).not.toHaveBeenCalled();
+  });
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();

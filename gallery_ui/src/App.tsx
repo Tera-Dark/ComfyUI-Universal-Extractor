@@ -8,10 +8,13 @@ import { WorkspaceSidebar } from "./components/shared/WorkspaceSidebar";
 import { TextInputDialog } from "./components/shared/TextInputDialog";
 import { OnboardingTour } from "./components/shared/OnboardingTour";
 import { useGalleryData } from "./hooks/useGalleryData";
+import type { TrashBatchResult } from "./hooks/galleryTrashBatch";
+import { confirmedBatchRetry } from "./utils/batchRetry";
 import { useI18n } from "./i18n/I18nProvider";
 import { useLibraryData } from "./hooks/useLibraryData";
 import { useUiPreferences } from "./hooks/useUiPreferences";
 import { galleryApi } from "./services/galleryApi";
+import { GallerySyncError } from "./services/gallerySync";
 import { useConfirm, type ConfirmOptions } from "./components/shared/ConfirmDialog";
 import { useToast } from "./components/shared/ToastViewport";
 import { useOperationStatus, type RunOperationOptions } from "./components/shared/OperationStatusCenter";
@@ -114,18 +117,42 @@ function App() {
     initialScope: initialLocation.gallery,
   });
   useGalleryJobs(true);
-  const syncHadFailure = useRef(false);
+  const syncFailureId = useRef<string | null>(null);
   useEffect(() => {
     if (!gallery.autoSyncFailure) {
-      if (syncHadFailure.current) { syncHadFailure.current = false; syncTask("auto-sync", t("jobRefresh"), "success", t("jobCompleted")); }
+      if (syncFailureId.current) { syncTask(syncFailureId.current, t("jobRefresh"), "success", t("jobCompleted")); syncFailureId.current = null; }
       return;
     }
-    syncHadFailure.current = true;
     const failure = gallery.autoSyncFailure;
-    syncTask("auto-sync", t("galleryAutoSyncFailed"), "error",
-      failure.error instanceof Error ? failure.error.message : String(failure.error), failure.retry);
+    const syncError = failure.error instanceof GallerySyncError ? failure.error : null;
+    syncFailureId.current = syncError ? `refresh:${syncError.scope}` : "auto-sync";
+    syncTask(syncFailureId.current, t("galleryAutoSyncFailed"), "error",
+      failure.error instanceof Error ? failure.error.message : String(failure.error), failure.retry,
+      syncError ? { jobId: syncError.jobId, taskKind: "refresh_index", source: "gallery" } : undefined);
   }, [gallery.autoSyncFailure, syncTask, t]);
   const libraryDataEnabled = activeTab === "library" || activeTab === "workbench";
+  const handleTrashBatch = (ids: string[], restore: boolean): Promise<TrashBatchResult> => {
+    const execute = restore ? gallery.restoreTrashItems : gallery.purgeTrashItems;
+    const pending = t(restore ? "operationRestoreTrash" : "operationPurgeTrash");
+    const summary = (_ids: string[], result: TrashBatchResult) => result.unfinished.length
+      ? t("trashBatchPartial", { completed: result.completed.length, unfinished: result.unfinished.length })
+      : t(restore ? "trashRestoreSelectedSuccess" : "trashDeleteSelectedSuccess", { count: result.completed.length });
+    return runOperation(() => execute(ids), {
+      pending,
+      success: (result) => summary(ids, result),
+      successTone: (result) => result.unfinished.length ? "error" : "success",
+      successDetail: (result) => result.error,
+      successRetry: (result) => confirmedBatchRetry({
+        paths: result.unfinished, execute, confirm, run: runOperation, pending,
+        failed: (_paths, next) => next.unfinished, summary,
+        confirmation: (count) => ({
+          title: t(restore ? "trashRestoreSelected" : "trashDeleteSelectedForever"),
+          message: t(restore ? "trashRestoreSelectedConfirm" : "trashDeleteSelectedConfirm", { count }),
+          tone: restore ? "warning" : "danger", confirmLabel: t(restore ? "trashRestore" : "trashDeleteForever"), cancelLabel: t("libraryCancel"),
+        }),
+      }),
+    });
+  };
   const library = useLibraryData(libraryDataEnabled);
   const initialLibraryRef = useRef(initialLocation.tab === "library" || initialLocation.tab === "workbench" ? initialLocation.library : "");
   useEffect(() => {
@@ -953,14 +980,7 @@ function App() {
                 });
               }}
               onRestoreTrashItems={async (ids) => {
-                await runOperation(async () => {
-                  for (const id of ids) {
-                    await gallery.restoreTrashItem(id);
-                  }
-                }, {
-                  pending: t("operationRestoreTrash"),
-                  success: t("trashRestoreSelectedSuccess", { count: ids.length }),
-                });
+                return handleTrashBatch(ids, true);
               }}
               onPurgeTrashItem={async (id) => {
                 const approved = await confirm({
@@ -977,15 +997,9 @@ function App() {
                 });
               }}
               onPurgeTrashItems={async (ids) => {
-                await runOperation(async () => {
-                  for (const id of ids) {
-                    await gallery.purgeTrashItem(id);
-                  }
-                }, {
-                  pending: t("operationPurgeTrash"),
-                  success: t("trashDeleteSelectedSuccess", { count: ids.length }),
-                });
+                return handleTrashBatch(ids, false);
               }}
+              trashBusy={gallery.trashBusy}
             />
           ) : activeTab === "library" ? (
             <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>

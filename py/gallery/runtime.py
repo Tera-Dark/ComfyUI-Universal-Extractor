@@ -79,9 +79,10 @@ class GalleryRuntime:
             return self.jobs
 
     def _refresh(self, context, payload):
-        context.scan_generation = self.require_catalog().generation()
         context.checkpoint(0, 1)
-        self.env.ensure_image_index_db_current(force_refresh=payload.get("force", True), scope=payload.get("subfolder", ""))
+        with self.scan_sync_lock:
+            context.scan_generation = self.require_catalog().generation()
+            self.env.ensure_image_index_db_current(force_refresh=payload.get("force", True), scope=payload.get("subfolder", ""))
         with self.env._connect_gallery_index_db() as db:
             folders_ready = self.env._index_meta_get(db, "folder_snapshot_version") == "1"
         if not folders_ready:
@@ -102,7 +103,7 @@ class GalleryRuntime:
             context = CURRENT_JOB.get()
             expected = getattr(context, "scan_generation", None)
             if expected is not None and self.require_catalog().generation() != expected:
-                raise OSError("Source changed during scan; retrying from a fresh snapshot")
+                raise OSError("Gallery files changed during indexing. Retry after file operations finish.")
             yield
 
     async def prepare_index(self, scope="", force=False):

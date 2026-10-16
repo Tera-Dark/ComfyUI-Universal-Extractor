@@ -55,6 +55,13 @@ export const useGalleryJobs = (enabled: boolean) => {
             response.jobs.push(...extra.filter((job): job is GalleryJob => job !== null));
           }
         }
+        const latestRefresh = new Map<string, GalleryJob>();
+        for (const job of response.jobs) {
+          if (job.kind !== "refresh_index") continue;
+          const scope = String(job.payload.subfolder ?? "");
+          const latest = latestRefresh.get(scope);
+          if (!latest || job.created_at > latest.created_at || job.created_at === latest.created_at && job.id > latest.id) latestRefresh.set(scope, job);
+        }
         for (const job of response.jobs) {
           pending ||= active(job);
           const relevant = job.kind === "refresh_index" || job.kind === "fingerprint_assets";
@@ -63,9 +70,11 @@ export const useGalleryJobs = (enabled: boolean) => {
           const signature = `${job.state}:${job.completed}:${job.total}:${job.error}`;
           if (previous === signature) continue;
           observed.current.set(job.id, signature);
+          const scope = String(job.payload.subfolder ?? "");
+          if (job.kind === "refresh_index" && latestRefresh.get(scope)?.id !== job.id) continue;
           const label = t(job.kind === "refresh_index" ? "jobRefresh" : "jobFingerprints");
           const tone = active(job) ? "pending" : job.state === "failed" ? "error" : job.state === "succeeded" ? "success" : "info";
-          syncTask(job.id, `${label} · ${t(active(job) ? "jobRunning" : job.state === "failed" ? "jobFailed" : job.state === "cancelled" ? "jobCancelled" : "jobCompleted")}`,
+          syncTask(job.kind === "refresh_index" ? `refresh:${scope}` : job.id, `${label} · ${t(active(job) ? "jobRunning" : job.state === "failed" ? "jobFailed" : job.state === "cancelled" ? "jobCancelled" : "jobCompleted")}`,
             tone, job.error || `${job.completed} / ${job.total}`, job.state === "failed" ? () => { void retry(job); } : undefined,
             { taskKind: job.kind, source: "gallery", phase: job.state, completed: job.completed, total: job.total, jobId: job.id,
               quiet: job.kind === "refresh_index",

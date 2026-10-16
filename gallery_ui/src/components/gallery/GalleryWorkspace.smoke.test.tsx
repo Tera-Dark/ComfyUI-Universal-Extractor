@@ -148,6 +148,17 @@ const renderWorkspace = (overrides: Partial<Parameters<typeof GalleryWorkspace>[
 };
 
 describe("GalleryWorkspace smoke", () => {
+  it("reopens the cached image-search modal ten times after close, Escape and outside clicks", async () => {
+    renderWorkspace({ isTrashView: false, selectedSubfolder: "default_output::", images: [galleryImage], total: 1 });
+    for (let round = 0; round < 10; round++) {
+      fireEvent.click(screen.getByRole("button", { name: "以图搜图" }));
+      expect(await screen.findByRole("dialog", { name: "以图搜图" })).toBeVisible();
+      if (round % 3 === 0) fireEvent.click(screen.getByRole("button", { name: "关闭以图搜图" }));
+      else if (round % 3 === 1) fireEvent.keyDown(window, { key: "Escape" });
+      else fireEvent.click(document.querySelector(".ue-image-search-backdrop")!);
+      await waitFor(() => expect(screen.queryByRole("dialog", { name: "以图搜图" })).toBeNull());
+    }
+  });
   it("retains the image-search session through locate and does not dismiss it on the return click", async () => {
     const NativeURL = URL;
     vi.stubGlobal("URL", class extends NativeURL { static createObjectURL() { return "blob:reference"; } static revokeObjectURL() {} });
@@ -155,6 +166,8 @@ describe("GalleryWorkspace smoke", () => {
     const locate = vi.spyOn(galleryApi, "locateImage").mockResolvedValue({ relative_path: galleryImage.relative_path, subfolder: "default_output::", page: 1, index: 0 });
     try {
       renderWorkspace({ isTrashView: false, selectedSubfolder: "default_output::", images: [galleryImage], total: 1 });
+      const scrollShell = document.querySelector<HTMLElement>(".ue-main-shell")!;
+      scrollShell.scrollTop = 350;
       fireEvent.click(screen.getByRole("button", { name: "以图搜图" }));
       const dialog = await screen.findByRole("dialog", { name: "以图搜图" });
       fireEvent.change(dialog.querySelector('input[type="file"]')!, { target: { files: [new File(["ref"], "social.png", { type: "image/png" })] } });
@@ -163,7 +176,9 @@ describe("GalleryWorkspace smoke", () => {
       fireEvent.click(screen.getByRole("button", { name: "定位文件夹" }));
       const back = await screen.findByRole("button", { name: "返回搜图结果与原浏览位置" });
       expect(screen.queryByRole("dialog", { name: "以图搜图" })).toBeNull();
+      scrollShell.scrollTop = 0;
       fireEvent.click(back);
+      await waitFor(() => expect(scrollShell.scrollTop).toBe(350));
       expect(await screen.findByRole("dialog", { name: "以图搜图" })).toBeVisible();
       expect(screen.getByText("social.png")).toBeVisible();
     } finally { search.mockRestore(); locate.mockRestore(); vi.unstubAllGlobals(); }

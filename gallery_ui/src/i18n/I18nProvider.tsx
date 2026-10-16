@@ -15,6 +15,8 @@ interface TranslateOptions {
   page?: number;
   totalPages?: number;
   count?: number;
+  completed?: number;
+  unfinished?: number;
   added?: number;
   updated?: number;
   removed?: number;

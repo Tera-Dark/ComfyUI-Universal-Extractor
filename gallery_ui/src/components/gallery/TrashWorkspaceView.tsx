@@ -8,6 +8,7 @@ import type { ContentViewMode } from "./galleryWorkspaceModel";
 import type { SelectionBoxState } from "./gallerySelectionModel";
 
 interface TrashWorkspaceViewProps {
+  busy?: boolean;
   trashItems: TrashItem[];
   selectedCount: number;
   selectedTrashCount: number;
@@ -33,6 +34,7 @@ interface TrashWorkspaceViewProps {
 }
 
 export const TrashWorkspaceView = ({
+  busy = false,
   trashItems,
   selectedCount,
   selectedTrashCount,
@@ -89,7 +91,7 @@ export const TrashWorkspaceView = ({
           <button
             className="ue-secondary-btn ue-secondary-btn--accent"
             onClick={onRestoreSelectedTrash}
-            disabled={!selectedTrashCount}
+            disabled={busy || !selectedTrashCount}
           >
             <RotateCcw size={14} />
             <span>{t("trashRestoreSelected")}</span>
@@ -97,7 +99,7 @@ export const TrashWorkspaceView = ({
           <button
             className="ue-secondary-btn ue-secondary-btn--danger"
             onClick={onPurgeSelectedTrash}
-            disabled={!selectedTrashCount}
+            disabled={busy || !selectedTrashCount}
           >
             <Trash2 size={14} />
             <span>{t("trashDeleteSelectedForever")}</span>
@@ -171,6 +173,7 @@ export const TrashWorkspaceView = ({
               <div className="ue-trash-card-actions">
                 <button
                   className="ue-icon-action"
+                  disabled={busy}
                   onClick={(event) => {
                     event.stopPropagation();
                     onRestoreTrashItem(item.id);
@@ -182,6 +185,7 @@ export const TrashWorkspaceView = ({
                 </button>
                 <button
                   className="ue-icon-action ue-icon-action--danger"
+                  disabled={busy}
                   onClick={(event) => {
                     event.stopPropagation();
                     onPurgeTrashItem(item.id);

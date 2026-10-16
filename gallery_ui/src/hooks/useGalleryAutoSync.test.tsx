@@ -60,8 +60,25 @@ describe("automatic gallery synchronization", () => {
     vi.mocked(galleryApi.createJob).mockRejectedValueOnce(new Error("denied"));
     const options = props(); renderHook(() => useGalleryAutoSync(options)); await advance(1000);
     expect(options.onError).toHaveBeenCalledOnce();
+    await advance(300000);
+    act(() => window.dispatchEvent(new Event("focus"))); await advance(0);
+    expect(galleryApi.createJob).toHaveBeenCalledTimes(1);
+    expect(options.onError).toHaveBeenCalledOnce();
     act(() => options.onError.mock.calls[0][1]()); await advance(1000);
     expect(options.refresh).toHaveBeenCalledOnce();
+  });
+  it("stops after two transient retries and permits one new attempt for a new workflow", async () => {
+    vi.mocked(galleryApi.createJob).mockRejectedValue(new ApiRequestError("busy", 503, null));
+    const options = props(); renderHook(() => useGalleryAutoSync(options));
+    await advance(13000);
+    expect(galleryApi.createJob).toHaveBeenCalledTimes(3);
+    expect(options.onError).toHaveBeenCalledOnce();
+    await advance(300000);
+    expect(galleryApi.createJob).toHaveBeenCalledTimes(3);
+    vi.mocked(galleryApi.createJob).mockResolvedValue(succeeded);
+    act(() => Channel.complete("after-failure")); await advance(1000);
+    expect(options.refresh).toHaveBeenCalledOnce();
+    expect(galleryApi.createJob).toHaveBeenCalledTimes(4);
   });
   it("runs one follow-up when a completion arrives during a scan", async () => {
     let resolve!: (value: typeof succeeded) => void;

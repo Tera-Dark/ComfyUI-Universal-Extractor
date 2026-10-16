@@ -20,7 +20,10 @@ import types
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--host", default="127.0.0.1")
 parser.add_argument("--port", type=int, default=8189)
+parser.add_argument("--trash-items", type=int, default=0, help="Seed up to 500 disposable trash fixtures for bulk-action QA")
 args = parser.parse_args()
+if not 0 <= args.trash_items <= 500:
+    parser.error("--trash-items must be between 0 and 500")
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
 temporary = tempfile.TemporaryDirectory(prefix="universal-preview-")
@@ -78,6 +81,13 @@ for index in range(18):
     {"name": "Soft daylight", "tags": ["natural light", "minimal composition"]},
     {"name": "Quiet landscapes", "tags": ["landscape", "muted colors"]},
 ], ensure_ascii=False))
+
+if args.trash_items:
+    from py.gallery import service
+    fixture_names = [f"QA_Disposable_{index:04}.png" for index in range(args.trash_items)]
+    for name in fixture_names:
+        Image.new("RGB", (16, 16), "#c3c6b3").save(base / "output" / name)
+    service.delete_images(fixture_names)
 
 async def preview_updates(force=False):
     from py.gallery.update_checker import _build_status

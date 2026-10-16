@@ -131,9 +131,10 @@ interface GalleryWorkspaceProps {
   searchValue?: string;
   onSearchChange?: (value: string) => void;
   onRestoreTrashItem: (id: string) => Promise<void>;
-  onRestoreTrashItems: (ids: string[]) => Promise<void>;
+  onRestoreTrashItems: (ids: string[]) => Promise<void | { completed: string[] }>;
   onPurgeTrashItem: (id: string) => Promise<void>;
-  onPurgeTrashItems: (ids: string[]) => Promise<void>;
+  onPurgeTrashItems: (ids: string[]) => Promise<void | { completed: string[] }>;
+  trashBusy?: boolean;
 }
 
 interface ImageContextMenuState {
@@ -213,6 +214,7 @@ export const GalleryWorkspace = ({
   onRestoreTrashItems,
   onPurgeTrashItem,
   onPurgeTrashItems,
+  trashBusy = false,
 }: GalleryWorkspaceProps) => {
   const { t } = useI18n();
   const densityMetrics = galleryDensityMetrics(interfaceDensity);
@@ -257,7 +259,7 @@ export const GalleryWorkspace = ({
     const paste = (event: ClipboardEvent) => {
       if (isEditableTarget(event.target) || document.querySelector('[aria-modal="true"]')) return;
       const file = [...(event.clipboardData?.files ?? [])].find((item) => item.type.startsWith("image/"));
-      if (file) { event.preventDefault(); setImageSearchFile(file); setShowImageSearch(true); }
+      if (file) { event.preventDefault(); setImageSearchFile(file); setSearchLocated(false); setShowImageSearch(true); }
     };
     window.addEventListener("paste", paste);
     return () => window.removeEventListener("paste", paste);
@@ -487,7 +489,9 @@ export const GalleryWorkspace = ({
   useEffect(() => {
     if (!returnScroll || isLoading || selectedSubfolder !== returnScroll.folder || page !== returnScroll.page || (searchValue || "") !== returnScroll.query) return;
     const frame = window.requestAnimationFrame(() => {
-      document.querySelector<HTMLElement>(".ue-main-shell")?.scrollTo({ top: returnScroll.top }); setReturnScroll(null);
+      const shell = document.querySelector<HTMLElement>(".ue-main-shell");
+      if (shell) shell.scrollTop = returnScroll.top;
+      setReturnScroll(null);
     });
     return () => window.cancelAnimationFrame(frame);
   }, [returnScroll, isLoading, selectedSubfolder, page, searchValue, images]);
@@ -875,8 +879,8 @@ export const GalleryWorkspace = ({
       return;
     }
 
-    await onRestoreTrashItems(selectedTrashItems.map((item) => item.id));
-    clearSelection();
+    const result = await onRestoreTrashItems(selectedTrashItems.map((item) => item.id));
+    if (!result) clearSelection();
   };
 
   const handlePurgeSelectedTrash = async () => {
@@ -895,8 +899,8 @@ export const GalleryWorkspace = ({
       return;
     }
 
-    await onPurgeTrashItems(selectedTrashItems.map((item) => item.id));
-    clearSelection();
+    const result = await onPurgeTrashItems(selectedTrashItems.map((item) => item.id));
+    if (!result) clearSelection();
   };
 
   const changePage = (nextPage: number) => {
@@ -1342,7 +1346,7 @@ export const GalleryWorkspace = ({
           sortOrder={sortOrder}
           searchValue={searchValue}
           onSearchChange={onSearchChange}
-          onImageSearch={() => { setImageSearchFile(null); setShowImageSearch(true); }}
+          onImageSearch={() => { setImageSearchFile(null); setSearchLocated(false); setShowImageSearch(true); }}
           onApplyPendingLiveRefresh={onApplyPendingLiveRefresh}
           onToggleFiltersMenu={() => setShowFiltersMenu((current) => !current)}
           onCloseFiltersMenu={() => setShowFiltersMenu(false)}
@@ -1492,6 +1496,7 @@ export const GalleryWorkspace = ({
           </div>
         ) : isTrashView ? (
           <TrashWorkspaceView
+            busy={trashBusy}
             trashItems={trashItems}
             selectedCount={selectedCount}
             selectedTrashCount={selectedTrashItems.length}

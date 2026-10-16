@@ -56,7 +56,12 @@ class JobScheduler:
             raise ValueError("unsupported job kind")
         payload = {**(payload or {}), "_processor_version": str(version)}
         encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-        key = hashlib.sha256(f"{kind}|{version}|{encoded}".encode()).hexdigest()
+        # A scan takes its generation when it starts and validates at commit.
+        # File mutations must not turn identical refresh requests into hundreds
+        # of queued scans. Analysis still deduplicates by resource version.
+        dedupe_payload = {k: v for k, v in payload.items() if kind != "refresh_index" or k != "_generation"}
+        dedupe_encoded = json.dumps(dedupe_payload, sort_keys=True, separators=(",", ":"))
+        key = hashlib.sha256(f"{kind}|{version}|{dedupe_encoded}".encode()).hexdigest()
         now = time.time()
         with self.condition, self.catalog.lock, self.catalog.connect() as db:
             if self.stopping:

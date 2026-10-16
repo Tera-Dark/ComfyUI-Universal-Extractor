@@ -2,6 +2,7 @@ import { useGalleryAutoSync } from "./useGalleryAutoSync";
 import { useGalleryRefresh } from "./useGalleryRefresh";
 import { useGalleryQueries } from "./useGalleryQueries";
 import { useGalleryBatchOperations } from "./useGalleryBatchOperations";
+import { runTrashBatch } from "./galleryTrashBatch";
 import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 
 import { useI18n } from "../i18n/I18nProvider";
@@ -63,7 +64,9 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const [selectedImagePaths, setSelectedImagePaths] = useState<string[]>([]);
   const [importMessage, setImportMessage] = useState("");
   const [importFolderRef, setImportFolderRef] = useState("");
-  const [refreshKey, setRefreshKey] = useState(0);
+  const [{ key: refreshKey, scan: refreshIndex }, setRefreshRequest] = useState({ key: 0, scan: false });
+  const trashMutationRunning = useRef(false);
+  const [trashBusy, setTrashBusy] = useState(false);
   const refreshSequenceRef = useRef(0);
   const { completeRefreshPart, waitForRefresh } = useGalleryRefresh(t("galleryRefreshInterrupted"));
   const [autoSyncFailure, setAutoSyncFailure] = useState<{ error: unknown; retry: () => void } | null>(null);
@@ -144,7 +147,7 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   }, [gridColumns]);
 
   const { images, setImages, context, setContext, colorIndexStatus, setColorIndexStatus, total, setTotal, isLoading, isRefreshing, error, trashItems, loadedViewKey } = useGalleryQueries({
-    page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, isTrashView, isActive, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart
+    page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, refreshIndex, isTrashView, isActive, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart
   });
 
   useGalleryAutoSync({
@@ -197,10 +200,10 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     return () => window.clearInterval(interval);
   }, [colorIndexStatus, isTrashView, isActive, setColorIndexStatus]);
 
-  const triggerRefresh = useCallback(() => {
+  const triggerRefresh = useCallback((scan = true) => {
     const key = ++refreshSequenceRef.current;
     setHasPendingLiveRefresh(false);
-    setRefreshKey(key);
+    setRefreshRequest({ key, scan });
     return key;
   }, []);
 
@@ -456,14 +459,32 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     return response;
   };
 
-  const restoreTrashItem = async (id: string) => {
-    await galleryApi.restoreTrashItem(id);
-    refresh();
+  const mutateTrashItems = async (ids: string[], restore: boolean) => {
+    if (trashMutationRunning.current) throw new Error(t("trashOperationBusy"));
+    trashMutationRunning.current = true;
+    setTrashBusy(true);
+    try {
+      const result = await runTrashBatch(ids, (id) => restore ? galleryApi.restoreTrashItem(id) : galleryApi.purgeTrashItem(id));
+      const completed = new Set(result.completed);
+      setSelectedImagePaths((current) => current.filter((id) => !completed.has(id)));
+      return result;
+    } finally {
+      // Restore already commits its live index; purge only changes trash. Never
+      // launch a whole-library scan for each removed item (or for this reload).
+      if (ids.length) triggerRefresh(false);
+      trashMutationRunning.current = false;
+      setTrashBusy(false);
+    }
   };
-
+  const restoreTrashItems = (ids: string[]) => mutateTrashItems(ids, true);
+  const purgeTrashItems = (ids: string[]) => mutateTrashItems(ids, false);
+  const restoreTrashItem = async (id: string) => {
+    const result = await restoreTrashItems([id]);
+    if (result.unfinished.length) throw new Error(result.error);
+  };
   const purgeTrashItem = async (id: string) => {
-    await galleryApi.purgeTrashItem(id);
-    refresh();
+    const result = await purgeTrashItems([id]);
+    if (result.unfinished.length) throw new Error(result.error);
   };
 
   const viewReady = loadedViewKey === liveRefreshViewKey && (isTrashView || searchTerm === deferredSearchTerm);
@@ -537,5 +558,8 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     importFiles,
     restoreTrashItem,
     purgeTrashItem,
+    restoreTrashItems,
+    purgeTrashItems,
+    trashBusy,
   };
 };
