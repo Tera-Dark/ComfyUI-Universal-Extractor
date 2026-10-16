@@ -10,6 +10,8 @@ import { useGalleryData } from "./useGalleryData";
 vi.mock("../services/galleryApi", () => ({
   galleryApi: {
     getContext: vi.fn(),
+    createJob: vi.fn(),
+    getJob: vi.fn(),
     getImageFreshness: vi.fn(),
     listImages: vi.fn(),
     listTrash: vi.fn(),
@@ -97,6 +99,7 @@ describe("useGalleryData live refresh", () => {
     vi.useFakeTimers();
     vi.clearAllMocks();
     vi.mocked(galleryApi.getContext).mockResolvedValue(contextResponse);
+    vi.mocked(galleryApi.createJob).mockResolvedValue({ job: { id: "sync", state: "succeeded" } } as Awaited<ReturnType<typeof galleryApi.createJob>>);
     vi.mocked(galleryApi.getImageFreshness).mockResolvedValue({
       fingerprint: "initial",
       changed: false,
@@ -263,7 +266,7 @@ describe("useGalleryData live refresh", () => {
     const callsBeforeInterval = vi.mocked(galleryApi.listImages).mock.calls.length;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(1_000);
     });
     await flushAsyncEffects();
 
@@ -271,7 +274,7 @@ describe("useGalleryData live refresh", () => {
     expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforeInterval + 1);
     expect(result.current.images[0]?.filename).toBe("image-refresh.png");
     expect(result.current.total).toBe(2);
-    expect(vi.mocked(galleryApi.listImages).mock.calls.at(-1)?.[12]).toBe(true);
+    expect(vi.mocked(galleryApi.listImages).mock.calls.at(-1)?.[12]).toBe(false);
   });
 
   it("defers new-first-page images while the user is scrolled down", async () => {
@@ -287,23 +290,24 @@ describe("useGalleryData live refresh", () => {
     const { result } = renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: true }), { wrapper });
     await flushAsyncEffects();
     const before = vi.mocked(galleryApi.listImages).mock.calls.length;
-    await act(async () => { await vi.advanceTimersByTimeAsync(6_000); });
-    expect(galleryApi.listImages).toHaveBeenCalledTimes(before);
+    await act(async () => { await vi.advanceTimersByTimeAsync(1_000); });
+    expect(galleryApi.listImages).toHaveBeenCalledTimes(before + 1);
     expect(result.current.hasPendingLiveRefresh).toBe(true);
     expect(result.current.images[0]?.filename).toBe("image-initial.png");
     viewport.remove();
   });
 
-  it("does not force a list refresh when freshness is unchanged", async () => {
+  it("reconciles once, then does not scan again when freshness is unchanged", async () => {
     vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 1));
 
     renderHook(() => useGalleryData({ isActive: true, liveRefreshEnabled: true }), { wrapper });
 
     await flushAsyncEffects();
+    await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
     const callsBeforeInterval = vi.mocked(galleryApi.listImages).mock.calls.length;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(15_000);
     });
     await flushAsyncEffects();
 
@@ -332,16 +336,16 @@ describe("useGalleryData live refresh", () => {
     const callsBeforeInterval = vi.mocked(galleryApi.listImages).mock.calls.length;
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(1_000);
     });
     await flushAsyncEffects();
 
-    expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforeInterval);
+    expect(galleryApi.listImages).toHaveBeenCalledTimes(callsBeforeInterval + 1);
     expect(result.current.hasPendingLiveRefresh).toBe(true);
     expect(result.current.images[0]?.filename).toBe("image-initial.png");
   });
 
-  it("keeps separate freshness fingerprints for different view scopes", async () => {
+  it("shares acknowledged freshness across pages in the same source scope", async () => {
     vi.mocked(galleryApi.listImages).mockResolvedValue(imagePage("initial", 2));
     vi.mocked(galleryApi.getImageFreshness)
       .mockResolvedValueOnce({
@@ -376,7 +380,7 @@ describe("useGalleryData live refresh", () => {
     await flushAsyncEffects();
 
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(1_000);
     });
     await flushAsyncEffects();
     expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "", expect.any(AbortSignal));
@@ -386,20 +390,20 @@ describe("useGalleryData live refresh", () => {
     });
     await flushAsyncEffects();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(1_000);
     });
     await flushAsyncEffects();
-    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "", expect.any(AbortSignal));
+    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "page-1", expect.any(AbortSignal));
 
     await act(async () => {
       result.current.setPage(1);
     });
     await flushAsyncEffects();
     await act(async () => {
-      await vi.advanceTimersByTimeAsync(6_000);
+      await vi.advanceTimersByTimeAsync(1_000);
     });
     await flushAsyncEffects();
-    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "page-1", expect.any(AbortSignal));
+    expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith("default_output::", "page-2", expect.any(AbortSignal));
   });
 
   it("does not schedule live refresh when the preference is disabled", async () => {

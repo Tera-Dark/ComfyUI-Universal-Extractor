@@ -8,7 +8,8 @@ import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 
 const source = readFileSync(fileURLToPath(new URL("../web/comfyui/top_menu_extension.js", import.meta.url)), "utf8")
-    .replace('import { app } from "../../scripts/app.js";', "const app = globalThis.__app;");
+    .replace('import { app } from "../../scripts/app.js";', "const app = globalThis.__app;")
+    .replace('import { api } from "../../scripts/api.js";', "const api = { addEventListener() {} };");
 const copy = (value) => JSON.parse(JSON.stringify(value));
 const incoming = (name, model = 0.8, clip = model) => ({
     name, strength_model: model, strength_clip: clip, enabled: true,
@@ -60,9 +61,9 @@ async function harness(nodes, selectedNodes = []) {
     await new Promise((resolve) => setImmediate(resolve));
     assert.ok(extension, "extension registered");
     await extension.setup();
-    assert.equal(channels.length, 1);
+    assert.equal(channels.length, 2);
     assert.equal(sent.length, 0);
-    window.bridge = channels[0];
+    window.bridge = channels[1];
     const instanceId = storage.get("universal-extractor:comfy-instance-id");
     const send = (mode, loras, id = `test-${Math.random()}`) => {
         const payload = { id, mode, loraManager: { detected: true, loras } };

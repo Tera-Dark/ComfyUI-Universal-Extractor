@@ -1,4 +1,5 @@
 import { app } from "../../scripts/app.js";
+import { api } from "../../scripts/api.js";
 
 const BUTTON_LABEL = "Launch Universal Gallery";
 const BUTTON_HINT = "Shift+Click opens in new window";
@@ -608,6 +609,27 @@ const createExtensionObject = (useActionBar) => {
     const extensionObj = {
         name: "UniversalExtractor.TopMenu",
         async setup() {
+            // Execution notifications have their own channel; workflow/LoRA
+            // delivery remains addressed to one acknowledged ComfyUI instance.
+            if ("BroadcastChannel" in window && !window.__universalGalleryExecutionBridge) {
+                window.__universalGalleryExecutionBridge = true;
+                const galleryEvents = new BroadcastChannel("universal-extractor-gallery-events");
+                const completedPrompts = new Set();
+                const complete = (event) => {
+                    const id = event.detail?.prompt_id;
+                    if (typeof id !== "string" || !id || id.length > 200 || completedPrompts.has(id)) return;
+                    completedPrompts.add(id);
+                    if (completedPrompts.size > 256) completedPrompts.delete(completedPrompts.values().next().value);
+                    galleryEvents.postMessage({ version: 1, type: "outputs-changed", prompt_id: id });
+                };
+                api.addEventListener("execution_success", complete);
+                api.addEventListener("execution_error", complete);
+                api.addEventListener("execution_interrupted", complete);
+                api.addEventListener("executing", (event) => {
+                    if (event.detail?.node === null) complete(event);
+                });
+                window.addEventListener("pagehide", (event) => { if (!event.persisted) galleryEvents.close(); });
+            }
             window.name = COMFY_WINDOW_NAME;
             let lastHandledWorkflowId = null;
             const recentLoraStackResults = new Map();
