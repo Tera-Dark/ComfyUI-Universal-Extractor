@@ -1479,6 +1479,45 @@ def get_image_freshness(env, subfolder: str = "", known: str = "") -> dict[str, 
     }
 
 
+def _image_sort_sql(sort_by="created_at", sort_order="desc"):
+    field = {"filename": "filename COLLATE NOCASE", "size": "size", "created_at": "created_at"}.get(sort_by, "created_at")
+    return f"{field} {'ASC' if sort_order.lower() == 'asc' else 'DESC'}, relative_path ASC"
+
+
+def locate_image(env, asset_id="", relative_path="", limit=60, sort_by="created_at", sort_order="desc"):
+    if not asset_id and not relative_path:
+        raise ValueError("asset_id or relative_path is required")
+    if not 1 <= limit <= 200 or len(asset_id) > 200 or len(relative_path) > 2000:
+        raise ValueError("invalid locate parameters")
+    if relative_path:
+        # Validate before the SQL lookup, including unindexed traversal attempts.
+        env.resolve_image_path(relative_path)
+    with env._connect_gallery_index_db() as db:
+        row = db.execute("SELECT * FROM gallery_images WHERE " + ("asset_id = ?" if asset_id else "relative_path = ?"),
+                         (asset_id or env.make_image_ref(*env.parse_image_ref(relative_path)),)).fetchone()
+        if row is None:
+            raise FileNotFoundError("image is no longer indexed; refresh the gallery")
+        runtime = env.get_runtime()
+        if runtime.catalog and row["asset_id"]:
+            from .catalog import source_namespace
+            identity = runtime.catalog.get(row["asset_id"])
+            source = env.get_gallery_source(row["source_id"])
+            if not identity or identity["namespace"] != source_namespace(source["path"]):
+                raise FileNotFoundError("image source changed; refresh the gallery")
+        _, full_path = env.resolve_image_path(row["relative_path"])
+        if not os.path.isfile(full_path):
+            raise FileNotFoundError("image file is unavailable")
+        folder = env.make_folder_ref(row["source_id"], row["relative_dir"])
+        where, params, _ = env._build_image_filter_sql(subfolder=folder)
+        rank = db.execute(f"""SELECT position FROM (
+            SELECT relative_path, row_number() OVER (ORDER BY {_image_sort_sql(sort_by, sort_order)}) AS position
+            FROM gallery_images WHERE {where}) WHERE relative_path = ?""", [*params, row["relative_path"]]).fetchone()
+        if rank is None:
+            raise FileNotFoundError("image source is unavailable")
+    return {"asset_id": row["asset_id"], "relative_path": row["relative_path"], "subfolder": folder,
+            "page": (int(rank["position"]) - 1) // limit + 1, "index": (int(rank["position"]) - 1) % limit, "limit": limit}
+
+
 def list_images_page(env,
     page: int = 1,
     limit: int = 60,
@@ -1499,12 +1538,6 @@ def list_images_page(env,
     where_sql, params, fts_query = env._build_image_filter_sql(
         search, category, subfolder, board_id, date_from, date_to, favorites_only, color_family)
     normalized_search = search.strip().lower()
-    sort_field = {
-        "filename": "filename COLLATE NOCASE",
-        "size": "size",
-        "created_at": "created_at",
-    }.get(sort_by, "created_at")
-    sort_direction = "ASC" if sort_order.lower() == "asc" else "DESC"
     safe_page = max(1, int(page or 1))
     safe_limit = max(1, min(200, int(limit or 60)))
     offset = (safe_page - 1) * safe_limit
@@ -1528,7 +1561,7 @@ def list_images_page(env,
                        color_family_scores_json, palette_json, color_saturation, color_luma
                 FROM gallery_images
                 WHERE {where_sql}
-                ORDER BY {sort_field} {sort_direction}, relative_path ASC
+                ORDER BY {_image_sort_sql(sort_by, sort_order)}
                 LIMIT ? OFFSET ?
                 """,
                 [*params, safe_limit, offset],
@@ -1554,7 +1587,7 @@ def list_images_page(env,
                        color_family_scores_json, palette_json, color_saturation, color_luma
                 FROM gallery_images
                 WHERE {fallback_where}
-                ORDER BY {sort_field} {sort_direction}, relative_path ASC
+                ORDER BY {_image_sort_sql(sort_by, sort_order)}
                 LIMIT ? OFFSET ?
                 """,
                 [*fallback_params, safe_limit, offset],

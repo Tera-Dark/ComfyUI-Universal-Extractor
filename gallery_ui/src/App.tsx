@@ -81,7 +81,7 @@ function App() {
   const { t } = useI18n();
   const { confirm, choose } = useConfirm();
   const { pushToast } = useToast();
-  const { runOperation } = useOperationStatus();
+  const { runOperation, syncTask } = useOperationStatus();
   const initialLocation = useMemo(() => readWorkspaceLocation(window.location.search), []);
   const [workbenchVisited,setWorkbenchVisited] = useState(initialLocation.tab === "workbench");
   const [settingsDirty,setSettingsDirty] = useState(false);
@@ -112,7 +112,18 @@ function App() {
     thumbnailPrewarmEnabled: uiPreferences.enableImagePrefetch,
     initialScope: initialLocation.gallery,
   });
-  useGalleryJobs(activeTab === "gallery");
+  useGalleryJobs(true);
+  const syncHadFailure = useRef(false);
+  useEffect(() => {
+    if (!gallery.autoSyncFailure) {
+      if (syncHadFailure.current) { syncHadFailure.current = false; syncTask("auto-sync", t("jobRefresh"), "success", t("jobCompleted")); }
+      return;
+    }
+    syncHadFailure.current = true;
+    const failure = gallery.autoSyncFailure;
+    syncTask("auto-sync", t("galleryAutoSyncFailed"), "error",
+      failure.error instanceof Error ? failure.error.message : String(failure.error), failure.retry);
+  }, [gallery.autoSyncFailure, syncTask, t]);
   const libraryDataEnabled = activeTab === "library" || activeTab === "workbench";
   const library = useLibraryData(libraryDataEnabled);
   const initialLibraryRef = useRef(initialLocation.tab === "library" || initialLocation.tab === "workbench" ? initialLocation.library : "");
@@ -296,7 +307,8 @@ function App() {
     }
     if (activeTab === "settings") {
       await runOperation(() => gallery.refreshAndWait(), {
-        pending: t("operationRefresh"),
+        taskKind: "refresh_index",
+      pending: t("operationRefresh"),
         success: t("operationRefreshSuccess"),
         error: (error) => error instanceof Error ? error.message : t("galleryEmptyErrorTitle"),
       }).catch(() => undefined);
@@ -308,6 +320,7 @@ function App() {
         await library.refreshActiveLibrary();
       }
     }, {
+      taskKind: "refresh_index",
       pending: t("operationRefresh"),
     });
   };
@@ -787,7 +800,7 @@ function App() {
   }, [activeTab, closeDetailForWorkspace, confirm, confirmDiscardLibraryEdits, gallery, library, settingsDirty, t, urlState]);
 
   return (
-    <div className="ue-app-shell">
+    <div className="ue-app-shell" data-density={uiPreferences.interfaceDensity || "standard"}>
       <TopNavigation
         activeTab={activeTab}
         onTabChange={handleTabChange}
@@ -895,6 +908,8 @@ function App() {
               onSearchChange={(value) => { gallery.setSearchTerm(value); gallery.setPage(1); }}
               defaultSelectionMode={uiPreferences.defaultSelectionMode}
               enableImagePrefetch={uiPreferences.enableImagePrefetch}
+              interfaceDensity={uiPreferences.interfaceDensity}
+              imageDetailOpen={Boolean(gallery.selectedImage)}
               onSelectionDragChange={handleGalleryDragChange}
               onSelectionModeActiveChange={setGallerySelectionModeActive}
               onOpenDetail={handleOpenGalleryDetail}

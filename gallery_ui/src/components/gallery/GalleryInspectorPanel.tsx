@@ -1,3 +1,4 @@
+import { confirmedBatchRetry } from "../../utils/batchRetry";
 import { useMemo, useState } from "react";
 import {
   Check,
@@ -127,6 +128,11 @@ export const GalleryInspectorPanel = ({
           missing: getDeleteOutcome(selectedPaths, value).failedPaths.length,
         }),
         successTone: (value) => getDeleteOutcome(selectedPaths, value).complete ? "success" : "error",
+        successRetry: (value) => confirmedBatchRetry({ paths: getDeleteOutcome(selectedPaths, value).failedPaths, confirm,
+          confirmation: (count) => ({ title: t("bulkDelete"), message: t("bulkDeleteConfirm", { count }), tone: "warning", confirmLabel: t("commonDelete"), cancelLabel: t("libraryCancel") }),
+          execute: onDeleteImages, failed: (paths, result) => getDeleteOutcome(paths, result).failedPaths,
+          summary: (paths, result) => t("operationDeleteImagesResult", { count: result.deleted.length, missing: getDeleteOutcome(paths, result).failedPaths.length }), run: runOperation, pending: t("operationDeleteImages"),
+        }),
         successDetail: (value) => {
           const { failedPaths } = getDeleteOutcome(selectedPaths, value);
           return failedPaths.length ? t("operationUnprocessedPaths", { target: describeFailedPaths(failedPaths) }) : "";
@@ -196,6 +202,11 @@ export const GalleryInspectorPanel = ({
           ].filter(Boolean).join(" ");
         },
         successTone: (value) => getMoveOutcome(selectedPaths, value).complete ? "success" : "error",
+        successRetry: (value) => confirmedBatchRetry({ paths: getMoveOutcome(selectedPaths, value).failedPaths, confirm,
+          confirmation: (count) => ({ title: t("bulkMoveTo"), message: t("bulkMoveConfirm", { count, target: target?.label || bulkTargetSubfolder }), tone: "warning", confirmLabel: t("folderMove"), cancelLabel: t("libraryCancel") }),
+          execute: (paths) => onMoveImages(paths, bulkTargetSubfolder, target?.source_id), failed: (paths, result) => getMoveOutcome(paths, result).failedPaths,
+          summary: (_paths, result) => t("qolMoveResult", { moved: result.moved.length, missing: result.missing.length, blocked: result.blocked?.length ?? 0 }), run: runOperation, pending: t("operationMoveImages"),
+        }),
         successDetail: (value) => {
           const { failedPaths } = getMoveOutcome(selectedPaths, value);
           return failedPaths.length ? t("operationUnprocessedPaths", { target: describeFailedPaths(failedPaths) }) : "";

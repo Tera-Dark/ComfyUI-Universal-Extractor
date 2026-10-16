@@ -103,14 +103,12 @@ describe("GalleryToolbar", () => {
     const user = userEvent.setup();
     const { props } = renderToolbar();
 
-    await user.click(screen.getByLabelText("更多操作", { selector: "summary" }));
-    await user.click(screen.getByRole("button", { name: "开启双栏目录整理" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "图库模式" }), "organize");
     expect(props.onDualFolderModeChange).toHaveBeenCalledWith(true);
     expect(props.onVariantModeChange).toHaveBeenCalledWith(false);
     expect(props.onClearSelection).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByLabelText("更多操作", { selector: "summary" }));
-    await user.click(screen.getByRole("button", { name: "变体" }));
+    await user.selectOptions(screen.getByRole("combobox", { name: "图库模式" }), "variants");
     expect(props.onVariantModeChange).toHaveBeenCalledWith(true);
     expect(props.onClearSelection).toHaveBeenCalledTimes(2);
 
@@ -141,7 +139,7 @@ describe("GalleryToolbar", () => {
     expect(sourceGroup?.querySelector('option[value="import_target"]')).toHaveTextContent("Import Target / universal_gallery_imports/");
 
     await user.click(screen.getByLabelText("更多操作", { selector: "summary" }));
-    await user.selectOptions(screen.getByRole("combobox"), "import_target");
+    await user.selectOptions(screen.getByRole("combobox", { name: "导入目标" }), "import_target");
     expect(props.onImportTargetSourceIdChange).toHaveBeenCalledWith("import_target");
   });
 });

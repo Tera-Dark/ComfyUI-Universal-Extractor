@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CornerDownRight,
   Eye,
+  MoreHorizontal,
   FolderPlus,
   Image as ImageIcon,
   Pin,
@@ -29,6 +30,7 @@ interface MasonryLayout {
 }
 
 interface GalleryMainContentProps {
+  highlightPath?: string;
   images: ImageRecord[];
   emptyState?: { title: string; description: string; actionLabel?: string; onAction?: () => void };
   galleryViewMode: ContentViewMode;
@@ -79,6 +81,7 @@ const SelectionBoxOverlay = ({ selectionEnabled, selectionBox }: { selectionEnab
 
 export const GalleryMainContent = ({
   images,
+  highlightPath,
   emptyState,
   galleryViewMode,
   selectionMode,
@@ -153,7 +156,7 @@ export const GalleryMainContent = ({
                   ref={(element) => {
                     cardRefs.current[image.relative_path] = element;
                   }}
-                  className={`ue-gallery-list-row ${selected ? "is-selected" : ""}`}
+                  className={`ue-gallery-list-row ${selected ? "is-selected" : ""} ${highlightPath === image.relative_path ? "is-located" : ""}`}
                   onContextMenu={(event) => onOpenContextMenu(event, image)}
                   onClick={(event) => {
                     if (selectionMode) {
@@ -281,7 +284,7 @@ export const GalleryMainContent = ({
                 return (
                   <article
                     key={image.relative_path}
-                    className={`ue-gallery-card ${selected ? "is-selected" : ""}`}
+                    className={`ue-gallery-card ${selected ? "is-selected" : ""} ${highlightPath === image.relative_path ? "is-located" : ""}`}
                     data-tour-id={index === 0 ? "gallery-card" : undefined}
                     data-index={index}
                     data-lane={lane}
@@ -308,7 +311,7 @@ export const GalleryMainContent = ({
                         }}
                       />
 
-                      <div className="ue-gallery-actions">
+                      <div className={`ue-gallery-actions ${selectionMode ? "is-selecting" : ""}`}>
                         <button
                           className="ue-send-btn"
                           data-tour-id={index === 0 ? "gallery-workflow" : undefined}
@@ -333,17 +336,7 @@ export const GalleryMainContent = ({
                           {selected ? <CheckSquare size={13} /> : <Square size={13} />}
                         </button>
 
-                        <button
-                          className="ue-board-btn"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            openBoardPickerForImage(image, selected);
-                          }}
-                          aria-label={t("bulkAddToBoard")}
-                          title={t("bulkAddToBoard")}
-                        >
-                          <FolderPlus size={13} />
-                        </button>
+                        <button className="ue-board-btn" onClick={(event) => { event.stopPropagation(); onOpenContextMenu(event, image); }} aria-label={t("moreActions")} title={t("moreActions")}><MoreHorizontal size={13} /></button>
 
                         <button
                           className={`ue-pin-btn ${image.pinned ? "active" : ""}`}
@@ -358,23 +351,7 @@ export const GalleryMainContent = ({
                         </button>
                       </div>
 
-                      <button
-                        className="ue-gallery-open ue-gallery-open--icon"
-                        onClick={(event) => {
-                          if (selectionMode) {
-                            onImageSelectionClick(image.relative_path, event);
-                            return;
-                          }
-                          if (isDraggingSelectionRef.current) {
-                            return;
-                          }
-                          onOpenDetail(image);
-                        }}
-                        aria-label={t("galleryInspect")}
-                        title={t("galleryInspect")}
-                      >
-                        <Eye size={14} />
-                      </button>
+
                     </div>
 
                     <button

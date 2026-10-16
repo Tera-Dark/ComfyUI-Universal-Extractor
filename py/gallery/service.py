@@ -350,6 +350,7 @@ _freshness_sources_for_subfolder = _partial(indexing._freshness_sources_for_subf
 _scan_image_freshness = _partial(indexing._scan_image_freshness, _environment)
 get_image_freshness = _partial(indexing.get_image_freshness, _environment)
 list_images_page = _partial(indexing.list_images_page, _environment)
+locate_image = _partial(indexing.locate_image, _environment)
 _build_image_filter_sql = _partial(indexing._build_image_filter_sql, _environment)
 _image_row_select_sql = _partial(indexing._image_row_select_sql, _environment)
 _query_filtered_image_rows = _partial(indexing._query_filtered_image_rows, _environment)

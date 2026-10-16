@@ -67,7 +67,7 @@ export const useGalleryJobs = (enabled: boolean) => {
           const tone = active(job) ? "pending" : job.state === "failed" ? "error" : job.state === "succeeded" ? "success" : "info";
           syncTask(job.id, `${label} · ${t(active(job) ? "jobRunning" : job.state === "failed" ? "jobFailed" : job.state === "cancelled" ? "jobCancelled" : "jobCompleted")}`,
             tone, job.error || `${job.completed} / ${job.total}`, job.state === "failed" ? () => { void retry(job); } : undefined,
-            { source: "gallery", phase: job.state, completed: job.completed, total: job.total, jobId: job.id,
+            { taskKind: job.kind, source: "gallery", phase: job.state, completed: job.completed, total: job.total, jobId: job.id,
               quiet: job.kind === "refresh_index",
               cancel: active(job) && job.state !== "cancelling" ? () => { void galleryApi.cancelJob(job.id).then(() => poll()).catch((error) => notify(error instanceof Error ? error.message : t("jobFailed"), "error")); } : undefined });
         }

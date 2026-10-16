@@ -29,7 +29,7 @@ describe("ImageSearchModal", () => {
     expect(await screen.findByText("文件完全相同")).toBeInTheDocument();
     expect(screen.getByText("C:\\output\\2025\\old.png")).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "定位文件夹" }));
-    expect(props.onClose).toHaveBeenCalledOnce();
+    expect(props.onClose).not.toHaveBeenCalled();
     expect(props.onLocate).toHaveBeenCalledWith(image);
   });
 

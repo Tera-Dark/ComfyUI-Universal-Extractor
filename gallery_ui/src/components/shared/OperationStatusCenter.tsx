@@ -1,3 +1,4 @@
+import { useDismissableLayer } from "../../utils/interaction";
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { CheckCircle2, CircleAlert, Info, Loader2, ListChecks, X } from "lucide-react";
 
@@ -6,6 +7,7 @@ import { useI18n } from "../../i18n/I18nProvider";
 export type OperationTone = "success" | "error" | "info" | "pending";
 
 export interface OperationMetadata {
+  taskKind?: string;
   source?: string;
   phase?: string;
   completed?: number;
@@ -26,18 +28,19 @@ interface OperationItem extends OperationMetadata {
   occurrences?: number;
 }
 
-export interface RunOperationOptions<T> {
+export interface RunOperationOptions<T> extends OperationMetadata {
   pending: string;
   success?: string | ((value: T) => string);
   successTone?: (value: T) => Exclude<OperationTone, "pending">;
   successDetail?: (value: T) => string;
+  successRetry?: (value: T) => (() => void) | undefined;
   error?: string | ((error: unknown) => string);
 }
 
 interface OperationStatusContextValue {
   notify: (message: string, tone?: Exclude<OperationTone, "pending">, detail?: string) => string;
-  startOperation: (message: string, detail?: string) => string;
-  updateOperation: (id: string, message: string, tone: Exclude<OperationTone, "pending">, detail?: string) => void;
+  startOperation: (message: string, detail?: string, metadata?: OperationMetadata) => string;
+  updateOperation: (id: string, message: string, tone: Exclude<OperationTone, "pending">, detail?: string, retry?: () => void) => void;
   dismissOperation: (id: string) => void;
   runOperation: <T>(operation: () => Promise<T>, options: RunOperationOptions<T>) => Promise<T>;
   syncTask: (id: string, message: string, tone: OperationTone, detail: string, retry?: () => void, metadata?: OperationMetadata) => void;
@@ -67,6 +70,8 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
   const [items, setItems] = useState<OperationItem[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [filter, setFilter] = useState<"pending" | "error" | "recent">("pending");
+  const closeCenter = useCallback(() => setExpanded(false), []);
+  useDismissableLayer(expanded, closeCenter, { closeOnScroll: false });
   const [epoch, tick] = useState(() => Date.now());
   const dismissTimersRef = useRef<Map<string, number>>(new Map());
   const errorIds = useRef(new Map<string, string>());
@@ -97,17 +102,26 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
   const upsertItem = useCallback((item: OperationItem) => {
     tick(Date.now());
     setItems((current) => {
-      const withoutExisting = current.filter((entry) => entry.id !== item.id);
-      const previous = current.find((entry) => entry.id === item.id);
+      const linked = item.jobId ? current.find((entry) => entry.jobId === item.jobId) ?? current.find((entry) =>
+        entry.tone === "pending" && entry.taskKind === item.taskKind && item.taskKind && !entry.jobId) : undefined;
+      const id = linked?.id ?? item.id;
+      const withoutExisting = current.filter((entry) => entry.id !== id);
+      const previous = current.find((entry) => entry.id === id);
       const quietCompleted = item.quiet && item.tone !== "error" && item.tone !== "pending" &&
         (!previous || Date.now() - previous.createdAt < 2000);
-      return trimOperationItems([{ ...item, createdAt: previous?.createdAt ?? item.createdAt,
+      return trimOperationItems([{ ...previous, ...item, id, createdAt: previous?.createdAt ?? item.createdAt,
         hidden: item.tone === "error" && previous?.tone !== "error" ? false : previous?.hidden || quietCompleted,
         occurrences: previous?.tone === "error" && item.tone === "error" && !item.jobId ? (previous.occurrences ?? 1) + 1 : previous?.occurrences,
       }, ...withoutExisting]);
     });
-    scheduleDismiss(item.id, item.tone);
-  }, [scheduleDismiss]);
+  }, []);
+
+  useEffect(() => {
+    for (const item of items) {
+      if (item.tone === "pending" || item.tone === "error") clearDismissTimer(item.id);
+      else if (!item.hidden && !dismissTimersRef.current.has(item.id)) scheduleDismiss(item.id, item.tone);
+    }
+  }, [clearDismissTimer, items, scheduleDismiss]);
 
   const notify = useCallback((message: string, tone: Exclude<OperationTone, "pending"> = "info", detail = "") => {
     const key = `${message}\n${detail}`;
@@ -117,18 +131,18 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
     return id;
   }, [upsertItem]);
 
-  const startOperation = useCallback((message: string, detail = "") => {
+  const startOperation = useCallback((message: string, detail = "", metadata?: OperationMetadata) => {
     const id = createOperationId();
-    upsertItem({ id, tone: "pending", message, detail, createdAt: Date.now() });
+    upsertItem({ id, tone: "pending", message, detail, ...metadata, createdAt: Date.now() });
     return id;
   }, [upsertItem]);
 
-  const updateOperation = useCallback((id: string, message: string, tone: Exclude<OperationTone, "pending">, detail = "") => {
-    upsertItem({ id, tone, message, detail, createdAt: Date.now() });
+  const updateOperation = useCallback((id: string, message: string, tone: Exclude<OperationTone, "pending">, detail = "", retry?: () => void) => {
+    upsertItem({ id, tone, message, detail, retry, cancel: undefined, createdAt: Date.now() });
   }, [upsertItem]);
 
   const runOperation = useCallback(async <T,>(operation: () => Promise<T>, options: RunOperationOptions<T>) => {
-    const id = startOperation(options.pending);
+    const id = startOperation(options.pending, "", { taskKind: options.taskKind, source: options.source });
     try {
       const value = await operation();
       if (options.success) {
@@ -137,6 +151,7 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
           typeof options.success === "function" ? options.success(value) : options.success,
           options.successTone?.(value) ?? "success",
           options.successDetail?.(value) ?? "",
+          options.successRetry?.(value),
         );
       } else {
         dismissOperation(id);
@@ -201,7 +216,7 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
   return (
     <OperationStatusContext.Provider value={value}>
       {children}
-      <div className="ue-operation-status-center">
+      <div className="ue-operation-status-center" onClick={(event) => event.stopPropagation()}>
         {expanded ? <section className="ue-task-panel" aria-label={t("operationCenter")}>
           <header><strong>{t("operationCenter")}</strong><button onClick={() => setExpanded(false)} aria-label={t("notificationDismiss")}><X size={16} /></button></header>
           <nav aria-label={t("operationCenter")}>
@@ -209,7 +224,7 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
           </nav>
           <div className="ue-task-history">{history.length ? history.map((item) => card(item, true)) : <p>{t("operationEmpty")}</p>}</div>
         </section> : floating.map((item) => card(item))}
-        <button className="ue-task-center-toggle" aria-expanded={expanded} onClick={() => setExpanded((current) => !current)}>
+        <button className="ue-task-center-toggle" aria-expanded={expanded} onClick={() => { if (!expanded) setFilter(pendingCount ? "pending" : errorCount ? "error" : "recent"); setExpanded((current) => !current); }}>
           <ListChecks size={16} /><span>{t("operationCenter")}</span>{pendingCount > 0 && <span>{pendingCount} {t("operationTab_pending")}</span>}{errorCount > 0 && <span className="ue-task-error-count">{errorCount} {t("operationTab_error")}</span>}
         </button>
       </div>

@@ -1,3 +1,4 @@
+import { confirmedBatchRetry } from "../../utils/batchRetry";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowRightLeft,
@@ -491,6 +492,12 @@ export const DualFolderWorkspace = ({
   }, [leftFolder, loadPane, rightFolder]);
 
   useEffect(() => {
+    const update = () => { void reloadBothPanes(false); };
+    window.addEventListener("universal-gallery:files-changed", update);
+    return () => window.removeEventListener("universal-gallery:files-changed", update);
+  }, [reloadBothPanes]);
+
+  useEffect(() => {
     void loadPane("left", leftFolder);
   }, [leftFolder, loadPane]);
 
@@ -590,6 +597,11 @@ export const DualFolderWorkspace = ({
           ].filter(Boolean).join(" ");
         },
         successTone: value => getMoveOutcome(relativePaths, value).complete ? "success" : "error",
+        successRetry: value => confirmedBatchRetry({ paths: getMoveOutcome(relativePaths, value).failedPaths, confirm,
+          confirmation: count => ({ title: text.moveConfirmTitle, message: t("qolMoveConfirm", { count, source: getFolderLabel(sourceFolder, context, t), target: getFolderLabel(targetFolder, context, t) }), tone: "warning", confirmLabel: t("commonMove"), cancelLabel: t("libraryCancel") }),
+          execute: paths => onMoveImages(paths, targetSubfolder, targetSourceId), failed: (paths, result) => getMoveOutcome(paths, result).failedPaths,
+          summary: (_paths, result) => t("qolMoveResult", { moved: result.moved.length, missing: result.missing.length, blocked: result.blocked?.length ?? 0 }), run: runOperation, pending: t("operationMoveImages"),
+        }),
         successDetail: value => {
           const { failedPaths } = getMoveOutcome(relativePaths, value);
           return failedPaths.length ? t("operationUnprocessedPaths", { target:describeFailedPaths(failedPaths) }) : "";

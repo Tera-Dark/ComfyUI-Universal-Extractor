@@ -432,6 +432,6 @@
 .ue-release-markdown { overflow-wrap: anywhere; font-size: 13px; line-height: 1.65; }
 .ue-release-markdown h3 { font-size: 13px; margin: 14px 0 5px; }
 .ue-release-markdown p { white-space: normal; margin: 6px 0; }
-.ue-release-markdown ul { padding-left: 18px; margin: 6px 0; }
+.ue-release-markdown ul { list-style: disc; padding-left: 18px; margin: 6px 0; }
 .ue-release-markdown li + li { margin-top: 5px; }
 .ue-release-markdown a { color: var(--ue-blue, #2563eb); }

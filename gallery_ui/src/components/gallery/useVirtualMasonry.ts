@@ -87,7 +87,8 @@ export const useVirtualMasonry = ({
   viewportWidth,
   scrollElement,
   gap,
-  density = "standard",}: {
+  density = "standard",
+}: {
   images: ImageRecord[];
   requestedColumns: number;
   gridWidth: number;

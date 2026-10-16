@@ -537,10 +537,10 @@ describe("GalleryWorkspace smoke", () => {
         element.classList.contains("ue-gallery-grid--virtual"),
       ).length;
 
-      fireEvent.click(screen.getByRole("button", { name: "开启双栏目录整理" }));
+      fireEvent.change(screen.getByRole("combobox", { name: "图库模式" }), { target: { value: "organize" } });
       await waitFor(() => expect(container.querySelector(".ue-dual-workspace")).toBeInTheDocument());
 
-      fireEvent.click(screen.getByRole("button", { name: "关闭双栏目录整理" }));
+      fireEvent.change(screen.getByRole("combobox", { name: "图库模式" }), { target: { value: "browse" } });
       await waitFor(() => expect(container.querySelector(".ue-gallery-grid--virtual")).toBeInTheDocument());
       await waitFor(() =>
         expect(observedElements.filter((element) => element.classList.contains("ue-gallery-grid--virtual")).length).toBeGreaterThan(initialGridObserveCount),

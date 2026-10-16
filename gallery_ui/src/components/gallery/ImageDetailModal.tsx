@@ -1,3 +1,4 @@
+import { DisclosureMenu } from "../shared/DisclosureMenu";
 import {
   useEffect,
   useRef,
@@ -1267,7 +1268,8 @@ export const ImageDetailModal = ({
 
         <div className="ue-lightbox-toolbar">
           {fileActionError ? <div className="ue-inline-error ue-lightbox-action-error" role="alert">{fileActionError}</div> : null}
-          <button
+          <div className="ue-detail-action-group" role="group" aria-label={t("detailBrowse")}>
+            <button
             className="ue-toolbar-btn"
             disabled={!navigation || currentIndex <= 0}
             onClick={() => handleRequestNavigate(Math.max(0, currentIndex - 1))}
@@ -1275,12 +1277,7 @@ export const ImageDetailModal = ({
             {...getTooltipProps(t("galleryPrevious"))}
           >
             <ChevronLeft size={17} />
-          </button>
-          <span className="ue-lightbox-page-indicator">
-            {currentIndex + 1}/{totalItems}
-          </span>
-          <span className="ue-lightbox-zoom-indicator">{zoomPercentage}%</span>
-          <button
+          </button><span className="ue-lightbox-page-indicator">{currentIndex + 1}/{totalItems}</span><button
             className="ue-toolbar-btn"
             disabled={!navigation || currentIndex >= totalItems - 1}
             onClick={() => handleRequestNavigate(Math.min(totalItems - 1, currentIndex + 1))}
@@ -1288,19 +1285,7 @@ export const ImageDetailModal = ({
             {...getTooltipProps(t("galleryNext"))}
           >
             <ChevronRight size={17} />
-          </button>
-          <span className="ue-toolbar-divider" />
-          {navigation && navigation.items.length > 1 ? (
-            <button
-              className={`ue-toolbar-btn ${showFilmstrip ? "is-active" : ""}`}
-              onClick={() => setShowFilmstrip((current) => !current)}
-              aria-label={t("imageFilmstripToggle")}
-              title={t("imageFilmstripToggle")}
-            >
-              <Film size={17} />
-            </button>
-          ) : null}
-          <button
+          </button><button
             className="ue-toolbar-btn"
             onClick={() => setShowInspector((current) => !current)}
             aria-label={t("modalToggleInspector")}
@@ -1308,41 +1293,28 @@ export const ImageDetailModal = ({
           >
             <BookOpen size={17} />
           </button>
-          <button
-            className="ue-toolbar-btn"
+          </div>
+          <div className="ue-detail-action-group" role="group" aria-label={t("detailReuse")}>
+            <button
+            className="ue-toolbar-btn ue-toolbar-btn--label"
             onClick={() => void handleCopyPositivePrompt()}
             aria-label={t("metadataCopyPositive")}
             {...getTooltipProps(t("metadataCopyPositive"))}
           >
-            <ClipboardCopy size={17} />
-          </button>
-          <button
-            className="ue-toolbar-btn"
-            onClick={() => setShowInspector(true)}
-            aria-label={t("metadataView")}
-            {...getTooltipProps(t("metadataView"))}
-          >
-            <FileJson size={17} />
-          </button>
-          <span className="ue-toolbar-divider" />
-          <button
-            className="ue-toolbar-btn"
-            onClick={resetViewport}
-            aria-label={t("modalFitImage")}
-            {...getTooltipProps(t("modalFitImage"))}
-          >
-            <Shrink size={17} />
-          </button>
-          <button
-            className="ue-toolbar-btn"
-            onClick={() => updateZoom(Math.max(zoomScale, 2))}
-            aria-label={t("modalExpandImage")}
-            {...getTooltipProps(t("modalExpandImage"))}
-          >
-            <Expand size={17} />
-          </button>
-          <span className="ue-toolbar-divider" />
-          <button
+            <ClipboardCopy size={17} /><span>{t("metadataCopyPositive")}</span>
+          </button><button
+              className="ue-toolbar-btn ue-toolbar-btn--label"
+              disabled={!canOpenWorkflow}
+              title={!canOpenWorkflow ? t("detailNoWorkflow") : t("modalOpenWorkflow")}
+              onClick={() => void onOpenWorkflow(image)}
+              aria-label={t("modalOpenWorkflow")}
+
+            >
+              <Boxes size={17} /><span>{t("modalOpenWorkflow")}</span>
+            </button>
+          </div>
+          <div className="ue-detail-action-group" role="group" aria-label={t("detailManage")}>
+            <button
             className="ue-toolbar-btn ue-toolbar-btn--filled"
             onClick={() => void handleSave()}
             aria-label={t("modalSaveState")}
@@ -1350,28 +1322,7 @@ export const ImageDetailModal = ({
             disabled={!isStateDirty || isSavingState || isLoading}
           >
             <Save size={17} />
-          </button>
-          {canOpenWorkflow ? (
-            <button
-              className="ue-toolbar-btn"
-              onClick={() => void onOpenWorkflow(image)}
-              aria-label={t("modalOpenWorkflow")}
-              {...getTooltipProps(t("modalOpenWorkflow"))}
-            >
-              <Boxes size={17} />
-            </button>
-          ) : null}
-          {metadata ? (
-            <button
-              className="ue-toolbar-btn"
-              onClick={() => void onApplyLoraStack(image)}
-              aria-label={t("loraStackApply")}
-              {...getTooltipProps(t("loraStackApply"))}
-            >
-              <Layers size={17} />
-            </button>
-          ) : null}
-          <button
+          </button><button
             className="ue-toolbar-btn"
             onClick={() => setDraftField("pinned", !draftPinned)}
             disabled={isEditorBusy}
@@ -1380,24 +1331,65 @@ export const ImageDetailModal = ({
           >
             <Pin size={17} fill={draftPinned ? "currentColor" : "none"} />
           </button>
-          <button
+          </div>
+          <DisclosureMenu label={t("moreActions")} icon={<span>{t("moreActions")}</span>} className="ue-detail-more">
+            <span className="ue-lightbox-zoom-indicator">{zoomPercentage}%</span>
+            {navigation && navigation.items.length > 1 ? (<button
+              className={`ue-toolbar-btn ${showFilmstrip ? "is-active" : ""}`}
+              onClick={() => setShowFilmstrip((current) => !current)}
+              aria-label={t("imageFilmstripToggle")}
+              title={t("imageFilmstripToggle")}
+            >
+              <Film size={17} />
+            </button>) : null}
+<button
+            className="ue-toolbar-btn"
+            onClick={() => setShowInspector(true)}
+            aria-label={t("metadataView")}
+            {...getTooltipProps(t("metadataView"))}
+          >
+            <FileJson size={17} />
+          <span>{t("metadataView")}</span></button>
+<button
+            className="ue-toolbar-btn"
+            onClick={resetViewport}
+            aria-label={t("modalFitImage")}
+            {...getTooltipProps(t("modalFitImage"))}
+          >
+            <Shrink size={17} />
+          <span>{t("modalFitImage")}</span></button>
+<button
+            className="ue-toolbar-btn"
+            onClick={() => updateZoom(Math.max(zoomScale, 2))}
+            aria-label={t("modalExpandImage")}
+            {...getTooltipProps(t("modalExpandImage"))}
+          >
+            <Expand size={17} />
+          <span>{t("modalExpandImage")}</span></button>
+{metadata ? (<button
+              className="ue-toolbar-btn"
+              onClick={() => void onApplyLoraStack(image)}
+              aria-label={t("loraStackApply")}
+              {...getTooltipProps(t("loraStackApply"))}
+            >
+              <Layers size={17} />
+            <span>{t("loraStackApply")}</span></button>) : null}
+<button
             className="ue-toolbar-btn"
             onClick={() => void handleRename()}
             aria-label={t("modalRenameFile")}
             {...getTooltipProps(t("modalRenameFile"))}
           >
             <PencilLine size={17} />
-          </button>
-          <button
+          <span>{t("modalRenameFile")}</span></button>
+<button
             className="ue-toolbar-btn ue-toolbar-btn--danger"
             onClick={() => void handleDelete()}
             aria-label={t("modalDeleteFile")}
             {...getTooltipProps(t("modalDeleteFile"))}
           >
             <Trash2 size={17} />
-          </button>
-          <span className="ue-toolbar-divider" />
-          <a
+          <span>{t("modalDeleteFile")}</span></button><a
             href={image.url}
             target="_blank"
             rel="noreferrer"
@@ -1406,7 +1398,8 @@ export const ImageDetailModal = ({
             {...getTooltipProps(t("modalOpenFull"))}
           >
             <ExternalLink size={17} />
-          </a>
+          <span>{t("modalOpenFull")}</span></a>
+          </DisclosureMenu>
         </div>
       </div>
     </div>,

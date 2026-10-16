@@ -27,6 +27,7 @@ test("execution terminal events emit once per prompt, without per-node refreshes
     __api: { addEventListener(name, handler) { handlers.set(name, handler); } },
     window, document: { getElementById() { return {}; }, querySelectorAll() { return []; }, addEventListener() {} },
     BroadcastChannel: Channel, setTimeout, console,
+    MutationObserver: class { observe() {} },
   });
   await new Promise(setImmediate);
   await extension.setup();
