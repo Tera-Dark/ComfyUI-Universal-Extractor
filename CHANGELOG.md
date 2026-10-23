@@ -1,6 +1,12 @@
 # Changelog
 
-## 1.8.1 - 2026-10-23
+## 1.8.1 - 2026-10-24
+
+### 图库同步与效率
+- 合并此前本地 1.8.0 的性能改进：一次遍历收集图片和目录，仅登记变化的资源身份，按索引 rowid 局部更新全文检索。
+- 后端发现 API 客户端的工作流完成记录，按输出范围合并同步；新完成事件不会被更早的扫描吞掉。
+- 刷新等待和状态中心共用任务变化通知，减少重复轮询与多余提示；未变化的卡片、目录和移动目标保持引用。
+- 修复新版 Pillow 颜色像素解析，合并后台分析排队，避免无用的尺寸任务。
 
 ### 统一工作区体验
 - 以图库的浅色工具界面为基准统一字体、表面、控件和弹层；保留深色沉浸看图及语义状态色。
@@ -13,9 +19,19 @@
 - 普通弹窗共用焦点、键盘和返回逻辑；确认框始终位于上层，词条草稿关闭前检查未保存修改。
 - 保留图库布局、选择、文件事务、自动同步和 ComfyUI/LoRA Manager 集成。
 
-### 本地候选
-- 本次为本地候选，不自动推送或发布。安装前请停止 ComfyUI，再完整替换代码和 dist。
-- 用户状态、词库和目录库不迁移，升级时保留 data 与恢复日志。
+### 升级说明
+- 安装前停止 ComfyUI，备份 data 和未解决的操作日志，再完整替换代码与 dist，重启并刷新 ComfyUI 和图库。
+- 保留用户 JSON、词库和目录库身份；派生索引升级到 schema 11。不要用包内默认数据覆盖用户 data，不要删除 catalog.sqlite3 或恢复证据。
+- GitHub 发布与 Registry 审核状态分别核验；上传成功不代表 Manager 已可更新。
+
+### 已知限制
+- 加载图片时仍可能出现轻微视觉抖动，尚未彻底消除；本版不增加搜索模型或视频音频支持。
+
+### Gallery synchronization and performance
+- Includes the previously local 1.8.0 improvements: collect images and folders in one traversal, register only changed identities, and update full-text rows through indexed row IDs.
+- Discover API workflow completions on the backend and coalesce output scopes; an older scan cannot acknowledge newer output.
+- Share task-change notifications between refresh waiters and the status center, reducing duplicate polling/messages while preserving unchanged cards, folders and move targets.
+- Fix modern Pillow color pixel extraction, coalesce background analysis and avoid unnecessary dimension jobs.
 
 ### Consistent workspaces
 - Align light workspace surfaces, typography, controls and overlays with Gallery; retain dark image viewing and semantic status colors.
@@ -28,9 +44,13 @@
 - Light dialogs share focus, keyboard and return behavior; nested confirmations stay above them and entry drafts require an explicit discard.
 - Preserve gallery geometry, selections, file journals, auto-sync and ComfyUI/LoRA Manager behavior.
 
-### Local candidate
-- No automatic push or publication. Stop ComfyUI before replacing the code and complete dist.
-- No user state, library or catalog migration; preserve data and recovery journals.
+### Upgrade notes
+- Stop ComfyUI, back up data and unresolved operation journals, replace the code and complete dist, restart, and refresh ComfyUI and Gallery.
+- Preserve user JSON, libraries and catalog identities; the derived index upgrades to schema 11. Do not overwrite user data with bundled defaults or delete catalog.sqlite3/recovery evidence.
+- GitHub releases and Registry review have independent status; a successful upload does not guarantee Manager availability.
+
+### Known limitations
+- Mild visual movement can still occur while images load; it is not fully resolved. No search model or video/audio support is added.
 
 ## 1.8.0 - 2026-10-23
 

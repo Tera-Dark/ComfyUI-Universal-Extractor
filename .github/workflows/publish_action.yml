@@ -3,6 +3,10 @@ name: Publish to Comfy registry
 on:
   workflow_dispatch:
 
+concurrency:
+  group: comfy-registry-${{ github.repository }}
+  cancel-in-progress: false
+
 jobs:
   publish-node:
     name: Publish Custom Node to registry
@@ -10,6 +14,24 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
+
+      - name: Validate release and prepare registry changelog
+        shell: bash
+        run: |
+          python scripts/check_release.py
+          python - <<'PY'
+          import os
+          import subprocess
+          import sys
+          import uuid
+
+          body = subprocess.check_output(
+              [sys.executable, "scripts/release_notes.py", "--body", "en"], text=True
+          ).strip()
+          delimiter = f"CHANGELOG_{uuid.uuid4().hex}"
+          with open(os.environ["GITHUB_ENV"], "a", encoding="utf-8") as handle:
+              handle.write(f"COMFY_NODE_CHANGELOG<<{delimiter}\n{body}\n{delimiter}\n")
+          PY
 
       - name: Read package version
         id: package
@@ -45,16 +67,13 @@ jobs:
           params = urllib.parse.urlencode({
               "nodeId": node_id,
               "pageSize": "100",
-              "statuses": "NodeVersionStatusActive",
           })
           url = f"https://api.comfy.org/versions?{params}"
-          exists = False
-          try:
-              with urllib.request.urlopen(url, timeout=20) as response:
-                  payload = json.loads(response.read().decode("utf-8"))
-              exists = any(item.get("version") == version for item in payload.get("versions", []))
-          except Exception as error:
-              print(f"::warning::Could not check Comfy registry before publishing: {error}", file=sys.stderr)
+          # Any existing status owns the version, including pending review.
+          # Fail the check rather than risk republishing an unknown state.
+          with urllib.request.urlopen(url, timeout=20) as response:
+              payload = json.loads(response.read().decode("utf-8"))
+          exists = any(item.get("version") == version for item in payload.get("versions", []))
           print(f"exists={'true' if exists else 'false'}")
           if exists:
               print(f"::notice::Comfy registry already has {node_id} {version}; skipping publish.", file=sys.stderr)
@@ -65,3 +84,4 @@ jobs:
         uses: Comfy-Org/publish-node-action@main
         with:
           personal_access_token: ${{ secrets.REGISTRY_ACCESS_TOKEN }}
+          skip_checkout: 'true'

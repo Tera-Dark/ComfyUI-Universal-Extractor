@@ -10,7 +10,7 @@ The current runtime preserves the contracts below. Installation, task API exampl
 - `py/gallery/similarity.py`: exact-radius candidate generation using disjoint Hamming bands.
 - `py/nodes/prompt_snapshot.py`: optional resolved-text PNG metadata pass-through.
 - `gallery_ui/src/components/shared/DisclosureMenu.tsx`: accessible native disclosure for progressive actions.
-- `gallery_ui/src/styles/minimal.css`: isolated visual tokens and workspace restyling.
+- `gallery_ui/src/styles/base.css`: global visual tokens and shared controls; `minimal.css` and `workspace-system.css` own navigation and workspace presentation.
 - `UNIVERSAL_EXTRACTOR_DATA_DIR`: opt-in external data root, no automatic migration.
 - Release builds now clean dist and validate Vite manifest; old hash names are never rewritten. `sync-dist` is a non-mutating compatibility alias for the audit.
 - `scripts/check_release.py` is the portable metadata checker; PowerShell delegates to it.
@@ -182,7 +182,7 @@ Node registration starts in the repository root `__init__.py`, which loads class
 
 `scripts/verify.ps1` remains the preferred full local check. It runs Python tests, backend compileall, Node bridge tests, frontend typecheck/lint/i18n/tests/security audit/build, dist asset audit, and release metadata checks. `scripts/check-release.ps1` checks that `pyproject.toml`, `gallery_ui/package.json`, and `package-lock.json` versions agree and built assets referenced by `index.html` exist. Clean builds remove previous hashed files; do not rewrite old hashes with new content. Release versions should also add a matching `## x.y.z` section in `CHANGELOG.md` so the update popover can display local notes before or without a populated GitHub Release body.
 
-The manual Comfy registry workflow reads the package version, checks the registry for an existing active version, and skips the publish action with a notice when the version is already present. Real publish failures should still fail the workflow.
+The manual Comfy registry workflow validates release metadata, passes the installed English structured release notes through `COMFY_NODE_CHANGELOG`, checks all registry statuses for an existing version, and skips publication when that version already exists (including pending review). A failed registry check or publish fails the workflow; publication runs are serialized per repository. Dispatch the verified immutable release tag. A successful upload does not imply an active/approved Registry version.
 
 The production frontend does not use the default Vite/React starter assets, so `gallery_ui/src/assets/hero.png`, `react.svg`, and `vite.svg` should stay absent unless a real UI surface references replacement assets.
 
