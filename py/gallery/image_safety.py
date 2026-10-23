@@ -65,8 +65,12 @@ def extract_rgba_pixels(image: Any) -> list[tuple[int, int, int, int]]:
     """Safely extract RGBA tuples from an RGBA Pillow image across Pillow 10-14+."""
     if hasattr(image, "get_flattened_data"):
         try:
-            flat = list(image.get_flattened_data())
-            return [(flat[i], flat[i + 1], flat[i + 2], flat[i + 3]) for i in range(0, len(flat), 4)]
+            # Pillow's flattened data flattens the image rows, not the color
+            # channels: RGBA images still yield one tuple per pixel.
+            pixels = list(image.get_flattened_data())
+            if not pixels or isinstance(pixels[0], (tuple, list)):
+                return [tuple(pixel) for pixel in pixels]
+            return [(pixels[i], pixels[i + 1], pixels[i + 2], pixels[i + 3]) for i in range(0, len(pixels), 4)]
         except Exception:
             pass
     with warnings.catch_warnings():

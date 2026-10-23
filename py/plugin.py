@@ -31,4 +31,5 @@ def register_gallery_routes():
 
     from .gallery.routes import register_routes
 
-    register_routes(prompt_server.instance.app)
+    queue = getattr(prompt_server.instance, "prompt_queue", None)
+    register_routes(prompt_server.instance.app, history_reader=getattr(queue, "get_history", None))

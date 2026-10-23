@@ -112,7 +112,8 @@ class Catalog:
                 row = db.execute("SELECT * FROM assets WHERE source_id=? AND namespace=? AND location_key=? AND availability IN ('online','missing')", (source["id"], namespace, key)).fetchone()
                 if row:
                     revision = row["content_revision"] + int((row["observed_size"], row["mtime_ns"]) != (size, mtime_ns))
-                    db.execute("UPDATE assets SET availability='online',relative_path=?,observed_size=?,mtime_ns=?,content_revision=? WHERE asset_id=?", (relative_path, size, mtime_ns, revision, row["asset_id"]))
+                    if row["availability"] != "online" or row["relative_path"] != relative_path or revision != row["content_revision"]:
+                        db.execute("UPDATE assets SET availability='online',relative_path=?,observed_size=?,mtime_ns=?,content_revision=? WHERE asset_id=?", (relative_path, size, mtime_ns, revision, row["asset_id"]))
                     asset_id = row["asset_id"]
                 else:
                     asset_id, revision = str(uuid.uuid4()), 1
