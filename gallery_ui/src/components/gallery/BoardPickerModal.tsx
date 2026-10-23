@@ -1,3 +1,4 @@
+import { ModalSurface } from "../shared/ModalSurface";
 import { useMemo, useState } from "react";
 import { Check, FolderPlus, Images, X } from "lucide-react";
 
@@ -69,8 +70,7 @@ export const BoardPickerModal = ({
   };
 
   return (
-    <div className="ue-modal-backdrop" onClick={onClose}>
-      <div className="ue-library-modal ue-board-picker-modal" onClick={(event) => event.stopPropagation()}>
+    <ModalSurface className="ue-library-modal ue-board-picker-modal" title={t("boardAddToTitle")} onClose={onClose} closeDisabled={isSubmitting}>
         <button className="ue-modal-close ue-modal-close--light" onClick={onClose} aria-label={t("modalClose")}>
           <X size={18} />
         </button>
@@ -124,7 +124,6 @@ export const BoardPickerModal = ({
             {newBoardName.trim() ? <FolderPlus size={14} /> : <Check size={14} />}
           </button>
         </div>
-      </div>
-    </div>
+    </ModalSurface>
   );
 };

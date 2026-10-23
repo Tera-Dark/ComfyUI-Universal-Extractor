@@ -1,50 +1,47 @@
+/* Shared visual contract. Feature chunks must not redefine global tokens. */
 :root {
-  --ue-ink: #18181b;
-  --ue-ink-soft: #3f3f46;
-  --ue-ink-muted: #71717a;
-  --ue-ink-ghost: #a1a1aa;
-
-  --ue-canvas: #ffffff;
+  --ue-ink: #242424;
+  --ue-ink-soft: #414141;
+  --ue-ink-muted: #737373;
+  --ue-ink-ghost: #777;
+  --ue-canvas: #fff;
   --ue-surface: #fafafa;
-  --ue-surface-alt: #f4f4f5;
-  --ue-surface-dim: #e4e4e7;
-
-  --ue-border: #e4e4e7;
+  --ue-surface-alt: #f4f4f4;
+  --ue-surface-dim: #e8e8e8;
+  --ue-border: #e8e8e8;
   --ue-line: var(--ue-border);
-  --ue-gallery-gap: 14px;
-  --ue-card-body-height: 48px;
-  --ue-card-body-padding: 6px;
-  --ue-line-soft: #f0f0f2;
-
-  --ue-accent: #18181b;
-  --ue-accent-hover: #27272a;
-  --ue-accent-soft: #f4f4f5;
-
+  --ue-line-soft: #ededed;
+  --ue-accent: #262626;
+  --ue-accent-hover: #3a3a3a;
+  --ue-accent-soft: #f1f1f1;
   --ue-red: #dc2626;
   --ue-red-soft: #fef2f2;
   --ue-green: #16a34a;
   --ue-green-soft: #f0fdf4;
   --ue-favorite: #f43f5e;
-
   --ue-r-sm: 8px;
   --ue-r-md: 12px;
   --ue-r-lg: 16px;
-
   --ue-shadow-0: none;
-  --ue-shadow-1: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --ue-shadow-2: 0 4px 16px rgba(0, 0, 0, 0.06);
-  --ue-shadow-3: 0 16px 48px rgba(0, 0, 0, 0.1);
-
-  --ue-ease: cubic-bezier(0.16, 1, 0.3, 1);
-  --ue-duration-fast: 150ms;
-  --ue-duration-base: 250ms;
-  --ue-duration-slow: 400ms;
-
-  --ue-sidebar-width: clamp(236px, 18vw, 292px);
+  --ue-shadow-1: none;
+  --ue-shadow-2: 0 4px 18px #0000000a;
+  --ue-shadow-3: 0 12px 44px #00000014;
+  --ue-ease: cubic-bezier(.2,.7,.3,1);
+  --ue-duration-fast: 120ms;
+  --ue-duration-base: 160ms;
+  --ue-duration-slow: 200ms;
+  --ue-sidebar-width: 248px;
   --ue-icon-size: 16px;
   --ue-icon-size-compact: 14px;
   --ue-icon-size-status: 11px;
-  --ue-hit-target: 32px;
+  --ue-hit-target: 36px;
+  --ue-gallery-gap: 14px;
+  --ue-card-body-height: 48px;
+  --ue-card-body-padding: 6px;
+  --ue-font-meta: 12px;
+  --ue-font-control: 13px;
+  --ue-layer-modal: 240;
+  --ue-layer-confirm: 300;
 }
 
 *,
@@ -84,9 +81,7 @@ body,
 
 body {
   margin: 0;
-  background:
-    radial-gradient(circle at top left, rgba(244, 244, 245, 0.96), transparent 28%),
-    linear-gradient(180deg, #ffffff 0%, #fcfcfc 100%);
+  background: var(--ue-canvas);
   color: var(--ue-ink);
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-feature-settings: "cv02", "cv03", "cv04", "cv11";
@@ -478,7 +473,7 @@ textarea::placeholder {
 .ue-modal-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 90;
+  z-index: var(--ue-layer-modal);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -486,12 +481,12 @@ textarea::placeholder {
   min-height: 0;
   padding: 24px;
   overflow: hidden auto;
-  background: rgba(0, 0, 0, 0.6);
+  background: rgba(24, 24, 24, 0.32);
   animation: ue-fade-in var(--ue-duration-base) var(--ue-ease) both;
 }
 
 .ue-confirm-backdrop {
-  z-index: 130;
+  z-index: var(--ue-layer-confirm);
   align-items: center;
   justify-content: center;
   padding: max(24px, env(safe-area-inset-top)) max(24px, env(safe-area-inset-right)) max(24px, env(safe-area-inset-bottom)) max(24px, env(safe-area-inset-left));
@@ -736,3 +731,44 @@ textarea::placeholder {
 .ue-density-setting { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 16px; font-size: 13px; }
 .ue-density-setting select { padding: 7px 10px; border: 1px solid var(--ue-line); border-radius: 8px; background: var(--ue-canvas); }
 .ue-density-setting small { color: var(--ue-ink-muted); font-size: 12px; }
+
+/* Available before any lazy workspace is opened. */
+.ue-primary-action,
+.ue-secondary-action,
+.ue-danger-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 8px 12px;
+  border-radius: 10px;
+  justify-content: center;
+  font-size: var(--ue-font-control);
+  line-height: 1.5;
+  cursor: pointer;
+}
+
+.ue-primary-action {
+  border: 1px solid var(--ue-accent);
+  background: var(--ue-accent);
+  color: white;
+}
+
+.ue-secondary-action {
+  border: 1px solid var(--ue-line);
+  background: var(--ue-canvas);
+  color: var(--ue-ink);
+}
+
+.ue-danger-action {
+  border: 1px solid rgba(239, 68, 68, 0.45);
+  background: rgba(239, 68, 68, 0.1);
+  color: rgb(220, 38, 38);
+}
+
+.ue-primary-action:disabled,
+.ue-secondary-action:disabled,
+.ue-danger-action:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}

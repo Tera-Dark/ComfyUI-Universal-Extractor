@@ -1,3 +1,4 @@
+import "../../styles/metadata.css";
 import { DisclosureMenu } from "../shared/DisclosureMenu";
 import {
   useEffect,

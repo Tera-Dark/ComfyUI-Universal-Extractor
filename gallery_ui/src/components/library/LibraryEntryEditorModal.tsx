@@ -1,4 +1,6 @@
-import { useState } from "react";
+import { useConfirm } from "../shared/ConfirmDialog";
+import { ModalSurface } from "../shared/ModalSurface";
+import { useState, useRef } from "react";
 import { Save, Sparkles, Trash2, X } from "lucide-react";
 
 import { useI18n } from "../../i18n/I18nProvider";
@@ -35,16 +37,29 @@ export const LibraryEntryEditorModal = ({
 }: LibraryEntryEditorModalProps) => {
   const { t } = useI18n();
   const { pushToast } = useToast();
+  const { confirm } = useConfirm();
+  const confirming = useRef(false);
   const [value, setValue] = useState(() => JSON.stringify(initialEntry ?? {}, null, 2));
+
+  const requestClose = async () => {
+    if (isSubmitting || confirming.current) return;
+    if (value !== JSON.stringify(initialEntry ?? {}, null, 2)) {
+      confirming.current = true;
+      try {
+        if (!(await confirm({ title: t("libraryUnsavedTitle"), message: t("libraryUnsavedConfirm"),
+          confirmLabel: t("libraryDiscardChanges"), cancelLabel: t("libraryCancel"), tone: "warning" }))) return;
+      } finally { confirming.current = false; }
+    }
+    onClose();
+  };
 
   if (!open) {
     return null;
   }
 
   return (
-    <div className="ue-modal-backdrop" onClick={onClose}>
-      <div className="ue-library-modal ue-library-modal--wide" onClick={(event) => event.stopPropagation()}>
-        <button className="ue-modal-close ue-modal-close--light" onClick={onClose} aria-label={t("modalClose")}>
+    <ModalSurface className="ue-library-modal ue-library-modal--wide" title={title} onClose={() => void requestClose()} closeDisabled={isSubmitting}>
+        <button className="ue-modal-close ue-modal-close--light" disabled={isSubmitting} onClick={() => void requestClose()} aria-label={t("modalClose")}>
           <X size={18} />
         </button>
 
@@ -64,7 +79,7 @@ export const LibraryEntryEditorModal = ({
               {templates.map((template) => (
                 <button
                   key={template.id}
-                  className="ue-library-template-card"
+                  className="ue-library-template-card" disabled={isSubmitting}
                   onClick={() => setValue(JSON.stringify(template.entry, null, 2))}
                   type="button"
                 >
@@ -86,7 +101,8 @@ export const LibraryEntryEditorModal = ({
         </div>
 
         <textarea
-          className="ue-library-entry-editor"
+          className="ue-library-entry-editor" disabled={isSubmitting}
+          aria-label={`${t("libraryDetail")} JSON`}
           value={value}
           onChange={(event) => setValue(event.target.value)}
         />
@@ -105,12 +121,12 @@ export const LibraryEntryEditorModal = ({
               aria-label={t("commonDelete")}
               title={t("commonDelete")}
             >
-              <Trash2 size={14} />
+              <Trash2 size={14} /><span>{t("commonDelete")}</span>
             </button>
           ) : null}
 
-          <button className="ue-icon-action" onClick={onClose} aria-label={t("libraryCancel")} title={t("libraryCancel")}>
-            <X size={14} />
+          <button className="ue-icon-action" disabled={isSubmitting} onClick={() => void requestClose()} aria-label={t("libraryCancel")} title={t("libraryCancel")}>
+            <X size={14} /><span>{t("libraryCancel")}</span>
           </button>
           <button
             className="ue-icon-action ue-icon-action--filled"
@@ -129,10 +145,9 @@ export const LibraryEntryEditorModal = ({
               }
             }}
           >
-            <Save size={14} />
+            <Save size={14} /><span>{t("librarySave")}</span>
           </button>
         </div>
-      </div>
-    </div>
+    </ModalSurface>
   );
 };

@@ -10,6 +10,9 @@ import {
   FolderPlus,
   FolderTree,
   HardDrive,
+  Settings,
+  SlidersHorizontal,
+  Activity,
   Images,
   ListTree,
   MoreHorizontal,
@@ -222,6 +225,8 @@ export const WorkspaceSidebar = ({
   const [folderSortMode, setFolderSortMode] = useState<FolderSortMode>(() => getStoredFolderSort());
   const [folderContextMenu, setFolderContextMenu] = useState<{ path: string; x: number; y: number } | null>(null);
   const [folderActionsMenu, setFolderActionsMenu] = useState<{ x: number; y: number } | null>(null);
+  const [libraryNameQuery, setLibraryNameQuery] = useState("");
+  const visibleLibraries = useMemo(() => libraries.filter((library) => library.filename.toLowerCase().includes(libraryNameQuery.trim().toLowerCase())), [libraries, libraryNameQuery]);
   const [folderSearchQuery, setFolderSearchQuery] = useState("");
   const [draggingFolderPath, setDraggingFolderPath] = useState("");
   const [folderDropTargetPath, setFolderDropTargetPath] = useState("");
@@ -779,6 +784,15 @@ export const WorkspaceSidebar = ({
           </div>
           </div>
         </div>
+      ) : activeTab === "settings" ? (
+        <div className="ue-sidebar-section ue-sidebar-section--grow">
+          <div className="ue-sidebar-heading"><span>{t("navSettings")}</span><Settings size={14} /></div>
+          <nav className="ue-settings-sidebar" aria-label={t("navSettings")} onClick={(event) => { if (window.innerWidth <= 960 && event.target instanceof Element && event.target.closest("a")) onToggle(); }}>
+            <a className="ue-tree-item" href="#ue-preferences"><SlidersHorizontal size={15} /><span>{t("settingsPreferencesTitle")}</span></a>
+            <a className="ue-tree-item" href="#ue-sources"><HardDrive size={15} /><span>{t("settingsSourcesTitle")}</span></a>
+            <a className="ue-tree-item" href="#ue-diagnostics"><Activity size={15} /><span>{t("settingsDiagnostics")}</span></a>
+          </nav>
+        </div>
       ) : (
         <div className="ue-sidebar-section ue-sidebar-section--grow">
           <div className="ue-sidebar-heading">
@@ -786,10 +800,14 @@ export const WorkspaceSidebar = ({
             <span>{libraries.length}</span>
           </div>
 
+          <label className="ue-sidebar-search">
+            <Search size={13} />
+            <input value={libraryNameQuery} onChange={(event) => setLibraryNameQuery(event.target.value)} placeholder={t("librarySearchFilesPlaceholder")} aria-label={t("librarySearchFilesPlaceholder")} />
+          </label>
           <div className="ue-library-list" role="list" aria-label={t("sidebarLibraries")}>
-            {libraries.length === 0 ? <div className="ue-sidebar-empty">{t("sidebarNoLibraries")}</div> : null}
+            {visibleLibraries.length === 0 ? <div className="ue-sidebar-empty">{t(libraries.length ? "libraryNoMatchingFiles" : "sidebarNoLibraries")}</div> : null}
 
-            {libraries.map((library) => (
+            {visibleLibraries.map((library) => (
               <div
                 key={library.filename}
                 role="listitem"

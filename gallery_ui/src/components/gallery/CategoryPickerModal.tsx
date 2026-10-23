@@ -1,3 +1,4 @@
+import { ModalSurface } from "../shared/ModalSurface";
 import { useMemo, useState } from "react";
 import { Search, X } from "lucide-react";
 
@@ -34,8 +35,7 @@ export const CategoryPickerModal = ({
   }
 
   return (
-    <div className="ue-modal-backdrop" onClick={onClose}>
-      <div className="ue-library-modal" onClick={(event) => event.stopPropagation()}>
+    <ModalSurface className="ue-library-modal" title={t("galleryCategoryBrowse")} onClose={onClose}>
         <button className="ue-modal-close ue-modal-close--light" onClick={onClose} aria-label={t("modalClose")}>
           <X size={18} />
         </button>
@@ -77,7 +77,6 @@ export const CategoryPickerModal = ({
             </button>
           ))}
         </div>
-      </div>
-    </div>
+    </ModalSurface>
   );
 };

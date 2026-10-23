@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CornerDownRight,
   Copy,
+  MoreHorizontal,
   Download,
   FileJson,
   FilePlus2,
@@ -15,7 +16,6 @@ import {
   PencilLine,
   RefreshCw,
   Save,
-  Search,
   Sparkles,
   Tags,
   Trash2,
@@ -32,6 +32,8 @@ import type {
   LibraryValidationIssue,
 } from "../../types/universal-gallery";
 import { LibraryEntryEditorModal } from "./LibraryEntryEditorModal";
+import { WorkspaceSearch } from "../shared/WorkspaceSearch";
+import { DisclosureMenu } from "../shared/DisclosureMenu";
 import { LibraryImportModal } from "./LibraryImportModal";
 import { useConfirm } from "../shared/ConfirmDialog";
 import { useToast } from "../shared/ToastViewport";
@@ -59,6 +61,7 @@ interface LibraryWorkspaceProps {
   canUseRawEditor: boolean;
   searchTerm: string;
   onSearchClear: () => void;
+  onSearchChange: (value: string) => void;
   onEditorValueChange: (value: string) => void;
   onPageChange: (page: number) => void;
   onStartEditing: () => void;
@@ -129,6 +132,7 @@ export const LibraryWorkspace = ({
   canUseRawEditor,
   searchTerm,
   onSearchClear,
+  onSearchChange,
   onEditorValueChange,
   onPageChange,
   onStartEditing,
@@ -376,7 +380,7 @@ export const LibraryWorkspace = ({
   return (
     <>
       <section
-        className={`ue-workspace ue-animate-in ${dragActive ? "is-dragging-library" : ""}`}
+        className={`ue-workspace ue-workspace--library ue-animate-in ${dragActive ? "is-dragging-library" : ""}`}
         data-tour-id="library-workspace"
         onDragEnter={(event) => {
           event.preventDefault();
@@ -414,10 +418,15 @@ export const LibraryWorkspace = ({
             </p>
           </div>
 
-          <div className={`ue-library-actions ${!activeLibraryName ? "is-empty" : ""}`} data-tour-id="library-actions">
+        </div>
+
+        <div className="ue-library-toolbar" data-tour-id="library-actions">
+          {activeLibraryName && <WorkspaceSearch value={searchTerm} onChange={onSearchChange} placeholder={t("librarySearchEntriesPlaceholder")} clearLabel={t("librarySearchClear")} tourId="topbar-search" />}
+          <div className={`ue-library-actions ${!activeLibraryName ? "is-empty" : ""}`}>
             <div className="ue-segmented-control ue-segmented-control--compact ue-view-toggle" aria-label={t("viewMode")}>
               <button
                 className={libraryViewMode === "grid" ? "active" : ""}
+                aria-pressed={libraryViewMode === "grid"}
                 onClick={() => setLibraryViewMode("grid")}
                 type="button"
                 aria-label={t("viewGrid")}
@@ -428,6 +437,7 @@ export const LibraryWorkspace = ({
               </button>
               <button
                 className={libraryViewMode === "list" ? "active" : ""}
+                aria-pressed={libraryViewMode === "list"}
                 onClick={() => setLibraryViewMode("list")}
                 type="button"
                 aria-label={t("viewList")}
@@ -437,104 +447,27 @@ export const LibraryWorkspace = ({
                 <span>{t("viewList")}</span>
               </button>
             </div>
-            <input
-              ref={fileInputRef}
-              className="ue-hidden-input"
-              type="file"
-              accept=".json,application/json"
-              onChange={(event) => void prepareImportFile(event.target.files?.[0] ?? null)}
-            />
-            <button
-              className="ue-icon-action"
-              onClick={() => fileInputRef.current?.click()}
-              aria-label={t("libraryAddFile")}
-              title={t("libraryAddFile")}
-            >
-              <FileUp size={14} /><span>{t("libraryAddFile")}</span>
+            <input ref={fileInputRef} className="ue-hidden-input" type="file" accept=".json,application/json"
+              onChange={(event) => void prepareImportFile(event.target.files?.[0] ?? null)} />
+            <button className="ue-icon-action" onClick={() => fileInputRef.current?.click()} disabled={isSubmitting || isEditing} title={t("libraryAddFile")}>
+              <FileUp size={15} /><span>{t("libraryAddFile")}</span>
             </button>
-            <button
-              className="ue-icon-action"
-              onClick={() => {
-                setPendingImportFile(null);
-                setShowImportModal(true);
-              }}
-              aria-label={t("libraryImport")}
-              title={t("libraryImport")}
-            >
-              <Download size={14} />
-            </button>
-            <button className="ue-icon-action" onClick={onRefresh} aria-label={t("navRefresh")} title={t("navRefresh")}>
-              <RefreshCw size={14} />
-            </button>
-            <button
-              className="ue-icon-action"
-              onClick={onExportLibrary}
-              disabled={!activeLibraryName}
-              aria-label={t("libraryExport")}
-              title={t("libraryExport")}
-            >
-              <Download size={14} />
-            </button>
-            <button
-              className="ue-icon-action"
-              onClick={() => openEntryEditor(entryTemplates[0].entry, null)}
-              disabled={!activeLibraryName}
-              aria-label={t("libraryStarterTemplate")}
-              title={t("libraryStarterTemplate")}
-            >
-              <Sparkles size={14} />
-            </button>
-            <button
-              className="ue-icon-action"
-              onClick={() => openEntryEditor({}, null)}
-              disabled={!activeLibraryName}
-              aria-label={t("libraryAddEntry")}
-              title={t("libraryAddEntry")}
-            >
-              <FilePlus2 size={14} /><span>{t("libraryAddEntry")}</span>
-            </button>
-
-            {isEditing && canUseRawEditor ? (
-              <>
-                <button
-                  className="ue-icon-action"
-                  onClick={onFormatEditor}
-                  aria-label={t("libraryFormat")}
-                  title={t("libraryFormat")}
-                >
-                  <WandSparkles size={14} />
-                </button>
-                <button
-                  className="ue-icon-action ue-icon-action--filled"
-                  onClick={onSaveLibrary}
-                  disabled={isSubmitting}
-                  aria-label={t("librarySave")}
-                  title={t("librarySave")}
-                >
-                  <Save size={14} /><span>{t("librarySave")}</span>
-                </button>
-                <button
-                  className="ue-icon-action"
-                  onClick={onCancelEditing}
-                  aria-label={t("libraryCancel")}
-                  title={t("libraryCancel")}
-                >
-                  <X size={14} />
-                </button>
-              </>
-            ) : canUseRawEditor ? (
-              <button
-                className="ue-icon-action"
-                onClick={onStartEditing}
-                disabled={!activeLibraryName}
-                aria-label={t("libraryEdit")}
-                title={t("libraryEdit")}
-              >
-                <PencilLine size={14} />
-              </button>
-            ) : (
-              <span className="ue-editor-status">{t("libraryLargeEditHint")}</span>
-            )}
+            {!isEditing && activeLibraryName && <button className="ue-icon-action ue-icon-action--filled" onClick={() => openEntryEditor({}, null)} disabled={isSubmitting}>
+              <FilePlus2 size={15} /><span>{t("libraryAddEntry")}</span>
+            </button>}
+            {isEditing && canUseRawEditor ? <>
+              <button className="ue-icon-action" onClick={onFormatEditor} title={t("libraryFormat")}><WandSparkles size={15} /><span>{t("libraryFormat")}</span></button>
+              <button className="ue-icon-action ue-icon-action--filled" onClick={onSaveLibrary} disabled={isSubmitting}><Save size={15} /><span>{t("librarySave")}</span></button>
+              <button className="ue-icon-action" onClick={onCancelEditing} disabled={isSubmitting}><X size={15} /><span>{t("libraryCancel")}</span></button>
+            </> : null}
+            <DisclosureMenu label={t("moreActions")} icon={<MoreHorizontal size={17} />} className="ue-library-more">
+              <button onClick={() => { setPendingImportFile(null); setShowImportModal(true); }} disabled={isSubmitting || isEditing}><FileJson size={15} /><span>{t("libraryImport")}</span></button>
+              <button onClick={onRefresh} disabled={isSubmitting || isEditing}><RefreshCw size={15} /><span>{t("navRefresh")}</span></button>
+              <button onClick={onExportLibrary} disabled={!activeLibraryName || isSubmitting}><Download size={15} /><span>{t("libraryExport")}</span></button>
+              <button onClick={() => openEntryEditor(entryTemplates[0].entry, null)} disabled={!activeLibraryName || isEditing || isSubmitting}><Sparkles size={15} /><span>{t("libraryStarterTemplate")}</span></button>
+              {!isEditing && canUseRawEditor && <button onClick={onStartEditing} disabled={!activeLibraryName || isSubmitting}><PencilLine size={15} /><span>{t("libraryEdit")}</span></button>}
+              {!canUseRawEditor && activeLibraryName && <p className="ue-qol-note">{t("libraryLargeEditHint")}</p>}
+            </DisclosureMenu>
           </div>
         </div>
 
@@ -581,6 +514,8 @@ export const LibraryWorkspace = ({
           </div>
         ) : (
           <>
+            <details className="ue-workspace-guide">
+              <summary>{t("libraryGuideDisclosure")}</summary>
             <div className="ue-library-overview-grid">
               <article className="ue-library-overview-card">
                 <span>{t("libraryOverviewEntries")}</span>
@@ -636,30 +571,6 @@ export const LibraryWorkspace = ({
               </article>
             </div>
 
-            <div className="ue-library-search-summary">
-              <div className="ue-library-search-copy">
-                <div className="ue-library-guide-head">
-                  <Search size={15} />
-                  <strong>
-                    {searchTerm.trim()
-                      ? t("librarySearchActive", { name: searchTerm })
-                      : t("librarySearchReady")}
-                  </strong>
-                </div>
-                <p>{t("librarySearchHint")}</p>
-              </div>
-              {searchTerm.trim() ? (
-                <button
-                  className="ue-icon-action"
-                  onClick={onSearchClear}
-                  aria-label={t("librarySearchClear")}
-                  title={t("librarySearchClear")}
-                >
-                  <X size={14} />
-                </button>
-              ) : null}
-            </div>
-
             {librarySignals.topTags.length || librarySignals.topModels.length ? (
               <div className="ue-library-signal-grid">
                 <article className="ue-library-signal-card">
@@ -699,6 +610,7 @@ export const LibraryWorkspace = ({
                 </article>
               </div>
             ) : null}
+            </details>
           </>
         )}
 
@@ -727,8 +639,11 @@ export const LibraryWorkspace = ({
           <div className="ue-gallery-state ue-gallery-state--empty">
             <BookOpen size={38} strokeWidth={1.1} />
             <div>
-              <h3>{t("libraryEmptyTitle")}</h3>
-              <p>{t("libraryEmptyText")}</p>
+              <h3>{t(searchTerm.trim() ? "libraryNoMatchesTitle" : "libraryEmptyTitle")}</h3>
+              <p>{t(searchTerm.trim() ? "libraryNoMatchesText" : "libraryEmptyText")}</p>
+              <button className="ue-secondary-action" onClick={searchTerm.trim() ? onSearchClear : () => openEntryEditor({}, null)}>
+                {t(searchTerm.trim() ? "librarySearchClear" : "libraryAddEntry")}
+              </button>
             </div>
           </div>
         ) : activeLibraryName ? (
@@ -785,38 +700,14 @@ export const LibraryWorkspace = ({
                   <div className="ue-library-row-side">
                     <span>{t("libraryEntryStatus", { count: index + 1 })}</span>
                     <div className="ue-library-row-actions">
-                      <button
-                        className="ue-library-row-action"
-                        onClick={() => openEntryEditor(entry, absoluteIndex)}
-                        aria-label={t("libraryEdit")}
-                        title={t("libraryEdit")}
-                      >
-                        <PencilLine size={13} />
+                      <button className="ue-library-row-action ue-library-row-action--copy" onClick={() => void copyText(promptCopyValue || JSON.stringify(entry, null, 2), t("artistCopyResult"))}>
+                        <Copy size={14} /><span>{t("libraryCopyPrompt")}</span>
                       </button>
-                      <button
-                        className="ue-library-row-action"
-                        onClick={() => void copyText(JSON.stringify(entry, null, 2), t("libraryCopyJsonSuccess"))}
-                        aria-label={t("libraryCopyJson")}
-                        title={t("libraryCopyJson")}
-                      >
-                        <FileJson size={13} />
-                      </button>
-                      <button
-                        className="ue-library-row-action"
-                        onClick={() => void copyText(promptCopyValue || JSON.stringify(entry, null, 2), t("artistCopyResult"))}
-                        aria-label={t("libraryCopyPrompt")}
-                        title={t("libraryCopyPrompt")}
-                      >
-                        <Copy size={13} />
-                      </button>
-                      <button
-                        className="ue-library-row-action ue-library-row-action--danger"
-                        onClick={() => void handleDeleteEntry(absoluteIndex)}
-                        aria-label={t("commonDelete")}
-                        title={t("commonDelete")}
-                      >
-                        <Trash2 size={13} />
-                      </button>
+                      <DisclosureMenu label={t("moreActions")} icon={<MoreHorizontal size={16} />} className="ue-library-more">
+                        <button onClick={() => openEntryEditor(entry, absoluteIndex)}><PencilLine size={14} /><span>{t("libraryEdit")}</span></button>
+                        <button onClick={() => void copyText(JSON.stringify(entry, null, 2), t("libraryCopyJsonSuccess"))}><FileJson size={14} /><span>{t("libraryCopyJson")}</span></button>
+                        <button className="ue-library-row-action--danger" onClick={() => void handleDeleteEntry(absoluteIndex)}><Trash2 size={14} /><span>{t("commonDelete")}</span></button>
+                      </DisclosureMenu>
                     </div>
                   </div>
                 </article>

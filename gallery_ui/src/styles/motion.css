@@ -1,6 +1,5 @@
 /* One motion system. State changes use opacity/color; geometry stays stable.
    Long travel is reserved for the sidebar. No slide/scale entrances on photos. */
-:root { --ue-duration-fast:120ms; --ue-duration-base:160ms; --ue-duration-slow:200ms; --ue-ease:cubic-bezier(.2,.7,.3,1); }
 @keyframes ue-fade-in { from {opacity:0;} to {opacity:1;} }
 @keyframes ue-scale-in { from {opacity:0;} to {opacity:1;} }
 @keyframes ue-overlay-in { from {opacity:0;} to {opacity:1;} }

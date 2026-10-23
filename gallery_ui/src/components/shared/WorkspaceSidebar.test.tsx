@@ -87,6 +87,25 @@ const renderSidebar = (overrides: Partial<Parameters<typeof WorkspaceSidebar>[0]
 };
 
 describe("WorkspaceSidebar folder tree", () => {
+  it("keeps library-file search independent and distinguishes no matches from no libraries", async () => {
+    const onLibrarySelect = vi.fn();
+    renderSidebar({ activeTab: "library", libraries: [{ filename: "Artists.json", count: 4, size: 20 }], onLibrarySelect });
+    const search = screen.getByRole("textbox", { name: "搜索词库文件" });
+    await userEvent.type(search, "missing");
+    expect(screen.getByText("没有匹配的词库文件")).toBeVisible();
+    expect(screen.queryByText("还没有可用词库")).not.toBeInTheDocument();
+    await userEvent.clear(search);
+    expect(screen.getByRole("button", { name: /Artists.json.*4 条记录/ })).toBeVisible();
+    expect(onLibrarySelect).not.toHaveBeenCalled();
+  });
+  it("shows relevant Settings navigation without claiming that gated libraries are empty", () => {
+    renderSidebar({ activeTab: "settings", libraries: [] });
+    expect(screen.getByRole("link", { name: "界面与交互偏好" })).toHaveAttribute("href", "#ue-preferences");
+    expect(screen.getByRole("link", { name: "图片目录" })).toHaveAttribute("href", "#ue-sources");
+    expect(screen.queryByText("还没有可用词库")).not.toBeInTheDocument();
+    expect(screen.queryByRole("textbox", { name: "新建词库" })).not.toBeInTheDocument();
+  });
+
   it("provides keyboard-activatable library rows with an independent delete action", async () => {
     const onLibrarySelect = vi.fn();
     const onLibraryDelete = vi.fn();

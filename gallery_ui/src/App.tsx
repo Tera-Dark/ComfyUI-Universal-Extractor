@@ -21,7 +21,7 @@ import { useOperationStatus, type RunOperationOptions } from "./components/share
 import { getFolderBaseName } from "./components/shared/folderTree";
 import { buildWorkspaceUrl, isSearchOnlyLocationChange, readWorkspaceLocation, type WorkspaceLocation } from "./utils/workspaceLocation";
 import { isOnboardingTourCompleted, markOnboardingTourCompleted } from "./components/shared/onboardingTourModel";
-import type { ImageRecord, LibraryInfo, UiPreferences, WorkspaceTab } from "./types/universal-gallery";
+import type { ImageRecord, UiPreferences, WorkspaceTab } from "./types/universal-gallery";
 import { trySendLoraStackToExistingComfyPage, trySendWorkflowToExistingComfyPage, type LoraStackApplyMode, type LoraStackPayload, type WorkflowPayload } from "./utils/comfyBridgeChannel";
 import "./App.css";
 
@@ -54,14 +54,6 @@ interface FolderDialogState {
   initialValue: string;
   sourcePath?: string;
 }
-
-const matchesLibrarySearch = (library: LibraryInfo, searchTerm: string) => {
-  const query = searchTerm.trim().toLowerCase();
-  if (!query) {
-    return true;
-  }
-  return library.filename.toLowerCase().includes(query);
-};
 
 const clearPendingWorkflowPayload = () => {
   try {
@@ -161,11 +153,6 @@ function App() {
     initialLibraryRef.current = "";
     void library.openLibrary(name);
   }, [library]);
-
-  const filteredLibraries = useMemo(
-    () => library.libraries.filter((item) => matchesLibrarySearch(item, librarySearchTerm)),
-    [library.libraries, librarySearchTerm],
-  );
 
   const canUseRawLibraryEditor = library.entryTotal <= 5000;
 
@@ -824,6 +811,7 @@ function App() {
   return (
     <div className="ue-app-shell" data-density={uiPreferences.interfaceDensity || "standard"}>
       <TopNavigation
+        showSearch={false}
         activeTab={activeTab}
         onTabChange={handleTabChange}
         searchValue={activeTab === "gallery" ? gallery.searchTerm : activeTab === "library" ? librarySearchTerm : ""}
@@ -882,7 +870,7 @@ function App() {
           onMergeFolder={handleMergeFolder}
           onRenameFolder={handleRenameFolder}
           onMoveFolder={handleMoveFolder}
-          libraries={filteredLibraries}
+          libraries={library.libraries}
           activeLibraryName={library.activeLibraryName}
           onLibrarySelect={handleLibrarySelect}
           onLibraryDelete={handleDeleteLibrary}
@@ -996,7 +984,7 @@ function App() {
               trashBusy={gallery.trashBusy}
             />
           ) : activeTab === "library" ? (
-            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
+            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("libraryLoading")}</p></div>}>
               <LibraryWorkspace
                 onSelectLibrary={(name) => void handleLibrarySelect(name)}
                 onCreateLibrary={() => void handleCreateLibrary()}
@@ -1004,6 +992,7 @@ function App() {
                 activeLibraryName={library.activeLibraryName}
                 entries={library.entries}
                 searchTerm={librarySearchTerm}
+                onSearchChange={handleSearchChange}
                 onSearchClear={() => {
                   setLibrarySearchTerm("");
                   library.setSearchTerm("");
@@ -1112,7 +1101,7 @@ function App() {
               />
             </Suspense>
           ) : activeTab === "workbench" ? null : (
-            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
+            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("commonLoading")}</p></div>}>
               <SettingsWorkspace
                 sources={gallery.context?.sources ?? []}
                 preferences={uiPreferences}
@@ -1124,7 +1113,7 @@ function App() {
             </Suspense>
           )}
           {workbenchVisited ? <Activity mode={activeTab === "workbench" ? "visible" : "hidden"}>
-            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("galleryLoading")}</p></div>}>
+            <Suspense fallback={<div className="ue-gallery-state"><div className="ue-loading-orb" /><p>{t("commonLoading")}</p></div>}>
               <WorkbenchWorkspace
                 libraries={library.libraries}
                 activeLibraryName={library.activeLibraryName}

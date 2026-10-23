@@ -25,6 +25,7 @@ import { FloatingLayerPortal, useDismissableLayer, type FloatingMenuPosition } f
 
 interface TopNavigationProps {
   activeTab: WorkspaceTab;
+  showSearch?: boolean;
   onTabChange: (tab: WorkspaceTab) => void;
   searchValue: string;
   onSearchChange: (value: string) => void;
@@ -35,6 +36,7 @@ interface TopNavigationProps {
 
 export const TopNavigation = ({
   activeTab,
+  showSearch = true,
   onTabChange,
   searchValue,
   onSearchChange,
@@ -56,7 +58,7 @@ export const TopNavigation = ({
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const composingRef = useRef(false);
   const updatesButtonRef = useRef<HTMLButtonElement | null>(null);
-  const searchEnabled = activeTab === "library";
+  const searchEnabled = showSearch && activeTab === "library";
   const searchOpen = searchEnabled && (searchExpanded || Boolean(searchValue.trim()));
   const updateAvailable = Boolean(updateStatus?.update_available);
 

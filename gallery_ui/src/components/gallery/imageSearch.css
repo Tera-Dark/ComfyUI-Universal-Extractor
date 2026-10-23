@@ -1,4 +1,4 @@
-.ue-image-search-backdrop { z-index: 240; }
+.ue-image-search-backdrop { z-index: var(--ue-layer-modal); }
 .ue-image-search { width: min(1040px, calc(100vw - 32px)); max-height: calc(100dvh - 48px); display: flex; flex-direction: column; overflow: hidden; background: #fff; border: 1px solid #e4e4e7; border-radius: 18px; box-shadow: 0 24px 80px #0002; color: #27272a; outline: none; }
 .ue-image-search > header { display: flex; justify-content: space-between; gap: 16px; padding: 22px 24px; border-bottom: 1px solid #eee; }
 .ue-image-search h2 { display: flex; align-items: center; gap: 9px; font-size: 18px; font-weight: 650; margin: 0 0 6px; }
@@ -7,12 +7,12 @@
 .ue-image-search aside { padding: 22px; background: #fafafa; border-right: 1px solid #eee; }
 .ue-image-search main { min-width: 0; padding: 22px; }
 .ue-image-search-drop { width: 100%; min-height: 190px; display: flex; align-items: center; flex-direction: column; justify-content: center; gap: 12px; padding: 16px; border: 1px dashed #a1a1aa; border-radius: 12px; background: white; cursor: pointer; font-size: 13px; }
-.ue-image-search-drop:hover { border-color: #6366f1; background: #f8f8ff; }
+.ue-image-search-drop:hover { border-color: #414141; background: #f4f4f4; }
 .ue-image-search-drop img { width: 100%; max-height: 200px; object-fit: contain; border-radius: 6px; }
-.ue-image-search-drop span { font-size: 11px; color: #71717a; }
+.ue-image-search-drop span { font-size: 12px; color: #71717a; }
 .ue-image-search-filename { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; margin: 10px 0; }
 .ue-image-search-broad { display: flex; gap: 8px; align-items: center; font-size: 12px; margin: 18px 0; }
-.ue-image-search-hint { font-size: 11px; line-height: 1.7; color: #71717a; margin: 10px 0; }
+.ue-image-search-hint { font-size: 12px; line-height: 1.7; color: #71717a; margin: 10px 0; }
 .ue-image-search-status { display: flex; align-items: center; gap: 8px; font-size: 13px; min-height: 24px; margin-bottom: 16px; }
 .ue-image-search-results { display: grid; gap: 12px; }
 .ue-image-search-result { display: flex; gap: 15px; padding: 12px; border: 1px solid #e4e4e7; border-radius: 12px; min-width: 0; }
@@ -20,12 +20,12 @@
 .ue-image-search-thumb img { width: 100%; height: 100%; object-fit: contain; }
 .ue-image-search-result-info { min-width: 0; display: flex; align-items: flex-start; flex-direction: column; gap: 8px; }
 .ue-image-search-result-info > strong { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 13px; }
-.ue-image-search-result code { word-break: break-all; font-size: 11px; color: #71717a; user-select: text; }
-.ue-image-search-match { font-size: 11px; color: #6366f1; background: #eef2ff; padding: 3px 7px; border-radius: 5px; }
+.ue-image-search-result code { word-break: break-all; font-size: 12px; color: #71717a; user-select: text; }
+.ue-image-search-match { font-size: 12px; color: #414141; background: #f1f1f1; padding: 3px 7px; border-radius: 5px; }
 .ue-image-search-match.is-exact { color: #047857; background: #ecfdf5; }
 .ue-image-search-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: auto; }
 .ue-image-search-actions button, .ue-image-search .ue-inline-error button { display: inline-flex; align-items: center; gap: 6px; padding: 7px 10px; border: 1px solid #e4e4e7; border-radius: 7px; font-size: 12px; background: #fff; cursor: pointer; }
-.ue-image-search-actions button:hover { border-color: #a5b4fc; background: #f5f7ff; }
+.ue-image-search-actions button:hover { border-color: #aaa; background: #f4f4f4; }
 .ue-image-search-empty { font-size: 13px; line-height: 1.8; color: #71717a; padding: 40px 16px; text-align: center; }
 .ue-image-search-spin { animation: ue-search-spin 1s linear infinite; }
 @keyframes ue-search-spin { to { transform: rotate(360deg); } }

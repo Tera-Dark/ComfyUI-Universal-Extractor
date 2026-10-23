@@ -1,3 +1,5 @@
+import { ModalSurface } from "../shared/ModalSurface";
+import "../../styles/metadata.css";
 import { useEffect, useState } from "react";
 import { ClipboardCopy, FileJson, X } from "lucide-react";
 
@@ -72,8 +74,7 @@ export const MetadataViewerModal = ({ image, onClose }: MetadataViewerModalProps
   );
 
   return (
-    <div className="ue-modal-backdrop ue-metadata-backdrop" onClick={onClose}>
-      <section className="ue-metadata-modal" onClick={(event) => event.stopPropagation()} aria-label={t("metadataView")}>
+    <ModalSurface className="ue-metadata-modal" backdropClassName="ue-metadata-backdrop" title={t("metadataView")} onClose={onClose}>
         <header className="ue-metadata-head">
           <div>
             <span>{t("metadataView")}</span>
@@ -137,7 +138,6 @@ export const MetadataViewerModal = ({ image, onClose }: MetadataViewerModalProps
             </details>
           </>
         )}
-      </section>
-    </div>
+    </ModalSurface>
   );
 };

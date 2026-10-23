@@ -606,6 +606,11 @@ export const WorkbenchWorkspace = ({
                     </label>
                   </div>
 
+                  <details className="ue-qol-disclosure ue-generator-options">
+                    <summary>{t("workbenchAdvancedRecipe")}<span className="ue-qol-note"> · {t("workbenchPostFilter")}: {postCountFilterMode === "none" ? t("workbenchFilterNone") : `${postCountFilterMode === "gt" ? ">" : "<"} ${postCountThreshold}`}
+                      {mode === "standard" ? ` · ${t("workbenchWeightMin")}/${t("workbenchWeightMax")}: ${standardWeightMin}–${standardWeightMax}` : mode === "nai" ? ` · ${t("workbenchWeightMin")}/${t("workbenchWeightMax")}: ${naiWeightMin}–${naiWeightMax}` : mode === "creative" ? ` · ${t("workbenchBracketStyle")}: ${creativeBracketStyle} · ${t("workbenchNestLevels")}: ${creativeNestLevels}` : ""}
+                      {enableCustomFormat ? ` · ${t("workbenchCustomFormat")}: ${t("commonEnabled")}` : ""}</span></summary>
+                    <div className="ue-generator-options-body">
                   <div className="ue-tool-grid ue-tool-grid--wide">
                     <label>
                       <span>{t("workbenchPostFilter")}</span>
@@ -687,6 +692,9 @@ export const WorkbenchWorkspace = ({
                       <input value={customFormatString} onChange={(event) => setCustomFormatString(event.target.value)} />
                     </label>
                   ) : null}
+
+                    </div>
+                  </details>
 
                   <div className="ue-tool-subsection">
                     <span>02</span>
@@ -826,7 +834,7 @@ export const WorkbenchWorkspace = ({
 
                   <div className="ue-tool-form">
                     <label>
-                      <span>{t("navSearchLibraryPlaceholder")}</span>
+                      <span>{t("workbenchSearchCandidatesPlaceholder")}</span>
                       <input value={query} onChange={(event) => setQuery(event.target.value)} />
                     </label>
                   </div>
@@ -855,10 +863,11 @@ export const WorkbenchWorkspace = ({
                                 setPreselectedNames((current) => [...current, candidate.name].slice(0, 20));
                               }
                             }}
-                            aria-label={t("commonCreate")}
-                            title={t("commonCreate")}
+                            aria-label={t("workbenchAddCandidate", { name: candidate.name })}
+                            title={t(preselectedNames.includes(candidate.name) ? "workbenchAlreadySelected" : preselectedNames.length >= 20 ? "workbenchSelectionLimit" : "workbenchAddPreselected")}
+                            disabled={preselectedNames.includes(candidate.name) || preselectedNames.length >= 20}
                           >
-                            <Plus size={13} />
+                            <Plus size={13} /><span>{t(preselectedNames.includes(candidate.name) ? "workbenchAlreadySelected" : "workbenchAddPreselected")}</span>
                           </button>
                         </div>
                       </article>

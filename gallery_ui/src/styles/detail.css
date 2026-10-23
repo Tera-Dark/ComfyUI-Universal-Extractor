@@ -313,33 +313,6 @@
   line-height: 1.55;
 }
 
-.ue-detail-disclosure {
-  border-top: 1px solid var(--ue-line-soft);
-  padding-top: 16px;
-}
-
-.ue-detail-disclosure summary {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  list-style: none;
-  color: var(--ue-ink-soft);
-  font-size: 12px;
-  font-weight: 500;
-}
-
-.ue-detail-disclosure summary::-webkit-details-marker {
-  display: none;
-}
-
-.ue-detail-disclosure summary strong {
-  margin-left: auto;
-  color: var(--ue-ink-ghost);
-  font-size: 11px;
-  font-weight: 600;
-}
-
 .ue-detail-pill-list {
   display: flex;
   flex-direction: column;
@@ -353,39 +326,6 @@
   background: var(--ue-surface);
   color: var(--ue-ink-soft);
   font-size: 12px;
-}
-
-.ue-detail-state {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 10px;
-  min-height: 96px;
-  border-radius: var(--ue-r-md);
-  background: var(--ue-surface);
-}
-
-.ue-detail-state--empty {
-  justify-content: flex-start;
-  padding: 14px;
-}
-
-.ue-detail-state p {
-  margin: 0;
-  color: var(--ue-ink-muted);
-  font-size: 12px;
-}
-
-.ue-meta-raw {
-  overflow: auto;
-  margin: 12px 0 0;
-  padding: 14px;
-  border-radius: var(--ue-r-md);
-  background: #111215;
-  color: #ececf1;
-  font-family: "SF Mono", Consolas, monospace;
-  font-size: 11px;
-  line-height: 1.65;
 }
 
 .ue-detail-copy-prompt {
@@ -615,88 +555,6 @@
   flex-direction: column;
   gap: 8px;
   margin-top: 4px;
-}
-
-.ue-metadata-backdrop {
-  z-index: 95;
-  background: rgba(15, 15, 18, 0.48);
-  backdrop-filter: blur(8px);
-}
-
-.ue-metadata-modal {
-  display: grid;
-  gap: 16px;
-  width: min(860px, calc(100vw - 32px));
-  max-height: min(760px, calc(100vh - 32px));
-  padding: 20px;
-  border: 1px solid rgba(228, 228, 231, 0.92);
-  border-radius: 18px;
-  background: rgba(255, 255, 255, 0.98);
-  box-shadow: 0 28px 72px rgba(24, 24, 27, 0.24);
-  overflow: auto;
-}
-
-.ue-metadata-head {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
-  padding-bottom: 12px;
-  border-bottom: 1px solid var(--ue-line-soft);
-}
-
-.ue-metadata-head span {
-  color: var(--ue-ink-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.ue-metadata-head h2 {
-  margin: 4px 0 0;
-  color: var(--ue-ink);
-  font-size: 18px;
-  line-height: 1.25;
-  overflow-wrap: anywhere;
-}
-
-.ue-metadata-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-}
-
-.ue-metadata-summary {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-}
-
-.ue-metadata-summary--detail {
-  grid-template-columns: 1fr;
-  margin-top: 12px;
-}
-
-.ue-metadata-summary label {
-  display: grid;
-  gap: 8px;
-}
-
-.ue-metadata-summary span {
-  color: var(--ue-ink-muted);
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.ue-metadata-summary textarea {
-  width: 100%;
-  min-height: 132px;
-  resize: vertical;
-  padding: 12px;
-  border: 1px solid var(--ue-line);
-  border-radius: var(--ue-r-md);
-  background: var(--ue-surface);
-  color: var(--ue-ink);
-  font: 12px/1.55 "SF Mono", Consolas, monospace;
 }
 
 .ue-detail-variant-list {
@@ -1028,26 +886,26 @@
   justify-content: center;
 }
 
-.ue-lightbox-retry-btn {
+ .ue-lightbox-retry-btn {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 8px 16px;
   border-radius: 10px;
   border: none;
-  background: #6366f1;
-  color: #ffffff;
+  background: #f4f4f4;
+  color: #242424;
   font-size: 13px;
   font-weight: 500;
   cursor: pointer;
   transition: background-color var(--ue-duration-fast) var(--ue-ease), color var(--ue-duration-fast) var(--ue-ease), border-color var(--ue-duration-fast) var(--ue-ease), opacity var(--ue-duration-fast) var(--ue-ease);
-  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.35);
+  box-shadow: none;
 }
 
 .ue-lightbox-retry-btn:hover {
-  background: #4f46e5;
-  transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(99, 102, 241, 0.45);
+  background: #fff;
+  transform: none;
+  box-shadow: none;
 }
 
 .ue-lightbox-link-btn {
@@ -1127,8 +985,8 @@
 }
 
 .ue-lightbox-filmstrip-item.is-active {
-  border-color: #6366f1;
-  box-shadow: 0 0 0 2px #6366f1, 0 4px 12px rgba(99, 102, 241, 0.35);
+  border-color: #fff;
+  box-shadow: 0 0 0 2px #fff;
   transform: scale(1.08);
 }
 

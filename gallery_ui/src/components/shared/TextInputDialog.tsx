@@ -1,3 +1,4 @@
+import { ModalSurface } from "./ModalSurface";
 import { useEffect, useState } from "react";
 import { Check, X } from "lucide-react";
 
@@ -44,10 +45,9 @@ export const TextInputDialog = ({
   const trimmedValue = value.trim();
 
   return (
-    <div className="ue-modal-backdrop" onClick={onClose}>
+    <ModalSurface className="ue-library-modal ue-dialog-modal ue-text-input-modal" title={title} onClose={onClose} closeDisabled={isSubmitting}>
       <form
-        className="ue-library-modal ue-dialog-modal ue-text-input-modal"
-        onClick={(event) => event.stopPropagation()}
+        className="ue-dialog-form"
         onSubmit={async (event) => {
           event.preventDefault();
           if (!trimmedValue || isSubmitting) {
@@ -99,6 +99,6 @@ export const TextInputDialog = ({
           </button>
         </div>
       </form>
-    </div>
+    </ModalSurface>
   );
 };
