@@ -229,8 +229,10 @@ def _schedule_dimension_backfill(env, sources, signature):
     runtime = env.get_runtime()
     if runtime.catalog:
         with env._connect_gallery_index_db() as db:
+            missing = db.execute("SELECT 1 FROM gallery_images WHERE image_width<=0 OR image_height<=0 LIMIT 1").fetchone()
             built = env._index_meta_get(db, "built_at")
-        runtime.get_jobs().enqueue("dimensions", {"_signature": signature, "_built": built}, version=env.DIMENSION_INDEX_VERSION)
+        if missing:
+            runtime.get_jobs().enqueue("dimensions", {"_signature": signature, "_built": built}, version=env.DIMENSION_INDEX_VERSION)
 
 
 def _schedule_dimension_backfill_if_needed(env, connection, sources, signature):

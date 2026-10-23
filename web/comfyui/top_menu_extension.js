@@ -611,24 +611,63 @@ const createExtensionObject = (useActionBar) => {
         async setup() {
             // Execution notifications have their own channel; workflow/LoRA
             // delivery remains addressed to one acknowledged ComfyUI instance.
-            if ("BroadcastChannel" in window && !window.__universalGalleryExecutionBridge) {
+            if (!window.__universalGalleryExecutionBridge) {
                 window.__universalGalleryExecutionBridge = true;
-                const galleryEvents = new BroadcastChannel("universal-extractor-gallery-events");
+                const galleryEvents = "BroadcastChannel" in window ? new BroadcastChannel("universal-extractor-gallery-events") : null;
                 const completedPrompts = new Set();
+                const outputs = new Map();
+                let closed = false;
+                let activePromptId = null;
+                api.addEventListener("execution_start", (event) => { activePromptId = event.detail?.prompt_id || null; });
+                api.addEventListener("executed", (event) => {
+                    const id = event.detail?.prompt_id;
+                    if (typeof id !== "string" || !id || id.length > 200 || completedPrompts.has(id)) return;
+                    const entries = outputs.get(id) || [];
+                    const images = event.detail?.output?.images;
+                    for (const image of Array.isArray(images) ? images : []) {
+                        if (entries.length >= 128) break;
+                        if (image && typeof image.subfolder === "string" && ["output", "input", "temp"].includes(image.type)) {
+                            entries.push({ type: image.type, subfolder: image.subfolder });
+                        }
+                    }
+                    outputs.set(id, entries);
+                    if (outputs.size > 256) outputs.delete(outputs.keys().next().value);
+                });
                 const complete = (event) => {
                     const id = event.detail?.prompt_id;
                     if (typeof id !== "string" || !id || id.length > 200 || completedPrompts.has(id)) return;
                     completedPrompts.add(id);
                     if (completedPrompts.size > 256) completedPrompts.delete(completedPrompts.values().next().value);
-                    galleryEvents.postMessage({ version: 1, type: "outputs-changed", prompt_id: id });
+                    const fallback = { version: 1, type: "outputs-changed", prompt_id: id };
+                    const body = JSON.stringify({ version: 1, prompt_id: id, outputs: outputs.get(id) || [] });
+                    outputs.delete(id);
+                    const emit = (value) => { if (!closed) galleryEvents?.postMessage(value); };
+                    if (typeof api.fetchApi !== "function") { emit(fallback); return; }
+                    // Persist no commands or disk paths. The server validates
+                    // registered scopes and relays the hint across desktop/browser origins.
+                    const relay = async (attempt = 0) => {
+                        if (closed) return;
+                        try {
+                            const response = await api.fetchApi("/universal_gallery/api/sync-notifications", {
+                                method: "POST", headers: { "Content-Type": "application/json" }, body,
+                            });
+                            if (!response.ok) throw new Error(`Gallery notification: ${response.status}`);
+                            emit((await response.json()).event || fallback);
+                        } catch {
+                            if (attempt === 0) emit(fallback);
+                            if (attempt < 2) setTimeout(() => { void relay(attempt + 1); }, [2000, 10000][attempt]);
+                        }
+                    };
+                    void relay();
                 };
                 api.addEventListener("execution_success", complete);
                 api.addEventListener("execution_error", complete);
                 api.addEventListener("execution_interrupted", complete);
                 api.addEventListener("executing", (event) => {
                     if (event.detail?.node === null) complete(event);
+                    else if (event.detail === null && activePromptId) complete({ detail: { prompt_id: activePromptId } });
                 });
-                window.addEventListener("pagehide", (event) => { if (!event.persisted) galleryEvents.close(); });
+                window.addEventListener("pagehide", (event) => { if (!event.persisted) { closed = true; galleryEvents?.close(); } });
             }
             window.name = COMFY_WINDOW_NAME;
             let lastHandledWorkflowId = null;

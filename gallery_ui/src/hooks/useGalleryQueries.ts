@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useI18n } from "../i18n/I18nProvider";
 import { galleryApi } from "../services/galleryApi";
 import { synchronizeGalleryIndex } from "../services/gallerySync";
+import { reconcileGalleryContext, reconcileImageRecords } from "../services/gallerySnapshot";
 import type { ColorIndexStatus, GalleryContext, ImageRecord, TrashItem } from "../types/universal-gallery";
 import { PAGE_SIZE } from "../utils/formatters";
 
@@ -56,13 +57,13 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
     const loadContext = async () => {
       let requestError: Error | undefined;
       try {
-        const legacyRefresh = shouldForceRefresh && refreshIndex ? await synchronizeGalleryIndex("", controller.signal) : false;
+        const legacyRefresh = shouldForceRefresh && refreshIndex ? await synchronizeGalleryIndex(isActive ? selectedSubfolder : "", controller.signal) : false;
         if (isCancelled) return;
         const contextResponse = await galleryApi.getContext(legacyRefresh, controller.signal);
         if (isCancelled) {
           return;
         }
-        setContext(contextResponse);
+        setContext((current) => reconcileGalleryContext(current, contextResponse));
         setColorIndexStatus(contextResponse.color_index_status ?? null);
         if (contextResponse.index_error || contextResponse.catalog_error) {
           const message = contextResponse.index_error || contextResponse.catalog_error || t("galleryLoading");
@@ -86,7 +87,7 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
       controller.abort();
       if (shouldForceRefresh) completeRefreshPart(refreshKey, "context", new Error(t("galleryRefreshInterrupted")));
     };
-  }, [completeRefreshPart, refreshKey, refreshIndex, t]);
+  }, [completeRefreshPart, refreshKey, refreshIndex, selectedSubfolder, isActive, t]);
 
   useEffect(() => {
     let isCancelled = false;
@@ -146,7 +147,7 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
           return;
         }
 
-        setImages(imageResponse.images ?? []);
+        setImages((current) => reconcileImageRecords(current, imageResponse.images ?? []));
         loadedCurrentImages = true;
         setTrashItems([]);
         setTotal(imageResponse.total ?? 0);
@@ -154,17 +155,6 @@ export const useGalleryQueries = (options: GalleryQueryOptions) => {
         if (imageResponse.index_error) {
           setError(imageResponse.index_error);
           requestError = new Error(imageResponse.index_error);
-        }
-        if (shouldForceRefresh) {
-          const contextResponse = await galleryApi.getContext(false, controller.signal);
-          if (!isCancelled) {
-            setContext(contextResponse);
-            setColorIndexStatus(contextResponse.color_index_status ?? imageResponse.color_index_status ?? null);
-            if (contextResponse.index_error) {
-              setError(contextResponse.index_error);
-              requestError = new Error(contextResponse.index_error);
-            }
-          }
         }
         if (!isCancelled) scheduleThumbnailPrewarm(imageResponse.images ?? []);
       } catch (fetchError) {

@@ -17,6 +17,14 @@ const NotifyHarness = () => {
   return <button onClick={() => notify("Saved", "success")}>Notify</button>;
 };
 
+const RefreshCycleHarness = () => {
+  const { syncTask } = useOperationStatus();
+  return <>
+    <button onClick={() => syncTask("refresh:scope", "Previous refresh", "success", "", undefined, { jobId: "previous", quiet: true })}>Finish previous</button>
+    <button onClick={() => syncTask("refresh:scope", "New refresh running", "pending", "", undefined, { jobId: "current", quiet: true })}>Start next</button>
+  </>;
+};
+
 const RunHarness = () => {
   const { runOperation } = useOperationStatus();
   return (
@@ -88,6 +96,18 @@ describe("OperationStatusProvider", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "关闭提醒" }));
     expect(screen.queryByText("Saved")).toBeNull();
+  });
+
+  it("starts a new quiet period for a new job without inheriting the old job's hidden state", () => {
+    vi.useFakeTimers();
+    renderWithStatus(<RefreshCycleHarness />);
+    fireEvent.click(screen.getByRole("button", { name: "Finish previous" }));
+    act(() => { vi.advanceTimersByTime(10000); });
+    fireEvent.click(screen.getByRole("button", { name: "Start next" }));
+    expect(screen.queryByText("New refresh running")).toBeNull();
+    act(() => { vi.advanceTimersByTime(2100); });
+    expect(screen.getByText("New refresh running")).toBeInTheDocument();
+    expect(screen.getAllByRole("article")).toHaveLength(1);
   });
 
   it("auto-dismisses completed notifications", async () => {

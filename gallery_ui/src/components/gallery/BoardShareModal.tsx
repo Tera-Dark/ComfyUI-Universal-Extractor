@@ -1,3 +1,4 @@
+import { ModalSurface } from "../shared/ModalSurface";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Copy, Download, Images, X } from "lucide-react";
 
@@ -184,8 +185,7 @@ export const BoardShareModal = ({ open, board, onClose }: BoardShareModalProps) 
   }
 
   return (
-    <div className="ue-modal-backdrop" onClick={onClose}>
-      <div className="ue-library-modal ue-board-share-modal" onClick={(event) => event.stopPropagation()}>
+    <ModalSurface className="ue-library-modal ue-board-share-modal" title={t("boardShareTitle")} onClose={onClose}>
         <button className="ue-modal-close ue-modal-close--light" onClick={onClose} aria-label={t("modalClose")}>
           <X size={18} />
         </button>
@@ -209,7 +209,7 @@ export const BoardShareModal = ({ open, board, onClose }: BoardShareModalProps) 
 
         <div className="ue-library-modal-actions">
           <button className="ue-icon-action" onClick={onClose} aria-label={t("libraryCancel")} title={t("libraryCancel")}>
-            <X size={14} />
+            <X size={14} /><span>{t("libraryCancel")}</span>
           </button>
           <button
             className="ue-icon-action"
@@ -218,7 +218,7 @@ export const BoardShareModal = ({ open, board, onClose }: BoardShareModalProps) 
             aria-label={t("contextCopyImage")}
             title={t("contextCopyImage")}
           >
-            <Copy size={14} />
+            <Copy size={14} /><span>{t("contextCopyImage")}</span>
           </button>
           <button
             className="ue-icon-action ue-icon-action--filled"
@@ -227,10 +227,9 @@ export const BoardShareModal = ({ open, board, onClose }: BoardShareModalProps) 
             aria-label={t("boardShareDownload")}
             title={t("boardShareDownload")}
           >
-            <Download size={14} />
+            <Download size={14} /><span>{t("boardShareDownload")}</span>
           </button>
         </div>
-      </div>
-    </div>
+    </ModalSurface>
   );
 };

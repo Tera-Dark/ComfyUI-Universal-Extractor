@@ -102,15 +102,19 @@ export const OperationStatusProvider = ({ children }: { children: ReactNode }) =
   const upsertItem = useCallback((item: OperationItem) => {
     tick(Date.now());
     setItems((current) => {
-      const linked = item.jobId ? current.find((entry) => entry.jobId === item.jobId) ?? current.find((entry) =>
-        entry.tone === "pending" && entry.taskKind === item.taskKind && item.taskKind && !entry.jobId) : undefined;
+      // A type such as refresh_index is not an operation identity. Guessing a
+      // pending record by type stole unrelated operations and left duplicates
+      // behind when their original completion callback subsequently arrived.
+      const linked = item.jobId ? current.find((entry) => entry.jobId === item.jobId) : undefined;
       const id = linked?.id ?? item.id;
       const withoutExisting = current.filter((entry) => entry.id !== id);
       const previous = current.find((entry) => entry.id === id);
+      const newJob = Boolean(item.jobId && previous?.jobId && item.jobId !== previous.jobId);
+      const createdAt = newJob ? item.createdAt : previous?.createdAt ?? item.createdAt;
       const quietCompleted = item.quiet && item.tone !== "error" && item.tone !== "pending" &&
-        (!previous || Date.now() - previous.createdAt < 2000);
-      return trimOperationItems([{ ...previous, ...item, id, createdAt: previous?.createdAt ?? item.createdAt,
-        hidden: item.tone === "error" && previous?.tone !== "error" ? false : previous?.hidden || quietCompleted,
+        (!previous || Date.now() - createdAt < 2000);
+      return trimOperationItems([{ ...previous, ...item, id, createdAt,
+        hidden: item.tone === "error" && previous?.tone !== "error" ? false : (!newJob && previous?.hidden) || quietCompleted,
         occurrences: previous?.tone === "error" && item.tone === "error" && !item.jobId ? (previous.occurrences ?? 1) + 1 : previous?.occurrences,
       }, ...withoutExisting]);
     });

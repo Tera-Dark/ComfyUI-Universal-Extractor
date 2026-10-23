@@ -389,43 +389,6 @@
   font-size: 12px;
 }
 
-.ue-primary-action,
-.ue-secondary-action,
-.ue-danger-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 36px;
-  padding: 8px 12px;
-  border-radius: 8px;
-  cursor: pointer;
-}
-
-.ue-primary-action {
-  border: 1px solid var(--ue-accent);
-  background: var(--ue-accent);
-  color: white;
-}
-
-.ue-secondary-action {
-  border: 1px solid var(--ue-line);
-  background: var(--ue-canvas);
-  color: var(--ue-ink);
-}
-
-.ue-danger-action {
-  border: 1px solid rgba(239, 68, 68, 0.45);
-  background: rgba(239, 68, 68, 0.1);
-  color: rgb(220, 38, 38);
-}
-
-.ue-primary-action:disabled,
-.ue-secondary-action:disabled,
-.ue-danger-action:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
 @media (max-width: 900px) {
   .ue-settings-hero {
     align-items: stretch;

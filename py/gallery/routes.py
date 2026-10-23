@@ -1243,12 +1243,18 @@ async def _gallery_lifecycle(app):
         await asyncio.to_thread(runtime.close)
 
 
-def register_routes(app):
+def register_routes(app, *, history_reader=None):
+    if history_reader is not None:
+        gallery_service.COMFY_HISTORY_READER = history_reader
     if not app.get(_LIFECYCLE):
         app[_LIFECYCLE] = True
         app.cleanup_ctx.append(_gallery_lifecycle)
     from .job_routes import handlers
     create_job, list_jobs, get_job, cancel_job = handlers(gallery_service)
+    from .sync_signals import handlers as sync_handlers
+    output_notification, sync_status = sync_handlers(gallery_service)
+    _safe_add_route(app.router, "post", "/universal_gallery/api/sync-notifications", output_notification)
+    _safe_add_route(app.router, "get", "/universal_gallery/api/sync-status", sync_status)
     from .image_search_routes import handler as image_search_handler
     _safe_add_route(app.router, "post", "/universal_gallery/api/images/search-by-image", image_search_handler(gallery_service))
     _safe_add_route(app.router, "post", "/universal_gallery/api/jobs", create_job)

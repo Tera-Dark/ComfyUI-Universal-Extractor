@@ -1,3 +1,4 @@
+import { ModalSurface } from "../shared/ModalSurface";
 import { useEffect, useMemo, useState } from "react";
 import { FileUp, GitMerge, RefreshCcw, X } from "lucide-react";
 
@@ -65,9 +66,8 @@ export const LibraryImportModal = ({
   }
 
   return (
-    <div className="ue-modal-backdrop" onClick={onClose}>
-      <div className="ue-library-modal" onClick={(event) => event.stopPropagation()}>
-        <button className="ue-modal-close ue-modal-close--light" onClick={onClose} aria-label={t("modalClose")}>
+    <ModalSurface className="ue-library-modal" title={t("libraryImportTitle")} onClose={onClose} closeDisabled={isSubmitting}>
+        <button className="ue-modal-close ue-modal-close--light" disabled={isSubmitting} onClick={onClose} aria-label={t("modalClose")}>
           <X size={18} />
         </button>
 
@@ -120,8 +120,8 @@ export const LibraryImportModal = ({
         )}
 
         <div className="ue-library-modal-actions">
-          <button className="ue-icon-action" onClick={onClose} aria-label={t("libraryCancel")} title={t("libraryCancel")}>
-            <X size={14} />
+          <button className="ue-icon-action" disabled={isSubmitting} onClick={onClose} aria-label={t("libraryCancel")} title={t("libraryCancel")}>
+            <X size={14} /><span>{t("libraryCancel")}</span>
           </button>
           <button
             className="ue-icon-action ue-icon-action--filled"
@@ -138,10 +138,9 @@ export const LibraryImportModal = ({
               }
             }}
           >
-            <FileUp size={14} />
+            <FileUp size={14} /><span>{t("libraryImport")}</span>
           </button>
         </div>
-      </div>
-    </div>
+    </ModalSurface>
   );
 };

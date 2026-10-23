@@ -1,5 +1,6 @@
 """indexing domain. Dependencies are injected by the host."""
 from __future__ import annotations
+from stat import S_ISDIR
 
 import os
 import json
@@ -106,6 +107,7 @@ def _initialize_gallery_index_db(env, connection: sqlite3.Connection):
     connection.execute("PRAGMA journal_mode=WAL")
     connection.execute("PRAGMA synchronous=NORMAL")
     connection.execute("CREATE TABLE IF NOT EXISTS gallery_folders(source_id TEXT NOT NULL,relative_path TEXT NOT NULL,source_path TEXT NOT NULL,modified_at INTEGER NOT NULL,PRIMARY KEY(source_id,relative_path))")
+    connection.execute("CREATE TABLE IF NOT EXISTS gallery_fts_rows(relative_path TEXT PRIMARY KEY,fts_rowid INTEGER NOT NULL UNIQUE)")
     connection.execute(
         """
         CREATE TABLE IF NOT EXISTS gallery_images (
@@ -148,6 +150,7 @@ def _initialize_gallery_index_db(env, connection: sqlite3.Connection):
         "boards_text": "TEXT NOT NULL DEFAULT ''",
         "image_width": "INTEGER NOT NULL DEFAULT 0",
         "image_height": "INTEGER NOT NULL DEFAULT 0",
+        "file_mtime_ns": "INTEGER NOT NULL DEFAULT 0",
         "dominant_color": "TEXT NOT NULL DEFAULT ''",
         "color_family": "TEXT NOT NULL DEFAULT ''",
         "color_families_text": "TEXT NOT NULL DEFAULT ''",
@@ -205,6 +208,11 @@ def _initialize_gallery_index_db(env, connection: sqlite3.Connection):
         connection.execute(
             "INSERT OR IGNORE INTO gallery_index_meta(key, value) VALUES('fts_available', '1')"
         )
+        if not connection.execute("SELECT 1 FROM gallery_index_meta WHERE key='fts_rowid_map_version' AND value='1'").fetchone():
+            connection.execute("DELETE FROM gallery_fts_rows")
+            connection.execute("INSERT OR IGNORE INTO gallery_fts_rows(relative_path,fts_rowid) SELECT relative_path,rowid FROM gallery_images_fts")
+            connection.execute("DELETE FROM gallery_images_fts WHERE rowid NOT IN (SELECT fts_rowid FROM gallery_fts_rows)")
+            connection.execute("INSERT OR REPLACE INTO gallery_index_meta(key,value) VALUES('fts_rowid_map_version','1')")
     except sqlite3.OperationalError as error:
         connection.execute(
             "INSERT OR REPLACE INTO gallery_index_meta(key, value) VALUES('fts_available', '0')"
@@ -432,16 +440,27 @@ def _color_family_rows_for_image(env, row: sqlite3.Row | dict[str, Any]) -> list
 
 
 def _sync_auxiliary_rows(env, connection: sqlite3.Connection, rows: list[sqlite3.Row | dict[str, Any]], remove_paths: list[str] | None = None):
+    fts = env._index_meta_get(connection, "fts_available") == "1"
+    def row_ids(paths):
+        found = {}
+        for batch in env.iter_sqlite_batches(paths):
+            placeholders = ",".join("?" for _ in batch)
+            found.update({row["relative_path"]: row["fts_rowid"] for row in connection.execute(
+                f"SELECT relative_path,fts_rowid FROM gallery_fts_rows WHERE relative_path IN ({placeholders})", batch)})
+        return found
+
     removed_paths = [env.normalize_relative_path(path) for path in (remove_paths or []) if env.normalize_relative_path(path)]
     if removed_paths:
         connection.executemany("DELETE FROM gallery_image_color_family WHERE relative_path = ?", [(path,) for path in removed_paths])
         connection.executemany("DELETE FROM gallery_image_fingerprints WHERE relative_path = ?", [(path,) for path in removed_paths])
-        if env._index_meta_get(connection, "fts_available") == "1":
-            connection.executemany("DELETE FROM gallery_images_fts WHERE relative_path = ?", [(path,) for path in removed_paths])
+        if fts:
+            connection.executemany("DELETE FROM gallery_images_fts WHERE rowid = ?", [(value,) for value in row_ids(removed_paths).values()])
+            connection.executemany("DELETE FROM gallery_fts_rows WHERE relative_path = ?", [(path,) for path in removed_paths])
 
     if not rows:
         return
 
+    rows = list({str(row["relative_path"]): row for row in rows}.values())
     relative_paths = [str(row["relative_path"]) for row in rows]
     connection.executemany("DELETE FROM gallery_image_color_family WHERE relative_path = ?", [(path,) for path in relative_paths])
     color_rows: list[tuple[str, str, float, int]] = []
@@ -456,11 +475,21 @@ def _sync_auxiliary_rows(env, connection: sqlite3.Connection, rows: list[sqlite3
             color_rows,
         )
 
-    if env._index_meta_get(connection, "fts_available") == "1":
-        connection.executemany("DELETE FROM gallery_images_fts WHERE relative_path = ?", [(path,) for path in relative_paths])
+    if fts:
+        # FTS UNINDEXED columns cannot accelerate equality deletes. Looking up
+        # their rowids in a B-tree avoids a full FTS scan for every changed image.
+        mapped = row_ids(relative_paths)
+        connection.executemany("DELETE FROM gallery_images_fts WHERE rowid = ?", [(value,) for value in mapped.values()])
+        if len(mapped) != len(relative_paths):
+            last = connection.execute("SELECT COALESCE(MAX(fts_rowid),0) FROM gallery_fts_rows").fetchone()[0]
+            for path in relative_paths:
+                if path not in mapped:
+                    last += 1
+                    mapped[path] = last
+            connection.executemany("INSERT OR IGNORE INTO gallery_fts_rows(relative_path,fts_rowid) VALUES(?,?)", mapped.items())
         connection.executemany(
-            "INSERT INTO gallery_images_fts(relative_path, search_text) VALUES(?, ?)",
-            [(str(row["relative_path"]), env._search_text_for_row(row)) for row in rows],
+            "INSERT INTO gallery_images_fts(rowid,relative_path,search_text) VALUES(?, ?, ?)",
+            [(mapped[str(row["relative_path"])], str(row["relative_path"]), env._search_text_for_row(row)) for row in rows],
         )
 
 
@@ -479,6 +508,7 @@ def _ensure_auxiliary_tables_current(env, connection: sqlite3.Connection):
     connection.execute("DELETE FROM gallery_image_color_family")
     if env._index_meta_get(connection, "fts_available") == "1":
         connection.execute("DELETE FROM gallery_images_fts")
+        connection.execute("DELETE FROM gallery_fts_rows")
     env._sync_auxiliary_rows(connection, rows)
     env._index_meta_set(connection, "auxiliary_schema_version", str(env.GALLERY_INDEX_SCHEMA_VERSION))
 
@@ -682,12 +712,21 @@ def get_color_index_status(env) -> dict[str, Any]:
     }
 
 
-def _store_folder_snapshot(connection, sources, details):
+def _store_folder_snapshot(connection, sources, details, scope=""):
     failed = getattr(details, "failed_sources", set())
     for source in sources:
         if not source.get("enabled") or not source.get("exists") or source["id"] in failed:
             continue
-        connection.execute("DELETE FROM gallery_folders WHERE source_id=?", (source["id"],))
+        from .refs import parse_folder_ref
+        scope_source, relative_scope = parse_folder_ref(scope)
+        if scope and source["id"] != scope_source:
+            continue
+        if relative_scope:
+            # Compare a literal prefix; folder names can contain LIKE wildcards.
+            connection.execute("DELETE FROM gallery_folders WHERE source_id=? AND (relative_path=? OR substr(relative_path,1,?)=?)",
+                               (source["id"], relative_scope, len(relative_scope) + 1, relative_scope + "/"))
+        else:
+            connection.execute("DELETE FROM gallery_folders WHERE source_id=?", (source["id"],))
         connection.executemany("INSERT INTO gallery_folders(source_id,relative_path,source_path,modified_at) VALUES(?,?,?,?)",
             [(source["id"], item["relative_path"], source["path"], item["modified_at"])
              for item in details.values() if item["source_id"] == source["id"]])
@@ -749,6 +788,7 @@ def _save_image_index_to_db(env, index: dict[str, Any]):
         connection.execute("DELETE FROM gallery_image_color_family")
         if env._index_meta_get(connection, "fts_available") == "1":
             connection.execute("DELETE FROM gallery_images_fts")
+            connection.execute("DELETE FROM gallery_fts_rows")
         auxiliary_rows = connection.execute(
             """
             SELECT relative_path, filename, title, category, notes, color_family, color_families_text,
@@ -895,7 +935,6 @@ def _image_record_for_file(env, source: dict[str, Any], full_path: str, stat: os
     subfolder_ref = relative_dir
     if source["id"] != env.DEFAULT_OUTPUT_SOURCE_ID:
         subfolder_ref = f'{source["id"]}{env.IMAGE_REF_SEPARATOR}{relative_dir}' if relative_dir else source["id"]
-    original_url, resolved_subfolder = env.build_view_url(image_ref)
     image_width, image_height = env._read_image_dimensions(full_path) if include_dimensions else (0, 0)
     return {
         "filename": os.path.basename(full_path),
@@ -903,13 +942,14 @@ def _image_record_for_file(env, source: dict[str, Any], full_path: str, stat: os
         "source_id": source["id"],
         "source_relative_path": relative_path,
         "relative_dir": relative_dir,
-        "subfolder": subfolder_ref if relative_dir or source["id"] != env.DEFAULT_OUTPUT_SOURCE_ID else resolved_subfolder,
+        "subfolder": subfolder_ref,
         "display_subfolder": display_dir,
         "size": stat.st_size,
         "image_width": image_width,
         "image_height": image_height,
         "created_at": int(stat.st_ctime),
         "modified_at": int(stat.st_mtime),
+        "file_mtime_ns": stat.st_mtime_ns,
         "title": "",
         "category": "",
         "notes": "",
@@ -923,6 +963,7 @@ class ScanRecords(dict):
     def __init__(self):
         super().__init__()
         self.failed_sources = set()
+        self.folder_details = {}
 
 
 def _scan_index_records_for_scope(env, sources: list[dict[str, Any]], scope: str = "") -> dict[str, dict[str, Any]]:
@@ -943,9 +984,20 @@ def _scan_index_records_for_scope(env, sources: list[dict[str, Any]], scope: str
             )
         except ValueError:
             continue
-        if not os.path.isdir(scan_root):
+        try:
+            root_stat = os.stat(scan_root)
+        except FileNotFoundError:
+            continue
+        except OSError:
+            records.failed_sources.add(source["id"])
+            continue
+        if not S_ISDIR(root_stat.st_mode):
             continue
 
+        if relative_scope:
+            folder_ref = env.make_folder_ref(source["id"], relative_scope)
+            records.folder_details[folder_ref] = {"source_id": source["id"], "relative_path": relative_scope,
+                                                "modified_at": int(root_stat.st_mtime)}
         stack = [scan_root]
         while stack:
             checkpoint()
@@ -961,13 +1013,20 @@ def _scan_index_records_for_scope(env, sources: list[dict[str, Any]], scope: str
                     if entry.is_dir(follow_symlinks=False):
                         if entry.name == ".ue-uploads" or entry.name.startswith(".ue-move-"):
                             continue
+                        relative_dir = env.normalize_relative_path(os.path.relpath(entry.path, source_root))
+                        folder_ref = env.make_folder_ref(source["id"], relative_dir)
+                        records.folder_details[folder_ref] = {"source_id": source["id"], "relative_path": relative_dir,
+                                                            "modified_at": int(entry.stat(follow_symlinks=False).st_mtime)}
                         if source.get("recursive", True):
                             stack.append(entry.path)
                         continue
                     if not entry.is_file(follow_symlinks=False) or not entry.name.lower().endswith(env.SUPPORTED_IMAGE_EXTENSIONS):
                         continue
                     stat = entry.stat()
-                except (FileNotFoundError, PermissionError, OSError):
+                except FileNotFoundError:
+                    continue
+                except OSError:
+                    records.failed_sources.add(source["id"])
                     continue
                 record = env._image_record_for_file(source, entry.path, stat, include_dimensions=False)
                 record["full_path"] = entry.path
@@ -998,7 +1057,7 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
         return env._build_image_index(sources)
 
     scanned_records = env._scan_index_records_for_scope(sources, scope)
-    folder_details = env._collect_directory_subfolder_details(sources)
+    folder_details = scanned_records.folder_details
     where_sql, params = env._scope_where_sql(sources, scope)
     scanned_at = time.time()
     state_map = env.get_image_state_map()
@@ -1009,7 +1068,7 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
     with env.get_runtime().scan_commit(), env._connect_gallery_index_db() as connection:
         existing_rows = connection.execute(
             f"""
-            SELECT relative_path, source_id, source_relative_path, size, modified_at
+            SELECT relative_path, source_id, source_relative_path, size, modified_at, file_mtime_ns
             FROM gallery_images
             WHERE {where_sql}
             """,
@@ -1032,6 +1091,7 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
                 existing_row
                 and int(existing_row["size"]) == int(record["size"])
                 and int(existing_row["modified_at"]) == int(record["modified_at"])
+                and int(existing_row["file_mtime_ns"]) == int(record["file_mtime_ns"])
             ):
                 continue
             image_state = state_map.get(relative_path, env.default_image_state())
@@ -1130,12 +1190,18 @@ def _sync_image_index_incremental_locked(env, sources: list[dict[str, Any]], sig
         env._index_meta_set(connection, "source_signature", signature)
         env._index_meta_set(connection, "built_at", str(scanned_at))
         if runtime.catalog:
-            runtime.sync_identities(connection, sources, dimensions_current={row["relative_path"] for row in upsert_payloads})
+            runtime.sync_identities(connection, sources, dimensions_current={row["relative_path"] for row in upsert_payloads},
+                                    observations={row["relative_path"]: row for row in upsert_payloads})
             env._index_meta_set(connection, "asset_identity_version", "1")
-        _store_folder_snapshot(connection, sources, folder_details)
+        # An inaccessible subtree cannot prove deletion of its cached folders.
+        from .sources import FolderSnapshot
+        folder_snapshot = FolderSnapshot()
+        folder_snapshot.update(folder_details)
+        folder_snapshot.failed_sources.update(failed_sources)
+        _store_folder_snapshot(connection, sources, folder_snapshot, scope)
         connection.commit()
 
-    if priority_paths:
+    if priority_paths and not CURRENT_JOB.get():
         env._schedule_color_index_backfill(sources, signature, priority_paths)
     return {
         "signature": signature,
@@ -1172,7 +1238,7 @@ def ensure_image_index_db_current(env, force_refresh: bool = False, scope: str =
                 }
             )
         with env.get_runtime().scan_commit(), env._connect_gallery_index_db() as connection:
-            if should_sync or env._index_meta_get(connection, "asset_identity_version") != "1":
+            if env._index_meta_get(connection, "asset_identity_version") != "1":
                 runtime = env.get_runtime()
                 if runtime.catalog:
                     runtime.sync_identities(connection, sources)

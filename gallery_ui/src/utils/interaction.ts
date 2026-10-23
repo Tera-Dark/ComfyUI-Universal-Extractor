@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, type RefObject, useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 
 export interface FloatingMenuPosition {
@@ -18,6 +18,46 @@ const defaultGap = 10;
 
 export const isEditableTarget = (target: EventTarget | null) =>
   target instanceof HTMLElement && Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
+
+/** Modal keyboard ownership is stack-aware, so a nested confirmation cannot
+ * dismiss its editor or return focus to the underlying gallery. */
+export const useModalFocus = (dialog: RefObject<HTMLElement | null>, onClose: () => void) => {
+  const close = useRef(onClose);
+  useEffect(() => { close.current = onClose; }, [onClose]);
+  useEffect(() => {
+    const element = dialog.current;
+    if (!element) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const root = document.getElementById("root"), wasInert = root?.inert ?? false;
+    if (root && !root.contains(element)) root.inert = true;
+    if (!element.contains(document.activeElement)) element.focus({ preventScroll: true });
+    const handleKey = (event: KeyboardEvent) => {
+      const modals = [...document.querySelectorAll<HTMLElement>('[aria-modal="true"]')];
+      if (modals.at(-1) !== element || event.isComposing) return;
+      if (event.key === "Escape") { event.preventDefault(); event.stopImmediatePropagation(); close.current(); }
+      if (event.key !== "Tab") return;
+      event.stopPropagation();
+      const controls = [...element.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled):not([type="hidden"]), textarea:not(:disabled), select:not(:disabled), a[href], summary, [tabindex="0"]')]
+        .filter((control) => {
+          const collapsed = control.closest("details:not([open])");
+          const style = getComputedStyle(control);
+          return !control.closest('[hidden], [inert]') && !control.hidden && control.getAttribute("aria-hidden") !== "true" &&
+            (!collapsed || control.tagName === "SUMMARY" && control.parentElement === collapsed) && style.display !== "none" && style.visibility !== "hidden";
+        })
+        .sort((left, right) => left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
+      const first = controls[0], last = controls.at(-1);
+      if (!first) { event.preventDefault(); element.focus(); }
+      else if (event.shiftKey && (document.activeElement === first || document.activeElement === element)) { event.preventDefault(); last?.focus(); }
+      else if (!event.shiftKey && (document.activeElement === last || document.activeElement === element)) { event.preventDefault(); first.focus(); }
+    };
+    document.addEventListener("keydown", handleKey, true);
+    return () => {
+      document.removeEventListener("keydown", handleKey, true);
+      if (root && !root.contains(element)) root.inert = wasInert;
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
+    };
+  }, [dialog]);
+};
 
 export const placeFloatingMenu = (
   clientX: number,

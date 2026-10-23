@@ -2,7 +2,7 @@
 
 ## Maintenance notes
 
-- `useGalleryData` composes scoped queries (`useGalleryQueries`), batch outcomes (`useGalleryBatchOperations`), and refresh completion (`useGalleryRefresh`). `useGalleryJobs` restores persistent task feedback and polls only while visible with active work. `useGallerySelection` owns click/range/keyboard anchors while box geometry stays with the measured layout; `useVariantRequests` aborts replaced analysis requests. Optional asset IDs preserve compatibility with old servers.
+- `useGalleryData` composes scoped queries (`useGalleryQueries`), batch outcomes (`useGalleryBatchOperations`), and refresh completion (`useGalleryRefresh`). `useGalleryJobs` and refresh waiters share `galleryJobMonitor`, using visible-only change-driven waits with a two-second legacy fallback. `useGallerySelection` owns click/range/keyboard anchors while box geometry stays with the measured layout; `useVariantRequests` aborts replaced analysis requests. Optional asset IDs preserve compatibility with old servers.
 - Task protocol and recovery: [foundation guide](../docs/foundation-1.6.0.zh-CN.md).
 - Reverse image search is a lazy `ImageSearchModal` beside the text search. Gallery-level paste opens it outside editable fields/modal dialogs. Uploads are references only; preserve cancellation, persistent index progress, full-path copy, filter-clearing folder navigation and resize behavior. See [search contracts and limits](../docs/image-search.zh-CN.md).
 
@@ -77,15 +77,15 @@ powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 
 ## 布局约定
 
-图库主页面采用稳定主内容区 + 覆盖式 Inspector 模型：
+图库主页面采用独立滚动主内容区 + 预留空间的 Inspector 模型：
 
 - 左侧资源栏：图源、输出/输入图库范围、当前 source 目录、图版、分类等导航。
 - 中间内容区：图库浏览、筛选、排序、分页、网格/列表。
-- 右侧 Inspector：当普通图库页选中图片时出现，桌面端以固定覆盖层显示，不改变中间图库滚动容器宽度；移动端以抽屉显示。
+- 右侧 Inspector：普通图库选择时显示，桌面预留右侧 320px，960px 及以下预留下方空间；可用宽度变化后重测虚拟布局，不遮挡卡片或分页。
 
 左侧资源栏采用固定快捷入口 + 单一滚动区模型：输出图库、输入图库和垃圾箱固定在顶部。输出图库/输入图库是实际 source 范围切换，目录区只显示当前 source 下的目录，不再把输入目录嵌套显示在输出树里。当前目录支持搜索、树形/列表切换、置顶、默认按修改时间排序、名称排序备选和更多操作菜单；有效日期命名目录会先按名称中的日期稳定排序，再回退到目录修改时间，避免自动生成的日期目录被后续写入打乱。布局避免多个嵌套滚动条抢占鼠标滚轮。
 
-垃圾箱页不复用右侧 Inspector，继续使用自己的批量操作栏，避免恢复/彻底删除逻辑和普通图片详情混在一起。垃圾箱网格视图使用自适应瀑布流排版，图片按内容高度自然排列，文件名和原始路径必须限制在卡片内部。
+垃圾箱页不复用右侧 Inspector，使用独立批量工具栏。网格保持瀑布流，预览保留 1/1.36 固定框，图片解码不改变列平衡；文件名和原始路径限制在卡片内部。
 
 ## 筛选约定
 
@@ -103,12 +103,12 @@ powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 
 ## 即时同步
 
-图库自动同步使用轻量 freshness 检查，而不是定时强制刷新完整列表：
+图库自动同步通过完成通知和 freshness 兜底协调：
 
-- `useGalleryData` 在 Gallery tab 可见、页面未隐藏、且自动同步开关开启时轮询 `galleryApi.getImageFreshness`。
-- freshness 未变化时不调用 `listImages(..., forceRefresh=true)`，避免触发后端索引同步。
-- 当前处于第 1 页且按 `created_at desc` 排序时，新图会自动替换列表并预热缩略图。
-- 其他页码或排序状态只显示“有新图”提示，用户点击后再调用 `refresh()`，避免打断浏览位置。
+- `useGalleryAutoSync` 在图库可见且启用自动同步时读取轻量完成通知，结合版本化广播合并一秒内事件；API 客户端的完成记录由后端发现。
+- 每 15 秒 freshness 兜底，有变化才扫描；首次索引直读后异步校准。成功后才确认指纹，陈旧扫描不能吞掉新事件。
+- 仅最新排序第一页、接近顶部且没有选择、拖动或详情编辑时自动插入；其他位置更新目录统计并显示待刷新入口，保持卡片和选择。
+- 关闭同步或后台标签页暂停自动检查；非图库页面不请求图片分页。详见[同步接口与性能](../docs/synchronization-performance.zh-CN.md)。
 
 ## UI 交互约定
 
@@ -131,15 +131,17 @@ powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 设置页包含浏览器本地保存的界面与交互偏好：
 
 - 默认进入选择模式：默认关闭，关闭时单击图片打开详情。
+- 标准/紧凑密度：只调整间距，独立于网格列数；安全存储不可用时不抛错。
 - 启动时收起侧边栏：适合小屏或专注浏览。
 - 预加载附近图片：可在大图库中提升翻页和滚动体验，也可关闭以减少后台读取。
+- 图库自动同步：控制完成事件和可见页面的兜底检查。
 - 目录默认树形视图：关闭后输出目录默认使用平铺列表。
 
 ## 构建与缓存
 
-执行 `npm run build` 后，Vite 会生成新的 hash 资源文件。ComfyUI 或浏览器可能仍请求旧 hash 文件；如果用户环境出现旧资源 404，需要把当前构建产物同步复制到旧 hash 文件名，保持兼容。
+`npm run build` 清理 dist 后生成新的内容哈希资源和 Vite manifest，再审计全部引用。不得把新内容覆盖到旧 hash 文件名；旧页出现资源 404 时完整更新 dist 并刷新浏览器/ComfyUI。
 
-`npm run build` 会在 Vite 构建后运行 `scripts/sync-dist-compat.mjs`，自动把当前 JS/CSS 内容同步到已跟踪的旧 hash 兼容文件名。CI 只验证构建可以通过，不会自动提交 `dist/`。发布前仍需显式提交 `dist/index.html` 和相关 `dist/assets/index-*.js`、`dist/assets/index-*.css` 产物。
+`npm run sync-dist` 只是非写入的资源审计兼容入口。CI 不自动提交 dist；发布前显式提交完整干净构建产物。共享颜色、控件在 `base.css`，跨工作区样式在 `workspace-system.css`，Metadata 两个入口分别导入 `metadata.css`；访问顺序不能改变布局。
 
 已知构建入口：
 
@@ -153,7 +155,10 @@ powershell -ExecutionPolicy Bypass -File scripts\verify.ps1
 
 - `/api/images`：分页图片列表，支持搜索、分类、日期、Pin、色系筛选和排序。
 - `/api/images/freshness`：轻量检查当前视图图片文件是否变化，用于自动同步。
-- `/api/update-status`：读取插件更新状态和 GitHub Releases 更新日志；普通加载走缓存，手动重查传 `force=true`。
+- `/api/update-status`：远端更新状态，区分核验、缓存和失败；手动重查才传 `force=true`。
+- `/api/release-notes`：离线读取当前安装版本和历史本地说明。
+- `/api/sync-status`、`/api/sync-notifications`：有界完成通知，不能提交任意路径或文件操作命令。
+- `/api/jobs`：持久任务状态和变化通知，不占普通查询通道。
 - `/api/context`：图源、图版、分类等上下文。
 - `/api/color-index/status`：色系索引补全进度，用于筛选面板状态提示。
 - `/api/image-state`：图片状态更新。

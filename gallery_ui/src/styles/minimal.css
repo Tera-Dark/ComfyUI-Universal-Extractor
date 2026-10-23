@@ -1,26 +1,6 @@
 /* Minimal workspace: quiet surfaces, one primary hierarchy, progressive controls.
    This layer is intentionally separate from feature/layout styles for safe upgrades. */
-:root {
-  --ue-ink: #202020;
-  --ue-ink-soft: #414141;
-  --ue-ink-muted: #6e6e6e;
-  --ue-ink-ghost: #777;
-  --ue-canvas: #fff;
-  --ue-surface: #f9f9f9;
-  --ue-surface-alt: #f0f0f0;
-  --ue-surface-dim: #e8e8e8;
-  --ue-line: #e5e5e5;
-  --ue-line-soft: #ededed;
-  --ue-accent: #212121;
-  --ue-accent-hover: #3a3a3a;
-  --ue-accent-soft: #ececec;
-  --ue-sidebar-width: 248px;
-  --ue-hit-target: 36px;
-  --ue-shadow-1: none;
-  --ue-shadow-2: 0 4px 18px #0000000a;
-  --ue-shadow-3: 0 12px 44px #00000014;
-  --ue-duration-base: 160ms;
-}
+
 body { background: var(--ue-canvas); font-size: 14px; }
 button, input, select, textarea { font: inherit; }
 button { touch-action: manipulation; }

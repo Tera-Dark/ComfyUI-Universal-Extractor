@@ -5,6 +5,59 @@ from pathlib import Path
 import pytest
 from aiohttp import FormData, web
 from aiohttp.test_utils import TestClient, TestServer
+import asyncio
+
+
+@pytest.mark.anyio
+async def test_completion_relay_is_bounded_read_only_and_source_scoped(gallery_client):
+    client, _ = gallery_client
+    body = {"version": 1, "prompt_id": "real-round", "outputs": [{"type": "output", "subfolder": ""}]}
+    response = await client.post("/universal_gallery/api/sync-notifications", json=body)
+    assert response.status == 200
+    event = (await response.json())["event"]
+    assert event["scopes"] == ["default_output::"]
+    again = await client.post("/universal_gallery/api/sync-notifications", json=body)
+    assert (await again.json())["event"]["sequence"] == event["sequence"]
+    status = await client.get("/universal_gallery/api/sync-status?since=0")
+    assert (await status.json())["events"] == [event]
+    jobs = await client.get("/universal_gallery/api/jobs")
+    assert (await jobs.json())["jobs"] == []  # a hint never silently starts work
+    foreign = await client.post("/universal_gallery/api/sync-notifications", json=body, headers={"Origin": "https://evil.example"})
+    assert foreign.status == 403
+    for invalid in ({**body, "outputs": [{"type": "output", "subfolder": "../outside"}]},
+                    {**body, "outputs": [{}] * 129}, {**body, "prompt_id": "x" * 201}):
+        assert (await client.post("/universal_gallery/api/sync-notifications", json=invalid)).status == 400
+    assert (await client.get("/universal_gallery/api/sync-status?since=-1")).status == 400
+
+
+@pytest.mark.anyio
+async def test_task_long_poll_wakes_without_holding_query_workers(gallery_client, isolated_gallery_env, monkeypatch):
+    client, _ = gallery_client
+    service = isolated_gallery_env.service
+    monkeypatch.setattr(service, "_schedule_dimension_backfill", lambda *args: None)
+    monkeypatch.setattr(service, "_schedule_color_index_backfill", lambda *args: None)
+    first = await client.get("/universal_gallery/api/jobs")
+    revision = (await first.json())["revision"]
+    waiting = asyncio.create_task(client.get(f"/universal_gallery/api/jobs?after={revision}&wait_ms=2000"))
+    await asyncio.sleep(.02)
+    assert not waiting.done()
+    # Both read workers remain free while the async subscription is waiting.
+    one, two = await asyncio.gather(client.get("/universal_gallery/api/jobs"), client.get("/universal_gallery/api/sync-status"))
+    assert one.status == two.status == 200
+    job = await client.post("/universal_gallery/api/jobs", json={"kind": "refresh_index", "payload": {"force": False}})
+    assert job.status == 202
+    response = await asyncio.wait_for(waiting, 1)
+    assert (await response.json())["revision"] > revision
+    assert (await client.get("/universal_gallery/api/jobs?after=-1")).status == 400
+    assert (await client.get("/universal_gallery/api/jobs?after=0&wait_ms=999999")).status == 400
+    scheduler = isolated_gallery_env.service.get_runtime().get_jobs()
+    await asyncio.wrap_future(scheduler.future((await job.json())["job"]["id"]))
+    task = asyncio.create_task(scheduler.wait_for_change(scheduler.change_version, 10))
+    await asyncio.sleep(.01)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert scheduler.change_waiters == set()
 
 
 @pytest.mark.anyio
@@ -39,7 +92,13 @@ async def test_release_notes_route_is_local_and_bounded(gallery_client):
     notes = await response.json()
     assert notes["releases"][0]["version"] == notes["current_version"]
     assert 1 <= len(notes["releases"]) <= 5
-    assert "workflow completion" in notes["releases"][0]["body"]
+    # Check installed content rather than a phrase tied to an older release.
+    from py.gallery.release_notes import NOTES_DIR
+    import json
+    installed = json.loads((NOTES_DIR / f"{notes['current_version']}.json").read_text(encoding="utf-8"))
+    assert notes["source"] == "local"
+    assert installed["locales"]["en"][0]["title"] in notes["releases"][0]["body"]
+    assert installed["locales"]["en"][0]["items"][0] in notes["releases"][0]["body"]
 
 
 @pytest.fixture()

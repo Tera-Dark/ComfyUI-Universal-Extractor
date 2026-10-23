@@ -1,20 +1,29 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiRequestError, galleryApi } from "./galleryApi";
-import { synchronizeGalleryIndex } from "./gallerySync";
+import { invalidateGallerySyncRequests, synchronizeGalleryIndex } from "./gallerySync";
 
 vi.mock("./galleryApi", async (original) => {
   const real = await original<typeof import("./galleryApi")>();
-  return { ...real, galleryApi: { createJob: vi.fn(), getJob: vi.fn() } };
+  return { ...real, galleryApi: { createJob: vi.fn(), getJob: vi.fn(), listJobs: vi.fn() } };
 });
 const running = { job: { id: "scan", state: "running" } } as Awaited<ReturnType<typeof galleryApi.createJob>>;
 beforeEach(() => {
   vi.useFakeTimers(); vi.clearAllMocks();
   vi.mocked(galleryApi.createJob).mockResolvedValue(running);
   vi.mocked(galleryApi.getJob).mockResolvedValue({ job: { ...running.job, state: "succeeded" } });
+  vi.mocked(galleryApi.listJobs).mockResolvedValue({ jobs: [], total: 0 });
 });
 afterEach(() => { vi.useRealTimers(); });
 
 describe("shared index refresh", () => {
+  it("does not let a pre-completion scan swallow a newly observed output", async () => {
+    vi.mocked(galleryApi.createJob).mockResolvedValue({ job: { ...running.job, state: "succeeded" } });
+    const older = synchronizeGalleryIndex("", new AbortController().signal);
+    invalidateGallerySyncRequests();
+    const newer = synchronizeGalleryIndex("default_output::today", new AbortController().signal);
+    await Promise.all([older, newer]);
+    expect(galleryApi.createJob).toHaveBeenCalledTimes(2);
+  });
   it("shares a whole-source scan and keeps it alive for remaining subscribers", async () => {
     const first = new AbortController(), second = new AbortController();
     const one = synchronizeGalleryIndex("", first.signal), two = synchronizeGalleryIndex("default_output::old", second.signal);

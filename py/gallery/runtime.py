@@ -13,6 +13,8 @@ from .jobs import JobScheduler, checkpoint, CURRENT_JOB
 
 from .catalog import Catalog, CatalogUnavailable
 from .media import ImageProcessor
+from .sqlite_batch import iter_sqlite_batches
+from .sync_signals import OutputSignals
 
 
 class GalleryRuntime:
@@ -50,6 +52,7 @@ class GalleryRuntime:
             self.catalog = None
             self.catalog_error = str(error)
         self.jobs = None
+        self.output_signals = OutputSignals(getattr(env, "COMFY_HISTORY_READER", None))
 
     def source_snapshot(self):
         # Read requests share a short-lived validated configuration snapshot.
@@ -126,7 +129,8 @@ class GalleryRuntime:
                 await execute(self, prepare_derived_schema, lane="scan")
                 return
             self.require_catalog()
-        job = self.get_jobs().enqueue("refresh_index", {"subfolder": scope, "force": force, "_generation": self.catalog.generation()})
+        job = self.get_jobs().enqueue("refresh_index", {"subfolder": scope, "force": force, "_generation": self.catalog.generation(),
+                                                        "_output_sequence": self.output_signals.sequence, "_output_instance": self.output_signals.instance})
         await await_task(self.get_jobs().future(job["id"]))
 
     def _fingerprints(self, context, payload):
@@ -223,15 +227,26 @@ class GalleryRuntime:
             self.env.execute_moves([], os.path.join(self.env.DATA_DIR, "operation_journal"),
                                    lambda: None, lambda: None, {})
 
-    def sync_identities(self, connection, sources, dimensions_current=()):
+    def sync_identities(self, connection, sources, dimensions_current=(), observations=None):
         catalog = self.require_catalog()
         for source in sources:
             if not source.get("enabled") or not source.get("exists"):
                 continue
-            cursor = connection.execute("SELECT relative_path,source_relative_path,size,modified_at,asset_id,content_revision FROM gallery_images WHERE source_id=?", (source["id"],))
-            while rows := cursor.fetchmany(500):
+            columns = "relative_path,source_relative_path,size,modified_at,file_mtime_ns,asset_id,content_revision"
+            if observations is None:
+                cursor = connection.execute(f"SELECT {columns} FROM gallery_images WHERE source_id=?", (source["id"],))
+                batches = iter(lambda: cursor.fetchmany(500), [])
+            else:
+                paths = [path for path, record in observations.items() if record["source_id"] == source["id"]]
+                batches = (connection.execute(f"SELECT {columns} FROM gallery_images WHERE relative_path IN ({','.join('?' for _ in batch)})", batch).fetchall()
+                           for batch in iter_sqlite_batches(paths, 500))
+            for rows in batches:
                 records = []
                 for row in rows:
+                    if observations is not None:
+                        record = observations[row["relative_path"]]
+                        records.append((row["source_relative_path"], record["size"], record["file_mtime_ns"]))
+                        continue
                     # First registration uses the existing index, without decoding
                     # or hashing the originals. Nanosecond stat is opportunistic.
                     try:
@@ -240,9 +255,11 @@ class GalleryRuntime:
                     except OSError:
                         records.append((row["source_relative_path"], row["size"], int(row["modified_at"]) * 1_000_000_000))
                 identities = catalog.observe_many(source, records)
-                changed = [(identity["asset_id"], identity["content_revision"], row["relative_path"]) for row, identity in zip(rows, identities) if row["asset_id"] != identity["asset_id"] or row["content_revision"] != identity["content_revision"]]
+                changed = [(identity["asset_id"], identity["content_revision"], record[2], row["relative_path"])
+                           for row, identity, record in zip(rows, identities, records)
+                           if row["asset_id"] != identity["asset_id"] or row["content_revision"] != identity["content_revision"] or row["file_mtime_ns"] != record[2]]
                 if changed:
-                    connection.executemany("UPDATE gallery_images SET asset_id=?,content_revision=? WHERE relative_path=?", changed)
+                    connection.executemany("UPDATE gallery_images SET asset_id=?,content_revision=?,file_mtime_ns=? WHERE relative_path=?", changed)
                 content_changed = [row["relative_path"] for row, identity in zip(rows, identities)
                                    if row["asset_id"] and row["content_revision"] != identity["content_revision"]]
                 if content_changed:

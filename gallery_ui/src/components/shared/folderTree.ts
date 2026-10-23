@@ -13,6 +13,9 @@ export const TRASH_SUBFOLDER_KEY = "__trash__";
 
 const splitFolderPath = (subfolder: string) => subfolder.split(/[\\/]+/).filter(Boolean);
 const FOLDER_DATE_PATTERN = /(?:^|[^\d])(\d{4})[-_.](\d{1,2})[-_.](\d{1,2})(?:$|[^\d])/;
+// Constructing locale options for every comparison dominates large folder
+// refreshes. Reuse one collator without changing natural/case-insensitive order.
+const folderNameCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
 
 export type FolderSortMode = "modified" | "name";
 
@@ -90,7 +93,7 @@ export const getFolderPinAliases = (folderRef: string) => {
 };
 
 export const isFolderPinned = (folderRef: string, pinnedFolders: Set<string>) =>
-  getFolderPinAliases(folderRef).some((alias) => pinnedFolders.has(alias));
+  pinnedFolders.size > 0 && getFolderPinAliases(folderRef).some((alias) => pinnedFolders.has(alias));
 
 export const getFolderDateSortValue = (folderRef: string) => {
   const folderName = getFolderBaseName(folderRef);
@@ -108,31 +111,35 @@ export const getFolderDateSortValue = (folderRef: string) => {
   return year * 10000 + month * 100 + day;
 };
 
-export const compareFolderKey = (
-  left: string,
-  right: string,
-  pinnedFolders: Set<string>,
-  sortMode: FolderSortMode,
-  folderModifiedAt: Map<string, number> = new Map(),
+/** Scope the cache to one sort so pin/date parsing runs once per path, not
+ * once per comparator call. Nothing is retained across preference changes. */
+export const createFolderComparator = (
+  pinnedFolders: Set<string>, sortMode: FolderSortMode, folderModifiedAt: Map<string, number> = new Map(),
 ) => {
-  const leftPinned = isFolderPinned(left, pinnedFolders);
-  const rightPinned = isFolderPinned(right, pinnedFolders);
-  if (leftPinned !== rightPinned) {
-    return leftPinned ? -1 : 1;
-  }
-  if (sortMode === "modified") {
-    const leftDate = getFolderDateSortValue(left);
-    const rightDate = getFolderDateSortValue(right);
-    if (leftDate && rightDate && leftDate !== rightDate) {
-      return rightDate - leftDate;
+  const keys = new Map<string, { pinned: boolean; date: number; modified: number }>();
+  const key = (path: string) => {
+    let result = keys.get(path);
+    if (!result) {
+      result = { pinned: isFolderPinned(path, pinnedFolders), date: sortMode === "modified" ? getFolderDateSortValue(path) : 0,
+        modified: folderModifiedAt.get(path) ?? 0 };
+      keys.set(path, result);
     }
-    const modifiedResult = (folderModifiedAt.get(right) ?? 0) - (folderModifiedAt.get(left) ?? 0);
-    if (modifiedResult !== 0) {
-      return modifiedResult;
+    return result;
+  };
+  return (left: string, right: string) => {
+    const one = key(left), two = key(right);
+    if (one.pinned !== two.pinned) return one.pinned ? -1 : 1;
+    if (sortMode === "modified") {
+      if (one.date && two.date && one.date !== two.date) return two.date - one.date;
+      if (one.modified !== two.modified) return two.modified - one.modified;
     }
-  }
-  return left.localeCompare(right, undefined, { numeric: true, sensitivity: "base" });
+    return folderNameCollator.compare(left, right);
+  };
 };
+
+export const compareFolderKey = (
+  left: string, right: string, pinnedFolders: Set<string>, sortMode: FolderSortMode, folderModifiedAt: Map<string, number> = new Map(),
+) => createFolderComparator(pinnedFolders, sortMode, folderModifiedAt)(left, right);
 
 export const defaultSourceLabel = (source: GallerySource | undefined, fallbackId: string) => source?.name || fallbackId;
 
@@ -156,13 +163,11 @@ export const formatFolderLabel = (
 
 const sortTreeNodes = (
   nodes: TreeNode[],
-  pinnedFolders: Set<string>,
-  sortMode: FolderSortMode,
-  folderModifiedAt: Map<string, number> = new Map(),
+  compare: (left: string, right: string) => number,
 ): TreeNode[] =>
   [...nodes]
-    .sort((left, right) => compareFolderKey(left.path, right.path, pinnedFolders, sortMode, folderModifiedAt))
-    .map((node) => ({ ...node, children: sortTreeNodes(node.children, pinnedFolders, sortMode, folderModifiedAt) }));
+    .sort((left, right) => compare(left.path, right.path))
+    .map((node) => ({ ...node, children: sortTreeNodes(node.children, compare) }));
 
 export const buildFolderTree = (
   subfolders: string[],
@@ -213,7 +218,7 @@ export const buildFolderTree = (
     });
   });
 
-  return sortTreeNodes(root, pinnedFolders, sortMode, folderModifiedAt);
+  return sortTreeNodes(root, createFolderComparator(pinnedFolders, sortMode, folderModifiedAt));
 };
 
 export const getAncestorPaths = (path: string) => {

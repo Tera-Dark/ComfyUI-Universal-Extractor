@@ -45,6 +45,9 @@ def handlers(service):
                 service.resolve_image_path(path)
             payload["relative_paths"] = list(dict.fromkeys(paths))
         payload["_generation"] = service.get_runtime().require_catalog().generation()
+        if kind == "refresh_index":
+            payload["_output_sequence"] = service.get_runtime().output_signals.sequence
+            payload["_output_instance"] = service.get_runtime().output_signals.instance
         job = service.get_runtime().enqueue_fingerprints(payload) if kind == "fingerprint_assets" else scheduler().enqueue(kind, payload)
         return web.json_response({"job": job}, status=202)
 
@@ -59,7 +62,18 @@ def handlers(service):
             raise ValueError("invalid pagination") from None
         if page < 1 or not 1 <= limit <= 120:
             raise ValueError("invalid pagination")
-        return web.json_response(await execute(service.get_runtime(), scheduler().list, page, limit, request.query.get("active") == "true"))
+        if "after" in request.query:
+            try:
+                after = int(request.query["after"])
+                wait_ms = int(request.query.get("wait_ms", "15000"))
+            except ValueError:
+                raise ValueError("invalid task subscription") from None
+            if not 0 <= after <= 2**53 - 1 or not 0 <= wait_ms <= 20000:
+                raise ValueError("invalid task subscription")
+            # Waiting is asynchronous: it holds no read worker or SQLite transaction.
+            await scheduler().wait_for_change(after, wait_ms / 1000)
+        return web.json_response(await execute(service.get_runtime(), scheduler().list, page, limit, request.query.get("active") == "true"),
+                                 headers={"Cache-Control": "no-store"})
 
     async def get(request):
         return web.json_response({"job": await execute(service.get_runtime(), scheduler().get, request.match_info["id"])})

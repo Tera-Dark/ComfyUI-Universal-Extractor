@@ -1,0 +1,144 @@
+/* Shared by standalone metadata and image detail; no route-order dependency. */
+.ue-detail-disclosure {
+  border-top: 1px solid var(--ue-line-soft);
+  padding-top: 16px;
+}
+
+.ue-detail-disclosure summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  list-style: none;
+  color: var(--ue-ink-soft);
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.ue-detail-disclosure summary::-webkit-details-marker {
+  display: none;
+}
+
+.ue-detail-disclosure summary strong {
+  margin-left: auto;
+  color: var(--ue-ink-ghost);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ue-detail-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 96px;
+  border-radius: var(--ue-r-md);
+  background: var(--ue-surface);
+}
+
+.ue-detail-state--empty {
+  justify-content: flex-start;
+  padding: 14px;
+}
+
+.ue-detail-state p {
+  margin: 0;
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+}
+
+.ue-meta-raw {
+  overflow: auto;
+  margin: 12px 0 0;
+  padding: 14px;
+  border-radius: var(--ue-r-md);
+  background: var(--ue-surface);
+  color: var(--ue-ink-soft);
+  font-family: "SF Mono", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.65;
+}
+
+.ue-metadata-backdrop {
+  z-index: var(--ue-layer-modal);
+  background: rgba(24, 24, 24, 0.32);
+}
+
+.ue-metadata-modal {
+  display: grid;
+  gap: 16px;
+  width: min(860px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 32px));
+  padding: 20px;
+  border: 1px solid rgba(228, 228, 231, 0.92);
+  border-radius: var(--ue-r-lg);
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: var(--ue-shadow-3);
+  overflow: auto;
+}
+
+.ue-metadata-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--ue-line-soft);
+}
+
+.ue-metadata-head span {
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ue-metadata-head h2 {
+  margin: 4px 0 0;
+  color: var(--ue-ink);
+  font-size: 18px;
+  line-height: 1.25;
+  overflow-wrap: anywhere;
+}
+
+.ue-metadata-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.ue-metadata-summary {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.ue-metadata-summary--detail {
+  grid-template-columns: 1fr;
+  margin-top: 12px;
+}
+
+.ue-metadata-summary label {
+  display: grid;
+  gap: 8px;
+}
+
+.ue-metadata-summary span {
+  color: var(--ue-ink-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.ue-metadata-summary textarea {
+  width: 100%;
+  min-height: 132px;
+  resize: vertical;
+  padding: 12px;
+  border: 1px solid var(--ue-line);
+  border-radius: var(--ue-r-md);
+  background: var(--ue-surface);
+  color: var(--ue-ink);
+  font: 12px/1.55 "SF Mono", Consolas, monospace;
+}
+
+
+@media (max-width:640px) { .ue-metadata-summary { grid-template-columns:minmax(0,1fr); } .ue-metadata-modal { padding:16px; } }
