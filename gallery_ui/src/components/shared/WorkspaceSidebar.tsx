@@ -30,7 +30,7 @@ import { writeStorageItem } from "../../utils/safeStorage";
 import {
   buildFolderTree,
   collectFolderSearchPaths,
-  compareFolderKey,
+  createFolderComparator,
   DEFAULT_OUTPUT_SOURCE_ID,
   filterSubfoldersBySource,
   FOLDER_SORT_STORAGE_KEY,
@@ -261,8 +261,8 @@ export const WorkspaceSidebar = ({
     [folderSearchQuery, scopedSubfolders],
   );
   const sortedSubfolders = useMemo(
-    () => [...visibleSubfolders].sort((left, right) => compareFolderKey(left, right, pinnedFolderPaths, folderSortMode, folderModifiedAt)),
-    [folderModifiedAt, folderSortMode, pinnedFolderPaths, visibleSubfolders],
+    () => folderViewMode === "tree" ? [] : [...visibleSubfolders].sort(createFolderComparator(pinnedFolderPaths, folderSortMode, folderModifiedAt)),
+    [folderViewMode, folderModifiedAt, folderSortMode, pinnedFolderPaths, visibleSubfolders],
   );
   const getSidebarSourceLabel = useCallback((source: GallerySource | undefined, fallbackId: string) => {
     if (source?.id === DEFAULT_OUTPUT_SOURCE_ID || source?.kind === "output") {
@@ -284,7 +284,7 @@ export const WorkspaceSidebar = ({
       : t("sidebarOutputDirs");
   const readOnlyFolderTitle = currentSource?.kind === "input" ? t("sidebarInputReadOnly") : t("sidebarSourceReadOnly");
   const folderTree = useMemo(
-    () => buildFolderTree(
+    () => folderViewMode === "tree" ? buildFolderTree(
       visibleSubfolders,
       pinnedFolderPaths,
       folderSortMode,
@@ -292,8 +292,8 @@ export const WorkspaceSidebar = ({
       getSidebarSourceLabel,
       currentSourceId,
       folderModifiedAt,
-    ),
-    [currentSourceId, folderModifiedAt, folderSortMode, galleryContext?.sources, getSidebarSourceLabel, pinnedFolderPaths, visibleSubfolders],
+    ) : [],
+    [currentSourceId, folderViewMode, folderModifiedAt, folderSortMode, galleryContext?.sources, getSidebarSourceLabel, pinnedFolderPaths, visibleSubfolders],
   );
   const [expandedPaths, setExpandedPaths] = useState<Set<string>>(new Set());
   const folderSearchActive = folderSearchQuery.trim().length > 0;

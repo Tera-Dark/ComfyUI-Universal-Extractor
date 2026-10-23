@@ -5,7 +5,7 @@ import { useGalleryAutoSync } from "./useGalleryAutoSync";
 
 vi.mock("../services/galleryApi", async (original) => {
   const real = await original<typeof import("../services/galleryApi")>();
-  return { ...real, galleryApi: { getImageFreshness: vi.fn(), createJob: vi.fn(), getJob: vi.fn() } };
+  return { ...real, galleryApi: { getImageFreshness: vi.fn(), createJob: vi.fn(), getJob: vi.fn(), getSyncStatus: vi.fn() } };
 });
 class Channel {
   static current: Channel;
@@ -24,16 +24,41 @@ beforeEach(() => {
   vi.mocked(galleryApi.getImageFreshness).mockResolvedValue({ fingerprint: "f", changed: false } as Awaited<ReturnType<typeof galleryApi.getImageFreshness>>);
   vi.mocked(galleryApi.createJob).mockResolvedValue(succeeded);
   vi.mocked(galleryApi.getJob).mockResolvedValue(succeeded);
+  vi.mocked(galleryApi.getSyncStatus).mockResolvedValue({ instance: "server", sequence: 0, events: [] });
 });
 afterEach(() => { vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("automatic gallery synchronization", () => {
+  it("uses the HTTP relay without a browser broadcast and skips freshness before completion scans", async () => {
+    const options = props();
+    renderHook(() => useGalleryAutoSync(options));
+    await advance(1000);
+    const before = vi.mocked(galleryApi.getImageFreshness).mock.calls.length;
+    vi.mocked(galleryApi.getSyncStatus).mockResolvedValue({ instance: "server", sequence: 1,
+      events: [{ version: 1, type: "outputs-changed", prompt_id: "desktop-round", scopes: ["default_output::new"] }] });
+    await advance(2000);
+    expect(galleryApi.createJob).toHaveBeenLastCalledWith("refresh_index", { subfolder: "default_output::new", force: true });
+    expect(galleryApi.getImageFreshness).toHaveBeenCalledTimes(before);
+    expect(options.refresh).toHaveBeenCalledTimes(2);
+    act(() => Channel.complete("desktop-round"));
+    await advance(4000);
+    expect(options.refresh).toHaveBeenCalledTimes(2);
+  });
   it("reconciles a missing baseline once, and leaves unchanged polling cheap", async () => {
     const options = props(); renderHook(() => useGalleryAutoSync(options));
     await advance(999); expect(galleryApi.createJob).not.toHaveBeenCalled();
     await advance(1); expect(options.refresh).toHaveBeenCalledWith(false, expect.any(AbortSignal));
     await advance(15000); expect(galleryApi.createJob).toHaveBeenCalledTimes(1);
     expect(galleryApi.getImageFreshness).toHaveBeenLastCalledWith(options.scope, "f", expect.any(AbortSignal));
+  });
+  it("repairs all sources once even when a saved old folder is initially open", async () => {
+    const options = { ...props(), scope: "default_output::old-folder" };
+    renderHook(() => useGalleryAutoSync(options));
+    await advance(1000);
+    expect(galleryApi.createJob).toHaveBeenLastCalledWith("refresh_index", { subfolder: "", force: true });
+    act(() => Channel.current.onmessage?.({ data: { version: 1, type: "outputs-changed", prompt_id: "new-folder-output", scopes: ["default_output::new-folder"] } }));
+    await advance(1000);
+    expect(galleryApi.createJob).toHaveBeenLastCalledWith("refresh_index", { subfolder: "default_output::new-folder", force: true });
   });
   it("coalesces completions and rejects duplicate or malformed notifications", async () => {
     renderHook(() => useGalleryAutoSync(props())); await advance(1000);

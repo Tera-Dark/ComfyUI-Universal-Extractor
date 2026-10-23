@@ -7,6 +7,7 @@ import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, use
 
 import { useI18n } from "../i18n/I18nProvider";
 import { galleryApi } from "../services/galleryApi";
+import { reconcileGalleryContext, reconcileImageRecords, sameImageContent } from "../services/gallerySnapshot";
 import type { BoardSummary, DetailNavigationState, GalleryContext, ImageRecord, MoveTargetOption, TrashItem } from "../types/universal-gallery";
 import { PAGE_SIZE } from "../utils/formatters";
 import { readStorageItem, writeStorageItem } from "../utils/safeStorage";
@@ -149,6 +150,9 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
   const { images, setImages, context, setContext, colorIndexStatus, setColorIndexStatus, total, setTotal, isLoading, isRefreshing, error, trashItems, loadedViewKey } = useGalleryQueries({
     page, deferredSearchTerm, selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo, favoritesOnly, selectedColorFamily, sortBy, sortOrder, refreshKey, refreshIndex, isTrashView, isActive, scheduleThumbnailPrewarm, liveRefreshViewKey, completeRefreshPart
   });
+  const latestPage = useRef({ images, total, selectedImage, selectedImagePaths, blocked: options.interactionBlocked });
+  useEffect(() => { latestPage.current = { images, total, selectedImage, selectedImagePaths, blocked: options.interactionBlocked }; },
+    [images, total, selectedImage, selectedImagePaths, options.interactionBlocked]);
 
   useGalleryAutoSync({
     enabled: liveRefreshEnabled,
@@ -157,27 +161,30 @@ export const useGalleryData = (options: UseGalleryDataOptions = {}) => {
     viewKey: liveRefreshViewKey,
     loaded: loadedViewKey === liveRefreshViewKey && !isLoading,
     onError: (error, retry) => setAutoSyncFailure({ error, retry }),
-    refresh: async (forceLegacy, signal) => {
-      const response = await galleryApi.listImages(page, PAGE_SIZE, deferredSearchTerm,
+    refresh: async (forceLegacy, signal, filesystemChanged = false) => {
+      const [response, nextContext] = await Promise.all([galleryApi.listImages(page, PAGE_SIZE, deferredSearchTerm,
         selectedCategory, selectedSubfolder, selectedBoardId, dateFrom, dateTo,
-        favoritesOnly, selectedColorFamily, sortBy, sortOrder, forceLegacy, signal);
-      const nextContext = await galleryApi.getContext(false, signal);
+        favoritesOnly, selectedColorFamily, sortBy, sortOrder, forceLegacy, signal), galleryApi.getContext(false, signal)]);
       if (signal.aborted) return;
-      setContext(nextContext);
+      setContext((current) => reconcileGalleryContext(current, nextContext));
       setColorIndexStatus(nextContext.color_index_status ?? response.color_index_status ?? null);
       setAutoSyncFailure(null);
       window.dispatchEvent(new Event("universal-gallery:index-synced"));
+      const current = latestPage.current;
       const safeToReplace = page === 1 && sortBy === "created_at" && sortOrder === "desc" &&
-        !options.interactionBlocked && selectedImagePaths.length === 0 && !selectedImage &&
+        !current.blocked && current.selectedImagePaths.length === 0 && !current.selectedImage &&
         !document.querySelector('[data-gallery-interacting="true"]') &&
         (document.querySelector<HTMLElement>(".ue-main-shell")?.scrollTop ?? 0) <= 80;
       if (safeToReplace) {
-        setImages(response.images ?? []);
+        setImages((images) => reconcileImageRecords(images, response.images ?? []));
         setTotal(response.total ?? 0);
         setHasPendingLiveRefresh(false);
         scheduleThumbnailPrewarm(response.images ?? []);
-      } else {
+      } else if (filesystemChanged || current.total !== response.total || !sameImageContent(current.images, response.images ?? [])) {
         setHasPendingLiveRefresh(true);
+      } else {
+        // Dimension/color backfill is metadata, not a new-picture notification.
+        setImages((images) => reconcileImageRecords(images, response.images ?? []));
       }
     },
   });

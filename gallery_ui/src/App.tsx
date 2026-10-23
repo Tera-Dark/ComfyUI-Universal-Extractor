@@ -325,21 +325,15 @@ function App() {
     if (activeTab === "library" && !(await confirmDiscardLibraryEdits())) {
       return;
     }
-    if (activeTab === "gallery") {
+    if (activeTab === "gallery" || activeTab === "settings") {
       // Persistent refresh progress is restored by useGalleryJobs. Avoid a
       // second pending card for the same refresh in the operation center.
       await gallery.refreshAndWait().catch((error: unknown) => {
-        pushToast(error instanceof Error ? error.message : t("galleryEmptyErrorTitle"), "error");
+        const syncError = error instanceof GallerySyncError ? error : null;
+        syncTask(`refresh:${syncError?.scope ?? gallery.selectedSubfolder}`, t("jobRefresh"), "error",
+          error instanceof Error ? error.message : t("galleryEmptyErrorTitle"),
+          () => { void handleRefresh(); }, syncError ? { jobId: syncError.jobId, taskKind: "refresh_index", source: "gallery" } : undefined);
       });
-      return;
-    }
-    if (activeTab === "settings") {
-      await runOperation(() => gallery.refreshAndWait(), {
-        taskKind: "refresh_index",
-      pending: t("operationRefresh"),
-        success: t("operationRefreshSuccess"),
-        error: (error) => error instanceof Error ? error.message : t("galleryEmptyErrorTitle"),
-      }).catch(() => undefined);
       return;
     }
     await runOperation(async () => {
@@ -348,7 +342,7 @@ function App() {
         await library.refreshActiveLibrary();
       }
     }, {
-      taskKind: "refresh_index",
+      taskKind: "library_refresh",
       pending: t("operationRefresh"),
     });
   };

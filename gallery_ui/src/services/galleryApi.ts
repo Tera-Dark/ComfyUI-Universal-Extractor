@@ -81,6 +81,10 @@ const requestJson = async <T>(input: RequestInfo | URL, init?: RequestInit): Pro
 };
 
 export const galleryApi = {
+  async getSyncStatus(since: number, signal?: AbortSignal) {
+    return requestJson<{ instance: string; sequence: number; events: import("./galleryEvents").GalleryOutputEvent[] }>(
+      `/universal_gallery/api/sync-status?since=${since}`, { signal });
+  },
   async locateImage(image: import("../types/universal-gallery").ImageRecord, limit: number, sortBy: string, sortOrder: string, signal?: AbortSignal) {
     const params = new URLSearchParams({ limit: String(limit), sort_by: sortBy, sort_order: sortOrder });
     params.set(image.asset_id ? "asset_id" : "relative_path", image.asset_id || image.relative_path);
@@ -94,8 +98,9 @@ export const galleryApi = {
     body.append("image", file);
     return requestJson<ImageSearchResponse>(`/universal_gallery/api/images/search-by-image?minimum=${minimum}`, { method: "POST", body, signal });
   },
-  async listJobs(signal?: AbortSignal) {
-    return requestJson<{ jobs: GalleryJob[]; total: number }>("/universal_gallery/api/jobs?limit=50", { signal });
+  async listJobs(signal?: AbortSignal, after?: number) {
+    const wait = after === undefined ? "" : `&after=${after}&wait_ms=15000`;
+    return requestJson<{ jobs: GalleryJob[]; total: number; revision?: number }>(`/universal_gallery/api/jobs?limit=50${wait}`, { signal, cache: "no-store" });
   },
   async getJob(id: string, signal?: AbortSignal) {
     return requestJson<{ job: GalleryJob }>(`/universal_gallery/api/jobs/${encodeURIComponent(id)}`, { signal });
