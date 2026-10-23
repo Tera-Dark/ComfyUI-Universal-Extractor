@@ -1,71 +1,71 @@
 {
-  "_I18nProvider-cZczvL7B.js": {
-    "file": "assets/I18nProvider-cZczvL7B.js",
+  "_I18nProvider-DEfiLn3N.js": {
+    "file": "assets/I18nProvider-DEfiLn3N.js",
     "name": "I18nProvider"
   },
-  "_boxes--0yaGReH.js": {
-    "file": "assets/boxes--0yaGReH.js",
+  "_boxes-GTo8RUgH.js": {
+    "file": "assets/boxes-GTo8RUgH.js",
     "name": "boxes",
     "imports": [
-      "_I18nProvider-cZczvL7B.js"
+      "_I18nProvider-DEfiLn3N.js"
     ]
   },
-  "_copy-Dp5BPX7F.js": {
-    "file": "assets/copy-Dp5BPX7F.js",
+  "_copy-CoBcvjUE.js": {
+    "file": "assets/copy-CoBcvjUE.js",
     "name": "copy",
     "imports": [
-      "_I18nProvider-cZczvL7B.js"
+      "_I18nProvider-DEfiLn3N.js"
     ]
   },
-  "_download-Bn9yrFnw.js": {
-    "file": "assets/download-Bn9yrFnw.js",
+  "_download-CSrVSIDj.js": {
+    "file": "assets/download-CSrVSIDj.js",
     "name": "download",
     "imports": [
-      "_I18nProvider-cZczvL7B.js"
+      "_I18nProvider-DEfiLn3N.js"
     ]
   },
-  "_image-plus-C2AXraiD.js": {
-    "file": "assets/image-plus-C2AXraiD.js",
+  "_image-plus-C8PYGAuQ.js": {
+    "file": "assets/image-plus-C8PYGAuQ.js",
     "name": "image-plus",
     "imports": [
-      "_I18nProvider-cZczvL7B.js"
+      "_I18nProvider-DEfiLn3N.js"
     ]
   },
-  "_refresh-ccw-CfRNSMuu.js": {
-    "file": "assets/refresh-ccw-CfRNSMuu.js",
+  "_refresh-ccw-bV8xzBtF.js": {
+    "file": "assets/refresh-ccw-bV8xzBtF.js",
     "name": "refresh-ccw",
     "imports": [
-      "_I18nProvider-cZczvL7B.js"
+      "_I18nProvider-DEfiLn3N.js"
     ]
   },
-  "_save-DFeVqt65.js": {
-    "file": "assets/save-DFeVqt65.js",
+  "_save-DQG0Zsqx.js": {
+    "file": "assets/save-DQG0Zsqx.js",
     "name": "save",
     "imports": [
-      "_I18nProvider-cZczvL7B.js"
+      "_I18nProvider-DEfiLn3N.js"
     ]
   },
-  "_sparkles-Bu6QFW9h.js": {
-    "file": "assets/sparkles-Bu6QFW9h.js",
+  "_sparkles-elJjV352.js": {
+    "file": "assets/sparkles-elJjV352.js",
     "name": "sparkles",
     "imports": [
-      "_I18nProvider-cZczvL7B.js"
+      "_I18nProvider-DEfiLn3N.js"
     ]
   },
-  "_wand-sparkles-C_uDcQtj.js": {
-    "file": "assets/wand-sparkles-C_uDcQtj.js",
+  "_wand-sparkles-262S5lQG.js": {
+    "file": "assets/wand-sparkles-262S5lQG.js",
     "name": "wand-sparkles",
     "imports": [
-      "_I18nProvider-cZczvL7B.js"
+      "_I18nProvider-DEfiLn3N.js"
     ]
   },
   "index.html": {
-    "file": "assets/index-DWGqjUOp.js",
+    "file": "assets/index-CKow1Wte.js",
     "name": "index",
     "src": "index.html",
     "isEntry": true,
     "imports": [
-      "_I18nProvider-cZczvL7B.js"
+      "_I18nProvider-DEfiLn3N.js"
     ],
     "dynamicImports": [
       "src/components/gallery/DualFolderWorkspace.tsx",
@@ -83,40 +83,40 @@
     ]
   },
   "src/components/gallery/BoardShareModal.tsx": {
-    "file": "assets/BoardShareModal-DrZ4X-PT.js",
+    "file": "assets/BoardShareModal-CNeucGS-.js",
     "name": "BoardShareModal",
     "src": "src/components/gallery/BoardShareModal.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-cZczvL7B.js",
-      "_copy-Dp5BPX7F.js",
-      "_download-Bn9yrFnw.js",
+      "_I18nProvider-DEfiLn3N.js",
+      "_copy-CoBcvjUE.js",
+      "_download-CSrVSIDj.js",
       "index.html"
     ]
   },
   "src/components/gallery/DualFolderWorkspace.tsx": {
-    "file": "assets/DualFolderWorkspace-Dl7afjQz.js",
+    "file": "assets/DualFolderWorkspace-D8G_E4xN.js",
     "name": "DualFolderWorkspace",
     "src": "src/components/gallery/DualFolderWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-cZczvL7B.js",
-      "_refresh-ccw-CfRNSMuu.js",
+      "_I18nProvider-DEfiLn3N.js",
+      "_refresh-ccw-bV8xzBtF.js",
       "index.html",
       "src/components/gallery/MetadataViewerModal.tsx"
     ]
   },
   "src/components/gallery/ImageDetailModal.tsx": {
-    "file": "assets/ImageDetailModal-DaLI34MR.js",
+    "file": "assets/ImageDetailModal-Bv5UXO0m.js",
     "name": "ImageDetailModal",
     "src": "src/components/gallery/ImageDetailModal.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-cZczvL7B.js",
-      "_sparkles-Bu6QFW9h.js",
-      "_boxes--0yaGReH.js",
-      "_copy-Dp5BPX7F.js",
-      "_save-DFeVqt65.js",
+      "_I18nProvider-DEfiLn3N.js",
+      "_boxes-GTo8RUgH.js",
+      "_copy-CoBcvjUE.js",
+      "_save-DQG0Zsqx.js",
+      "_sparkles-elJjV352.js",
       "index.html"
     ],
     "css": [
@@ -124,13 +124,13 @@
     ]
   },
   "src/components/gallery/ImageSearchModal.tsx": {
-    "file": "assets/ImageSearchModal-DZp0PXl_.js",
+    "file": "assets/ImageSearchModal-CH4E-SEH.js",
     "name": "ImageSearchModal",
     "src": "src/components/gallery/ImageSearchModal.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-cZczvL7B.js",
-      "_image-plus-C2AXraiD.js",
+      "_I18nProvider-DEfiLn3N.js",
+      "_image-plus-C8PYGAuQ.js",
       "index.html"
     ],
     "css": [
@@ -138,51 +138,51 @@
     ]
   },
   "src/components/gallery/MetadataViewerModal.tsx": {
-    "file": "assets/MetadataViewerModal-CEAQlgmV.js",
+    "file": "assets/MetadataViewerModal-zQM0uYbS.js",
     "name": "MetadataViewerModal",
     "src": "src/components/gallery/MetadataViewerModal.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-cZczvL7B.js",
+      "_I18nProvider-DEfiLn3N.js",
       "index.html"
     ]
   },
   "src/components/gallery/VariantGroupsView.tsx": {
-    "file": "assets/VariantGroupsView-BdO8HmPI.js",
+    "file": "assets/VariantGroupsView-BT_Lf8GR.js",
     "name": "VariantGroupsView",
     "src": "src/components/gallery/VariantGroupsView.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-cZczvL7B.js",
+      "_I18nProvider-DEfiLn3N.js",
       "index.html"
     ]
   },
   "src/components/library/LibraryWorkspace.tsx": {
-    "file": "assets/LibraryWorkspace-CT02q7ep.js",
+    "file": "assets/LibraryWorkspace-CPcrzo6d.js",
     "name": "LibraryWorkspace",
     "src": "src/components/library/LibraryWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-cZczvL7B.js",
-      "_sparkles-Bu6QFW9h.js",
-      "_wand-sparkles-C_uDcQtj.js",
-      "_boxes--0yaGReH.js",
-      "_copy-Dp5BPX7F.js",
-      "_download-Bn9yrFnw.js",
-      "_refresh-ccw-CfRNSMuu.js",
-      "_save-DFeVqt65.js",
+      "_I18nProvider-DEfiLn3N.js",
+      "_boxes-GTo8RUgH.js",
+      "_copy-CoBcvjUE.js",
+      "_download-CSrVSIDj.js",
+      "_refresh-ccw-bV8xzBtF.js",
+      "_save-DQG0Zsqx.js",
+      "_sparkles-elJjV352.js",
+      "_wand-sparkles-262S5lQG.js",
       "index.html"
     ]
   },
   "src/components/settings/SettingsWorkspace.tsx": {
-    "file": "assets/SettingsWorkspace-CZMkuJbF.js",
+    "file": "assets/SettingsWorkspace-BaJRJ6EV.js",
     "name": "SettingsWorkspace",
     "src": "src/components/settings/SettingsWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-cZczvL7B.js",
-      "_image-plus-C2AXraiD.js",
-      "_save-DFeVqt65.js",
+      "_I18nProvider-DEfiLn3N.js",
+      "_image-plus-C8PYGAuQ.js",
+      "_save-DQG0Zsqx.js",
       "index.html"
     ],
     "css": [
@@ -190,15 +190,15 @@
     ]
   },
   "src/components/workbench/WorkbenchWorkspace.tsx": {
-    "file": "assets/WorkbenchWorkspace-KwG36plb.js",
+    "file": "assets/WorkbenchWorkspace-CpFPCzJz.js",
     "name": "WorkbenchWorkspace",
     "src": "src/components/workbench/WorkbenchWorkspace.tsx",
     "isDynamicEntry": true,
     "imports": [
-      "_I18nProvider-cZczvL7B.js",
-      "_sparkles-Bu6QFW9h.js",
-      "_wand-sparkles-C_uDcQtj.js",
-      "_copy-Dp5BPX7F.js",
+      "_I18nProvider-DEfiLn3N.js",
+      "_copy-CoBcvjUE.js",
+      "_sparkles-elJjV352.js",
+      "_wand-sparkles-262S5lQG.js",
       "index.html"
     ],
     "css": [

@@ -1,5 +1,14 @@
 # ComfyUI Universal Extractor
 
+## 1.8.0 · 同步与性能修复（本地候选）
+
+- 图片与目录只遍历一次，只同步变化的资源身份；加速全文索引局部更新。
+- 后端发现 API 跑图完成记录，图库不再依赖另一个 ComfyUI 网页收到事件。
+- 刷新与任务中心共用变化通知，修复重复提示、陈旧扫描吞掉新图和新版 Pillow 颜色分析失败。
+- 保持资源 ID、用户 JSON、文件事务和既有 ComfyUI/LoRA Manager 行为。
+
+[排查、接口与验收说明](docs/synchronization-performance.zh-CN.md)。这是未发布候选，部署前须停止 ComfyUI，完整替换代码及 dist，再重启并刷新页面。
+
 ## 1.7.0 · 自动同步与日常体验优化
 
 - ComfyUI 工作流完成后自动同步图库，保留整理位置；可见时每 15 秒检查遗漏。

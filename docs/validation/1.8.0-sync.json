@@ -1,0 +1,156 @@
+{
+  "version": "1.8.0",
+  "date": "2026-10-23",
+  "status": "local_candidate",
+  "environment": {
+    "os": "Windows",
+    "python": "3.12.8",
+    "comfy_mode": "isolated CPU/offline, own plugin only",
+    "real_user_sources_modified": false
+  },
+  "scan_comparison": {
+    "baseline_commit": "d83cba9",
+    "candidate_stage": "single-walk/changed-identity stage; before later FTS-rowid and unused-URL refinements",
+    "images": 14317,
+    "warmups": 5,
+    "samples": 30,
+    "method": "A/B and B/A alternating on same read-only generated 64x64 PNG tree; separate temp catalogs; decoding and analysis disabled",
+    "metrics": {
+      "all": {
+        "before": {
+          "p50_ms": 2508.3912000000055,
+          "p95_ms": 4274.6564999997645,
+          "counts": {
+            "ms": 4274.6564999997645,
+            "observed_assets": 28634,
+            "directory_visits": 578
+          }
+        },
+        "after": {
+          "p50_ms": 931.7863999995097,
+          "p95_ms": 1875.876299999618,
+          "counts": {
+            "ms": 1290.765800000372,
+            "observed_assets": 0,
+            "directory_visits": 289
+          }
+        }
+      },
+      "folder": {
+        "before": {
+          "p50_ms": 1369.7821499999918,
+          "p95_ms": 3981.710899999598,
+          "counts": {
+            "ms": 3122.6615999994465,
+            "observed_assets": 28634,
+            "directory_visits": 290
+          }
+        },
+        "after": {
+          "p50_ms": 70.18509999988964,
+          "p95_ms": 240.87650000001304,
+          "counts": {
+            "ms": 182.15049999980693,
+            "observed_assets": 0,
+            "directory_visits": 1
+          }
+        }
+      },
+      "list": {
+        "before": {
+          "p50_ms": 42.11390000000392,
+          "p95_ms": 49.68800000006013,
+          "counts": {
+            "ms": 36.489199999778066,
+            "observed_assets": 0,
+            "directory_visits": 0
+          }
+        },
+        "after": {
+          "p50_ms": 42.37534999992931,
+          "p95_ms": 48.76590000003489,
+          "counts": {
+            "ms": 36.44590000021708,
+            "observed_assets": 0,
+            "directory_visits": 0
+          }
+        }
+      },
+      "context": {
+        "before": {
+          "p50_ms": 122.03900000031354,
+          "p95_ms": 138.1562999995367,
+          "counts": {
+            "ms": 86.55679999992572,
+            "observed_assets": 0,
+            "directory_visits": 0
+          }
+        },
+        "after": {
+          "p50_ms": 122.00475000008737,
+          "p95_ms": 140.8638000002611,
+          "counts": {
+            "ms": 138.71910000034404,
+            "observed_assets": 0,
+            "directory_visits": 0
+          }
+        }
+      }
+    }
+  },
+  "final_comfy_workflow": {
+    "baseline_all_sources": 14399,
+    "rounds": 30,
+    "displayed": 30,
+    "decoded": 30,
+    "long_tasks_50ms": 0,
+    "max_floating_cards": 0,
+    "index_latency_ms": {
+      "p50": 2019.0,
+      "p95": 2594,
+      "max": 2621
+    },
+    "display_latency_ms": {
+      "p50": 2231.5,
+      "p95": 2811,
+      "max": 2895
+    },
+    "loaded_latency_ms": {
+      "p50": 2324.0,
+      "p95": 2893,
+      "max": 2995
+    },
+    "workflow": "API LoadImage -> SaveImage, no client_id, no ordinary ComfyUI page",
+    "refresh_jobs_succeeded": 30,
+    "refresh_jobs_failed": 0,
+    "source_hint_check_ms": 1000,
+    "coalescing_ms": 1000
+  },
+  "manual_refresh": {
+    "scan_post_requests": 1,
+    "context_get_requests": 1,
+    "page_get_requests": 1,
+    "mounted_image_shells_removed": 0,
+    "mounted_image_shells_added": 0,
+    "max_floating_cards": 0
+  },
+  "verification": {
+    "python_tests": 171,
+    "frontend_tests": 255,
+    "lora_bridge_tests": 11,
+    "completion_bridge_tests": 2,
+    "pinned_lora_upstream_tests": 6,
+    "security_vulnerabilities": 0,
+    "i18n_keys": 961,
+    "dist_references": 26,
+    "typecheck": true,
+    "lint": true,
+    "compileall": true,
+    "build": true,
+    "release_metadata": true
+  },
+  "limits": [
+    "Generated tiny images measure metadata scanning and synchronization, not full-resolution decoding or GPU throughput.",
+    "Real installed plugin remains 1.7.0 until ComfyUI is stopped and candidate code/dist are deployed."
+  ]
+}

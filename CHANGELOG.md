@@ -1,5 +1,39 @@
 # Changelog
 
+## 1.8.0 - 2026-10-23
+
+### 同步与效率
+- 单次遍历同时更新图片和目录，只登记变化的资源身份，缓存纳秒时间并加速全文索引的局部更新。
+- 后端发现 API 客户端的工作流完成记录，不再依赖普通 ComfyUI 网页收到事件；明确输出目录时优先同步相关范围。
+- 任务中心与刷新等待共用变化通知，避免重复轮询、重复提示和旧任务隐藏状态影响新任务。
+- 复用未变化的卡片、目录与移动目标，复用自然排序器消除目录刷新热点；元数据回填保持布局，保护请求期间新建的选择。
+
+### 可靠性修复
+- 修复新版 Pillow 的颜色像素解析错误，合并后台分析排队，不再创建空尺寸分析任务。
+- 新完成事件不会被更早的扫描吞掉；重复输出只保留必要的后续同步。
+- 保留单图、批量文件事务、资源 ID、图源权限和 LoRA Manager 行为。
+
+### 候选版与升级
+- 此版本为本地验证候选，尚未自动推送 GitHub 或发布 Registry。
+- 部署前停止 ComfyUI，备份用户数据和未解决日志，完整替换代码及 dist，重启并刷新页面。
+- 目录库和用户 JSON 不迁移；派生索引升级到 schema 11，不要删除 catalog.sqlite3 或恢复日志。
+
+### Synchronization and performance
+- Collect image and folder snapshots in one traversal, register only changed identities, cache nanosecond mtimes, and update FTS rows through indexed row IDs.
+- Discover API workflow completions on the backend without requiring an ordinary ComfyUI page to receive the event; reconcile known output scopes first.
+- Share one change-driven task monitor between feedback and refresh waiters, avoiding duplicate polling, duplicate messages and stale hidden state.
+- Reuse unchanged cards, folders and move targets plus one natural-sort collator, keep metadata backfill stable, and protect in-flight selections.
+
+### Reliability fixes
+- Fix modern Pillow RGBA pixel extraction, coalesce analysis backlogs, and avoid empty dimension jobs.
+- Do not acknowledge new workflow output through an older scan; merge only the necessary follow-up reconciliation.
+- Preserve file journals, resource IDs, registered-source permissions and LoRA Manager behavior.
+
+### Candidate and upgrade notes
+- This is a local validation candidate; no automatic GitHub push or Registry publication.
+- Stop ComfyUI, back up user data and unresolved journals, replace code and the complete dist, restart, and refresh the pages.
+- Catalog identities and user JSON remain unchanged. The derived index upgrades to schema 11; never delete catalog.sqlite3 or recovery evidence.
+
 ## 1.7.0 - 2026-10-16
 
 ### 主要变化
