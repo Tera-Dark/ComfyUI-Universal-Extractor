@@ -1,5 +1,37 @@
 # Changelog
 
+## 1.8.1 - 2026-10-23
+
+### 统一工作区体验
+- 以图库的浅色工具界面为基准统一字体、表面、控件和弹层；保留深色沉浸看图及语义状态色。
+- 词库改为标题、搜索与操作、条目的内容优先布局；统计和教程按需展开，区分空词库与搜索无结果。
+- 工作台恢复 1320px 下的宽生成区，高级配方折叠并显示生效摘要，画师池明确区分加入预选和已加入。
+- 设置侧栏提供对应导航，不再将未请求的词库误显示为空。
+
+### 弹窗与样式可靠性
+- 通用按钮和设计变量不再依赖设置页加载；Metadata 可从右键菜单独立打开，无需先进入图片详情。
+- 普通弹窗共用焦点、键盘和返回逻辑；确认框始终位于上层，词条草稿关闭前检查未保存修改。
+- 保留图库布局、选择、文件事务、自动同步和 ComfyUI/LoRA Manager 集成。
+
+### 本地候选
+- 本次为本地候选，不自动推送或发布。安装前请停止 ComfyUI，再完整替换代码和 dist。
+- 用户状态、词库和目录库不迁移，升级时保留 data 与恢复日志。
+
+### Consistent workspaces
+- Align light workspace surfaces, typography, controls and overlays with Gallery; retain dark image viewing and semantic status colors.
+- Put library search, actions and entries first; keep overview/help optional and distinguish empty libraries from unmatched searches.
+- Restore the wide generator below 1320px, disclose active advanced recipe options, and make artist selection actions explicit.
+- Give Settings relevant sidebar navigation without presenting unfetched libraries as empty.
+
+### Modal and style reliability
+- Shared controls and design tokens no longer depend on Settings being loaded; standalone Metadata owns its required styles.
+- Light dialogs share focus, keyboard and return behavior; nested confirmations stay above them and entry drafts require an explicit discard.
+- Preserve gallery geometry, selections, file journals, auto-sync and ComfyUI/LoRA Manager behavior.
+
+### Local candidate
+- No automatic push or publication. Stop ComfyUI before replacing the code and complete dist.
+- No user state, library or catalog migration; preserve data and recovery journals.
+
 ## 1.8.0 - 2026-10-23
 
 ### 同步与效率

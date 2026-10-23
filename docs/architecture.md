@@ -191,6 +191,12 @@ Browse URLs encode the stable workspace tab and gallery source/board, search, fi
 Explicit gallery refresh waits for both context and image/trash requests to finish before marking its operation complete; a superseding view change reports an interrupted request. Live freshness replaces the newest first page only while the scroll viewport is near its top, otherwise it offers the existing pending-update pill. At mobile widths (up to 560px) grid density is an independent, persistent comfortable single-column or compact two-column choice, subject to the actual available width; the density popover shows the effective column count. The workflow-send confirmation is always required for safety; there is no `confirmWorkflowSend` UI preference.
 
 
+## Workspace visual system (1.8.1)
+
+The 1.8.1 workspace alignment keeps the confirmed Gallery as its visual baseline. Global tokens and shared action styles are defined in `styles/base.css`, with cross-workspace layout rules consolidated in `workspace-system.css`. Settings feature CSS must not define shared button geometry. Standalone Metadata and image detail both import the independently owned `metadata.css`, so styles do not depend on visit order. Lazy JavaScript entry points and gallery loading gates remain unchanged.
+
+Library search lives beside its content, independently from sidebar filename filtering; overview/help are optional disclosures. Workbench advanced recipes retain their effective settings in a compact summary, and the 1320px stacking breakpoint keeps its generator usable. Settings has relevant sidebar navigation without requesting library data. `ModalSurface` portals ordinary light dialogs outside the inert application root, with stack-aware keyboard ownership, deliberate backdrop dismissal and opener restoration through `interaction.ts`. Nested confirmations stay above ordinary dialogs; pending work and entry-draft discard guards remain explicit.
+
 ## 1.7 QoL contracts
 
 - `GET /universal_gallery/api/release-notes?locale=zh-CN|en`: installed `current_version`, `source`, and up to five `releases`, current first. Structured bilingual files ship in `docs/releases`; older CHANGELOG sections remain readable offline. `update-status` preserves old fields and adds `check_status` (`checked`, `cached`, `failed`, `preview`), `notes_source`, `last_success_at`. Remote calls share one in-flight check and cache successful results for 30 minutes. Safe Markdown uses React text, never raw HTML or remote images.

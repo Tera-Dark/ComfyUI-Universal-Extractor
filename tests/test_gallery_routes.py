@@ -92,7 +92,13 @@ async def test_release_notes_route_is_local_and_bounded(gallery_client):
     notes = await response.json()
     assert notes["releases"][0]["version"] == notes["current_version"]
     assert 1 <= len(notes["releases"]) <= 5
-    assert "workflow completion" in notes["releases"][0]["body"]
+    # Check installed content rather than a phrase tied to an older release.
+    from py.gallery.release_notes import NOTES_DIR
+    import json
+    installed = json.loads((NOTES_DIR / f"{notes['current_version']}.json").read_text(encoding="utf-8"))
+    assert notes["source"] == "local"
+    assert installed["locales"]["en"][0]["title"] in notes["releases"][0]["body"]
+    assert installed["locales"]["en"][0]["items"][0] in notes["releases"][0]["body"]
 
 
 @pytest.fixture()
